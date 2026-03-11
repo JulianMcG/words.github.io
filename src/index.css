@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f7f7f5;
+  --color-bg-tertiary: #f9fafb;
+  --color-bg-hover: #f1f1ef;
+  --color-bg-hover-strong: #ebebea;
+  --color-text-primary: #37352f;
+  --color-text-muted: #73726e;
+  --color-text-faint: #9a9a97;
+  --color-icon-muted: #9a9a97;
+  --color-border-primary: #e5e7eb;
+  --color-border-hover: #d1d5db;
+  --color-accent: #2383e2;
+  --color-highlight: #fef08a;
+  --color-shadow-primary: rgba(0, 0, 0, 0.1);
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg-primary: #191919;
+    --color-bg-secondary: #202020;
+    --color-bg-tertiary: #2a2a2a;
+    --color-bg-hover: #2e2e2e;
+    --color-bg-hover-strong: #383838;
+    --color-text-primary: #ffffff;
+    --color-text-muted: #a3a3a3;
+    --color-text-faint: #5e5e5e;
+    --color-icon-muted: #5e5e5e;
+    --color-border-primary: #404040;
+    --color-border-hover: #525252;
+    --color-highlight: #716215;
+    --color-shadow-primary: rgba(0, 0, 0, 0.4);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

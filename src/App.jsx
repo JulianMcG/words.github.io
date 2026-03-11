@@ -1,0 +1,1959 @@
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import {
+  Type,
+  Heading1,
+  Heading2,
+  Heading3,
+  List,
+  ListOrdered,
+  Quote,
+  Plus,
+  FileText,
+  Trash2,
+  Menu,
+  ChevronsLeft,
+  Bold,
+  Italic,
+  Strikethrough,
+  Highlighter,
+  Pin,
+  PinOff,
+  CheckSquare,
+  Table,
+  Image as ImageIcon,
+} from "lucide-react";
+
+const EMOJIS = [
+  "📄",
+  "📝",
+  "📓",
+  "📚",
+  "📌",
+  "💡",
+  "🧠",
+  "💭",
+  "🚀",
+  "✨",
+  "⭐️",
+  "🔥",
+  "🎯",
+  "🎨",
+  "🎬",
+  "🎧",
+  "☕️",
+  "🍎",
+  "🌍",
+  "🏠",
+  "💻",
+  "🎮",
+  "🌈",
+  "⚡️",
+];
+
+const getEmojiForTitle = (title) => {
+  const t = title.toLowerCase();
+  const map = {
+    todo: "📝",
+    task: "✅",
+    tasks: "✅",
+    plan: "📋",
+    checklist: "☑️",
+    goal: "🎯",
+    note: "📓",
+    notes: "📓",
+    journal: "📔",
+    diary: "📖",
+    log: "📋",
+    idea: "💡",
+    ideas: "💡",
+    brain: "🧠",
+    thought: "💭",
+    draft: "📄",
+    work: "💼",
+    meeting: "🤝",
+    project: "📊",
+    report: "📈",
+    presentation: "📽️",
+    office: "🏢",
+    email: "📧",
+    inbox: "📥",
+    folder: "📁",
+    home: "🏠",
+    personal: "👤",
+    life: "🌱",
+    family: "👨‍👩‍👧‍👦",
+    friend: "👋",
+    food: "🍎",
+    recipe: "🍳",
+    cook: "👨‍🍳",
+    meal: "🍽️",
+    diet: "🥗",
+    grocery: "🛒",
+    travel: "✈️",
+    trip: "🚗",
+    vacation: "🌴",
+    flight: "🛫",
+    itinerary: "🗺️",
+    money: "💰",
+    finance: "📈",
+    budget: "💵",
+    expense: "💸",
+    tax: "🧾",
+    health: "🏥",
+    workout: "🏋️",
+    gym: "💪",
+    fitness: "🏃",
+    code: "💻",
+    dev: "👨‍💻",
+    programming: "🧑‍💻",
+    bug: "🐛",
+    feature: "✨",
+    app: "📱",
+    software: "💿",
+    web: "🌐",
+    tech: "🔧",
+    database: "🗄️",
+    sql: "🗄️",
+    api: "🔌",
+    server: "🖥️",
+    system: "⚙️",
+    linux: "🐧",
+    python: "🐍",
+    java: "☕",
+    react: "⚛️",
+    javascript: "📜",
+    aws: "☁️",
+    docker: "🐋",
+    git: "🐙",
+    github: "🐙",
+    release: "🚀",
+    deploy: "🚢",
+    game: "🎮",
+    play: "🎲",
+    xbox: "🎮",
+    playstation: "🎮",
+    nintendo: "🍄",
+    mario: "🍄",
+    zelda: "🗡️",
+    pokemon: "🐉",
+    rpg: "🎲",
+    mmo: "🌍",
+    movie: "🍿",
+    film: "🎬",
+    cinema: "🎞️",
+    video: "🎥",
+    tv: "📺",
+    show: "📺",
+    netflix: "🍿",
+    anime: "🍥",
+    manga: "📖",
+    comic: "🦸",
+    youtube: "▶️",
+    twitch: "🟪",
+    stream: "🎙️",
+    run: "👟",
+    jog: "👟",
+    cardio: "🤸",
+    lift: "🏋️",
+    yoga: "🧘",
+    stretch: "🧘",
+    meditate: "🧘",
+    swim: "🏊",
+    bike: "🚲",
+    cycle: "🚴",
+    protein: "🥩",
+    water: "💧",
+    hydrate: "💧",
+    sleep: "💤",
+    rest: "🛌",
+    med: "💊",
+    medical: "🩺",
+    doctor: "👨‍⚕️",
+    write: "✍️",
+    blog: "📝",
+    story: "📚",
+    book: "📖",
+    poem: "✒️",
+    novel: "📕",
+    author: "✍️",
+    essay: "📝",
+    script: "📜",
+    design: "🎨",
+    art: "🖌️",
+    sketch: "✏️",
+    draw: "🖍️",
+    paint: "🎨",
+    color: "🌈",
+    ui: "✨",
+    ux: "✨",
+    photo: "📸",
+    shoot: "📸",
+    music: "🎵",
+    song: "🎶",
+    audio: "🎧",
+    podcast: "🎙️",
+    band: "🎸",
+    guitar: "🎸",
+    piano: "🎹",
+    drums: "🥁",
+    invoice: "🧾",
+    bill: "💳",
+    pay: "💳",
+    salary: "💰",
+    invest: "💹",
+    stock: "📉",
+    crypto: "🪙",
+    bitcoin: "₿",
+    client: "🤝",
+    pitch: "📽️",
+    strategy: "♟️",
+    startup: "🚀",
+    business: "💼",
+    shop: "🛍️",
+    buy: "💳",
+    cloth: "👕",
+    hotel: "🏨",
+    eat: "🍔",
+    restaurant: "🍝",
+    coffee: "☕",
+    cafe: "☕",
+    tree: "🌳",
+    animal: "🐾",
+    dog: "🐶",
+    cat: "🐱",
+    pet: "🐕",
+    rock: "🪨",
+    rocks: "🪨",
+    stone: "🪨",
+    earth: "🌍",
+    weather: "☀️",
+    cloud: "☁️",
+    rain: "🌧️",
+    beach: "🏖️",
+    ocean: "🌊",
+    sea: "🌊",
+    sun: "☀️",
+    tide: "🌊",
+    wave: "🌊",
+    coral: "🪸",
+    reef: "🪸",
+    mountain: "⛰️",
+    hike: "🥾",
+    camp: "⛺",
+    tent: "⛺",
+    forest: "🌲",
+    park: "🏞️",
+    snow: "❄️",
+    winter: "⛄",
+    summer: "🌞",
+    sediment: "🪨",
+    dirt: "🌱",
+    soil: "🌱",
+    fossil: "🦴",
+    volcano: "🌋",
+    earthquake: "💥",
+    science: "🔬",
+    math: "➗",
+    physics: "⚛️",
+    space: "🚀",
+    chemistry: "🧪",
+    biology: "🦠",
+    cell: "🦠",
+    dna: "🧬",
+    atom: "⚛️",
+    planet: "🪐",
+    star: "⭐",
+    galaxy: "🌌",
+    moon: "🌙",
+    comet: "☄️",
+    astronomy: "🔭",
+    gravity: "🍎",
+    energy: "⚡",
+    lab: "🧪",
+    school: "🏫",
+    class: "🎓",
+    study: "📚",
+    learn: "🧠",
+    college: "🎓",
+    exam: "📝",
+    test: "📝",
+    thesis: "📜",
+    research: "🔬",
+    paper: "📄",
+    assignment: "📋",
+    homework: "📚",
+    lecture: "👩‍🏫",
+    event: "📅",
+    party: "🎉",
+    birthday: "🎂",
+    gift: "🎁",
+    holiday: "🎄",
+    car: "🚗",
+    auto: "🚙",
+    stuff: "📦",
+    thing: "📦",
+    beatles: "🎸",
+    beatle: "🎸",
+  };
+
+  const words = t.match(/\b\w+\b/g) || [];
+  
+  // Iterate backwards to prioritize trailing head nouns (the most important words)
+  for (let i = words.length - 1; i >= 0; i--) {
+    const word = words[i];
+    if (Object.prototype.hasOwnProperty.call(map, word)) return map[word];
+    if (
+      word.endsWith("s") &&
+      Object.prototype.hasOwnProperty.call(map, word.slice(0, -1))
+    )
+      return map[word.slice(0, -1)];
+    if (
+      word.endsWith("es") &&
+      Object.prototype.hasOwnProperty.call(map, word.slice(0, -2))
+    )
+      return map[word.slice(0, -2)];
+  }
+
+  // Removed dangerous t.includes() fallback loop causing substring false positives
+  return null;
+};
+
+// Define the separated commands
+const COMMANDS = [
+  {
+    id: "text",
+    title: "Text",
+    description: "Just start writing with plain text.",
+    icon: Type,
+    type: "formatBlock",
+    tag: "P",
+  },
+  {
+    id: "checklist",
+    title: "To-do List",
+    description: "Track tasks with a checklist.",
+    icon: CheckSquare,
+    type: "checklist",
+  },
+  {
+    id: "h1",
+    title: "Heading 1",
+    description: "Big section heading.",
+    icon: Heading1,
+    type: "formatBlock",
+    tag: "H1",
+  },
+  {
+    id: "h2",
+    title: "Heading 2",
+    description: "Medium section heading.",
+    icon: Heading2,
+    type: "formatBlock",
+    tag: "H2",
+  },
+  {
+    id: "h3",
+    title: "Heading 3",
+    description: "Small section heading.",
+    icon: Heading3,
+    type: "formatBlock",
+    tag: "H3",
+  },
+  {
+    id: "ul",
+    title: "Bulleted List",
+    description: "Create a simple bulleted list.",
+    icon: List,
+    type: "list",
+    tag: "insertUnorderedList",
+  },
+  {
+    id: "ol",
+    title: "Numbered List",
+    description: "Create a list with numbering.",
+    icon: ListOrdered,
+    type: "list",
+    tag: "insertOrderedList",
+  },
+  {
+    id: "quote",
+    title: "Quote",
+    description: "Capture a quote.",
+    icon: Quote,
+    type: "formatBlock",
+    tag: "BLOCKQUOTE",
+  },
+  {
+    id: "table",
+    title: "Table",
+    description: "Add a resizable grid.",
+    icon: Table,
+    type: "insertHTML",
+    tag: `<div class="table-container" contenteditable="false" style="margin: 1.5em 0; clear: both;">
+  <div class="table-title" contenteditable="true" data-placeholder="Table Title"></div>
+  <div class="table-wrapper">
+    <div class="table-scroll">
+      <table contenteditable="true">
+        <tbody>
+          <tr>
+            <td><br></td>
+            <td><br></td>
+            <td><br></td>
+          </tr>
+          <tr>
+            <td><br></td>
+            <td><br></td>
+            <td><br></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-resize-handle" contenteditable="false" title="Drag to add/remove rows and columns"></div>
+  </div>
+</div>
+<p><br></p>`,
+  },
+];
+
+export default function App() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
+  const [docs, setDocs] = useState(() => {
+    const saved = localStorage.getItem("words_docs");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        console.error("Failed to parse local storage docs:", e);
+      }
+    }
+    return [
+      {
+        id: "1",
+        title: "",
+        content: "<p><br></p>",
+        isPinned: false,
+        emoji: null,
+        hasCustomEmoji: false,
+      },
+    ];
+  });
+  const [activeDocId, setActiveDocId] = useState(() => {
+    return localStorage.getItem("words_active_doc") || "1";
+  });
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+
+  // Editor UI State
+  const [slashState, setSlashState] = useState({
+    isOpen: false,
+    query: "",
+    x: 0,
+    y: 0,
+    activeIndex: 0,
+  });
+  const [toolbarState, setToolbarState] = useState({
+    show: false,
+    x: 0,
+    y: 0,
+  });
+
+  const editorRef = useRef(null);
+  const titleRef = useRef(null);
+  const emojiPickerRef = useRef(null);
+  const docsRef = useRef(docs);
+  const isInternalEdit = useRef(false);
+  const titleTimeoutRef = useRef(null);
+
+  const filteredCommands = COMMANDS.filter(
+    (cmd) =>
+      cmd.title.toLowerCase().includes(slashState.query.toLowerCase()) ||
+      cmd.id.toLowerCase().includes(slashState.query.toLowerCase()),
+  );
+
+  useEffect(() => {
+    const activeDoc = docs.find((d) => d.id === activeDocId);
+    if (activeDoc && editorRef.current && titleRef.current) {
+      titleRef.current.innerText = activeDoc.title;
+      editorRef.current.innerHTML = activeDoc.content;
+    }
+  }, [activeDocId]);
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (
+        selection &&
+        !selection.isCollapsed &&
+        editorRef.current?.contains(selection.anchorNode)
+      ) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        setToolbarState({
+          show: true,
+          x: rect.left + rect.width / 2,
+          y: rect.top - 8,
+        });
+      } else {
+        setToolbarState((prev) =>
+          prev.show ? { ...prev, show: false } : prev,
+        );
+      }
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () =>
+      document.removeEventListener("selectionchange", handleSelectionChange);
+  }, []);
+
+  // Sync to ref and localStorage normally
+  useEffect(() => {
+    docsRef.current = docs;
+    try {
+      localStorage.setItem("words_docs", JSON.stringify(docs));
+    } catch (error) {
+      console.warn(
+        "Local storage quota exceeded. The document is too large to save locally.",
+        error,
+      );
+    }
+  }, [docs]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("words_active_doc", activeDocId);
+    } catch (error) {
+      console.warn("Failed to save active doc state to local storage.", error);
+    }
+  }, [activeDocId]);
+
+  // Failsafe: Synchronous save on unmount/refresh
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (editorRef.current && titleRef.current) {
+        const currentDocs = docsRef.current.map((d) =>
+          d.id === activeDocId
+            ? {
+                ...d,
+                title: titleRef.current.innerText || "",
+                content: editorRef.current.innerHTML || "<p><br></p>",
+              }
+            : d,
+        );
+        try {
+          localStorage.setItem("words_docs", JSON.stringify(currentDocs));
+          localStorage.setItem("words_active_doc", activeDocId);
+        } catch (e) {}
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [activeDocId]);
+
+  const handleTitleInput = () => {
+    const newTitle = titleRef.current?.innerText || "";
+    
+    // Instantly sync the text typed to the document state
+    setDocs((prev) =>
+      prev.map((d) => (d.id === activeDocId ? { ...d, title: newTitle } : d))
+    );
+
+    // Clear any existing timeout since the user is still actively typing
+    if (titleTimeoutRef.current) {
+      clearTimeout(titleTimeoutRef.current);
+    }
+
+    // Wait 800ms after the user *stops* typing to evaluate the smart emoji
+    titleTimeoutRef.current = setTimeout(() => {
+      setDocs((prev) =>
+        prev.map((d) => {
+          if (d.id !== activeDocId) return d;
+          let nextEmoji = d.emoji;
+          
+          if (!d.hasCustomEmoji) {
+            const autoEmoji = getEmojiForTitle(newTitle);
+            if (autoEmoji) nextEmoji = autoEmoji;
+          }
+
+          return { ...d, emoji: nextEmoji };
+        })
+      );
+    }, 800);
+  };
+
+  const syncContentToState = useCallback(() => {
+    const newContent = editorRef.current?.innerHTML || "<p><br></p>";
+    setDocs((prev) => {
+      const updatedDocs = prev.map((d) =>
+        d.id === activeDocId ? { ...d, content: newContent } : d,
+      );
+      const activeDoc = updatedDocs.find((d) => d.id === activeDocId);
+
+      const hasContent =
+        newContent !== "<p><br></p>" && newContent.trim() !== "";
+
+      return updatedDocs;
+    });
+  }, [activeDocId]);
+
+  const handleEditorInput = useCallback(() => {
+    if (isInternalEdit.current) return;
+    syncContentToState();
+
+    // Check selection natively
+    const selection = window.getSelection();
+    if (!selection || !selection.focusNode) return;
+
+    const node = selection.focusNode;
+    const text = node.textContent.substring(0, selection.focusOffset);
+
+    // --- Clean Stale Math Previews ---
+    const stalePreviews = editorRef.current.querySelectorAll(".math-preview");
+    stalePreviews.forEach((p) => p.remove());
+
+    // --- Auto-Math Evaluation ---
+    const mathMatch = text.match(
+      /(?:^|[\s\u00A0])([0-9\.\+\-\*\/\^\(\)\s\u00A0]+)=$/,
+    );
+    if (mathMatch) {
+      const eq = mathMatch[1].trim();
+      if (eq.length > 0 && /\d/.test(eq) && /[\+\-\*\/\^]/.test(eq)) {
+        try {
+          const sanitized = eq.replace(/\^/g, "**").replace(/[\u00A0]/g, " ");
+          if (/^[\d\.\+\-\*\/\^\(\)\s\*\*]+$/.test(sanitized)) {
+            const ans = new Function("return " + sanitized)();
+            if (isFinite(ans)) {
+              isInternalEdit.current = true;
+
+              // Insert DOM nodes directly so it stays perfectly inline
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount > 0) {
+                const range = sel.getRangeAt(0);
+
+                const span = document.createElement("span");
+                span.className = "math-preview";
+                span.contentEditable = "false";
+                span.textContent = ans;
+
+                range.insertNode(span);
+                range.setStartAfter(span);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+
+                // Zero-width space locks the cursor safely after the uneditable element
+                document.execCommand("insertHTML", false, "\u200B");
+              }
+
+              isInternalEdit.current = false;
+              syncContentToState();
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    // --- Slash command trigger ---
+    const slashMatch = text.match(/(?:^|\s)(\/)([^/\s]*)$/);
+    if (slashMatch) {
+      const coords = getCaretCoordinates();
+      if (coords) {
+        setSlashState((prev) => ({
+          isOpen: true,
+          query: slashMatch[2],
+          x: coords.x,
+          y: coords.y,
+          activeIndex:
+            prev.isOpen && prev.query === slashMatch[2] ? prev.activeIndex : 0,
+        }));
+      }
+    } else {
+      setSlashState((prev) => ({ ...prev, isOpen: false }));
+    }
+  }, [syncContentToState]);
+
+  const createNewDoc = () => {
+    const newId = Math.random().toString(36).substring(2, 9);
+    const newDoc = {
+      id: newId,
+      title: "",
+      content: "<p><br></p>",
+      isPinned: false,
+      emoji: null,
+      hasCustomEmoji: false,
+    };
+    setDocs((prev) => [newDoc, ...prev]);
+    setActiveDocId(newId);
+  };
+
+  const deleteDoc = (e, id) => {
+    e.stopPropagation();
+    if (docs.length === 1) {
+      setDocs([
+        {
+          id: "1",
+          title: "",
+          content: "<p><br></p>",
+          isPinned: false,
+          emoji: null,
+          hasCustomEmoji: false,
+        },
+      ]);
+      setActiveDocId("1");
+      if (titleRef.current) titleRef.current.innerText = "";
+      if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
+      return;
+    }
+    const newDocs = docs.filter((d) => d.id !== id);
+    setDocs(newDocs);
+    if (activeDocId === id) setActiveDocId(newDocs[0].id);
+  };
+
+  const togglePinDoc = (e, id) => {
+    e.stopPropagation();
+    setDocs((prev) =>
+      prev.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned } : d)),
+    );
+  };
+
+  const getCaretCoordinates = () => {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    const rects = range.getClientRects();
+    if (rects.length > 0) return { x: rects[0].left, y: rects[0].bottom };
+
+    const node = selection.focusNode;
+    if (node && node.nodeType === Node.ELEMENT_NODE) {
+      const rect = node.getBoundingClientRect();
+      return { x: rect.left, y: rect.bottom };
+    }
+    return null;
+  };
+
+  const executeCommand = (command) => {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return;
+
+    const range = selection.getRangeAt(0);
+    const node = selection.focusNode;
+
+    const text = node.textContent.substring(0, selection.focusOffset);
+    const match = text.match(/(?:^|\s)(\/)([^/\s]*)$/);
+
+    if (match) {
+      const triggerIndex = text.lastIndexOf(match[1]);
+      range.setStart(node, triggerIndex);
+      range.setEnd(node, selection.focusOffset);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand("delete", false, null);
+    }
+
+    if (command.type === "formatBlock") {
+      document.execCommand("formatBlock", false, `<${command.tag}>`);
+    } else if (command.type === "list") {
+      document.execCommand(command.tag, false, null);
+    } else if (command.type === "insertHTML") {
+      document.execCommand("insertHTML", false, command.tag);
+    } else if (command.type === "checklist") {
+      document.execCommand("insertUnorderedList", false, null);
+      setTimeout(() => {
+        const curSel = window.getSelection();
+        if (curSel && curSel.focusNode) {
+          const ul = (
+            curSel.focusNode.nodeType === 3
+              ? curSel.focusNode.parentElement
+              : curSel.focusNode
+          ).closest("ul");
+          if (ul) {
+            ul.classList.add("checklist");
+            syncContentToState();
+          }
+        }
+      }, 10);
+    }
+
+    setSlashState((prev) => ({ ...prev, isOpen: false, query: "" }));
+
+    setTimeout(() => {
+      editorRef.current.focus();
+      syncContentToState();
+    }, 10);
+  };
+
+  const formatText = (e, format, value = null) => {
+    e.preventDefault();
+    document.execCommand(format, false, value);
+    syncContentToState();
+  };
+
+  // --- Image Insertion Utilities ---
+  const createImgWrapperHTML = (src) => {
+    return `<span class="image-wrapper" contenteditable="false"
+    style="float: left; resize: horizontal; overflow: hidden; display: block; max-width: 100%; width: 320px; min-width: 100px; min-height: 50px; border-radius: 8px; margin: 0.5em 1.5em 1em 0; position: relative;"><img
+      src="${src}" style="width: 100%; height: 100%; display: block; object-fit: cover; pointer-events: none;" /><button
+      class="image-delete-btn" contenteditable="false" title="Delete image"><svg xmlns="http://www.w3.org/2000/svg"
+        width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 6h18" />
+        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+        <line x1="10" x2="10" y1="11" y2="17" />
+        <line x1="14" x2="14" y1="11" y2="17" />
+      </svg></button></span>&nbsp;`;
+  };
+
+  const insertImageFile = (file, targetNodeToReplace = null) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+        const max_size = 1200;
+
+        if (width > max_size || height > max_size) {
+          if (width > height) {
+            height = Math.round((height * max_size) / width);
+            width = max_size;
+          } else {
+            width = Math.round((width * max_size) / height);
+            height = max_size;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+
+        const html = createImgWrapperHTML(dataUrl);
+        if (targetNodeToReplace) {
+          targetNodeToReplace.outerHTML = html;
+        } else {
+          document.execCommand("insertHTML", false, html);
+        }
+        syncContentToState();
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // --- Editor Wide Interactivity ---
+  const handleEditorMouseDown = (e) => {
+    if (e.target.closest(".image-delete-btn")) {
+      e.preventDefault();
+      const wrapper = e.target.closest(".image-wrapper");
+      if (wrapper) {
+        if (
+          wrapper.nextSibling &&
+          wrapper.nextSibling.nodeType === 3 &&
+          wrapper.nextSibling.textContent === "\u00A0"
+        ) {
+          wrapper.nextSibling.remove();
+        }
+        wrapper.remove();
+        syncContentToState();
+      }
+      return;
+    }
+
+    if (e.target.tagName === "LI") {
+      const ul = e.target.closest("ul");
+      if (ul && ul.classList.contains("checklist")) {
+        const rect = e.target.getBoundingClientRect();
+        if (e.clientX >= rect.left && e.clientX <= rect.left + 24) {
+          e.target.classList.toggle("checked");
+          syncContentToState();
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+    if (e.target.classList.contains("table-resize-handle")) {
+      e.preventDefault();
+      const wrapper = e.target.closest(".table-wrapper");
+      const table = wrapper.querySelector("table");
+      const tbody = table.querySelector("tbody");
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const trs = Array.from(tbody.querySelectorAll("tr"));
+      const startRows = trs.length;
+      const startCols = trs[0] ? trs[0].querySelectorAll("td").length : 1;
+      const onMouseMove = (moveEvent) => {
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+
+        const newCols = Math.max(1, startCols + Math.round(dx / 120));
+        const newRows = Math.max(1, startRows + Math.round(dy / 38));
+
+        const currentTrs = Array.from(tbody.querySelectorAll("tr"));
+
+        while (currentTrs.length < newRows) {
+          const tr = document.createElement("tr");
+          for (let i = 0; i < newCols; i++) tr.innerHTML += "<td><br></td>";
+          tbody.appendChild(tr);
+          currentTrs.push(tr);
+        }
+        while (currentTrs.length > newRows) {
+          tbody.lastChild.remove();
+          currentTrs.pop();
+        }
+
+        currentTrs.forEach((tr) => {
+          const tds = Array.from(tr.querySelectorAll("td"));
+          while (tds.length < newCols) {
+            const td = document.createElement("td");
+            td.innerHTML = "<br>";
+            tr.appendChild(td);
+            tds.push(td);
+          }
+          while (tds.length > newCols) {
+            tr.lastChild.remove();
+            tds.pop();
+          }
+        });
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        syncContentToState();
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+      return;
+    }
+  };
+
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf("image") !== -1) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        insertImageFile(file);
+        return;
+      }
+    }
+  };
+  const handleDrop = (e) => {
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.type.startsWith("image/")) {
+        e.preventDefault();
+        const placeholder = e.target.closest(".image-placeholder");
+
+        if (!placeholder && document.caretRangeFromPoint) {
+          const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+          if (range) {
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }
+        insertImageFile(file, placeholder);
+      }
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleKeyDown = useCallback(
+    (e) => {
+      // --- 1. Math Preview Interceptor & Cleanup ---
+      const preview = editorRef.current?.querySelector(".math-preview");
+      if (preview) {
+        // Let standard navigation arrows pass through unhindered (but strip the preview to prevent stale ghost blocks)
+        if (["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(e.key))
+          return;
+        const isNav = [
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "ArrowDown",
+        ].includes(e.key);
+
+        const ans = preview.textContent;
+
+        if ([" ", "Enter", "Tab"].includes(e.key)) {
+          e.preventDefault(); // Do not insert the space/tab! Use it strictly to commit the answer.
+          isInternalEdit.current = true;
+
+          // Clean up the DOM string naturally
+          if (
+            preview.nextSibling &&
+            preview.nextSibling.nodeType === 3 &&
+            preview.nextSibling.textContent.includes("\u200B")
+          ) {
+            preview.nextSibling.textContent =
+              preview.nextSibling.textContent.replace(/\u200B/g, "");
+          }
+
+          // Reposition cursor safely before preview so removal is clean
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.setStartBefore(preview);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+
+          preview.remove();
+
+          // Insert Answer as raw text
+          document.execCommand("insertText", false, ans);
+
+          isInternalEdit.current = false;
+          syncContentToState();
+          return;
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          isInternalEdit.current = true;
+
+          if (
+            preview.nextSibling &&
+            preview.nextSibling.nodeType === 3 &&
+            preview.nextSibling.textContent.includes("\u200B")
+          ) {
+            preview.nextSibling.textContent =
+              preview.nextSibling.textContent.replace(/\u200B/g, "");
+          }
+
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.setStartBefore(preview);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+
+          preview.remove();
+
+          // Also delete the '=' sign that triggered it
+          document.execCommand("delete", false, null);
+
+          isInternalEdit.current = false;
+          syncContentToState();
+          return;
+        } else if (!isNav) {
+          // Typing another character kills the preview and types over it
+          if (
+            preview.nextSibling &&
+            preview.nextSibling.nodeType === 3 &&
+            preview.nextSibling.textContent.includes("\u200B")
+          ) {
+            preview.nextSibling.textContent =
+              preview.nextSibling.textContent.replace(/\u200B/g, "");
+          }
+
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.setStartBefore(preview);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+
+          preview.remove();
+          // Character natively inserts itself here since we didn't block it
+          setTimeout(() => syncContentToState(), 0);
+        }
+      }
+
+      // --- 2. Slash Commands Menu Navigation ---
+      if (slashState.isOpen) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSlashState((prev) => ({
+            ...prev,
+            activeIndex: (prev.activeIndex + 1) % filteredCommands.length,
+          }));
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSlashState((prev) => ({
+            ...prev,
+            activeIndex:
+              (prev.activeIndex - 1 + filteredCommands.length) %
+              filteredCommands.length,
+          }));
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          const selectedCommand =
+            filteredCommands[slashState.activeIndex] || filteredCommands[0];
+          if (selectedCommand) executeCommand(selectedCommand);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          setSlashState((prev) => ({ ...prev, isOpen: false }));
+        }
+        return;
+      }
+
+      // --- 3. Markdown Formatting Shortcuts ---
+      const selection = window.getSelection();
+
+      if (e.key === " " || e.key === "Enter") {
+        if (selection && selection.focusNode) {
+          const focusNode = selection.focusNode;
+          const text = focusNode.textContent.substring(
+            0,
+            selection.focusOffset,
+          );
+
+          if (text.endsWith("1.") && e.key === " ") {
+            e.preventDefault();
+            const range = selection.getRangeAt(0);
+            range.setStart(focusNode, selection.focusOffset - 2);
+            range.setEnd(focusNode, selection.focusOffset);
+            range.deleteContents();
+            document.execCommand("insertOrderedList", false, null);
+            syncContentToState();
+            return;
+          } else if (
+            (text.endsWith("-") || text.endsWith("*")) &&
+            e.key === " "
+          ) {
+            e.preventDefault();
+            const range = selection.getRangeAt(0);
+            range.setStart(focusNode, selection.focusOffset - 1);
+            range.setEnd(focusNode, selection.focusOffset);
+            range.deleteContents();
+            document.execCommand("insertUnorderedList", false, null);
+            syncContentToState();
+            return;
+          } else if (text.endsWith("[]") && e.key === " ") {
+            e.preventDefault();
+            const range = selection.getRangeAt(0);
+            range.setStart(focusNode, selection.focusOffset - 2);
+            range.setEnd(focusNode, selection.focusOffset);
+            range.deleteContents();
+            document.execCommand("insertUnorderedList", false, null);
+            setTimeout(() => {
+              const curSel = window.getSelection();
+              if (curSel && curSel.focusNode) {
+                const ul = (
+                  curSel.focusNode.nodeType === 3
+                    ? curSel.focusNode.parentElement
+                    : curSel.focusNode
+                ).closest("ul");
+                if (ul) ul.classList.add("checklist");
+                syncContentToState();
+              }
+            }, 10);
+            return;
+          } else if (
+            text.endsWith("/table") &&
+            (e.key === " " || e.key === "Enter")
+          ) {
+            e.preventDefault();
+            const range = selection.getRangeAt(0);
+            range.setStart(focusNode, selection.focusOffset - 6);
+            range.setEnd(focusNode, selection.focusOffset);
+            range.deleteContents();
+            const cmd = COMMANDS.find((c) => c.id === "table");
+            document.execCommand("insertHTML", false, cmd.tag);
+            syncContentToState();
+            return;
+          }
+        }
+      }
+
+      if (e.key === "Tab") {
+        e.preventDefault();
+        document.execCommand(e.shiftKey ? "outdent" : "indent", false, null);
+        syncContentToState();
+        return;
+      }
+
+      if (e.key === "Enter" && !e.shiftKey) {
+        if (selection && selection.focusNode) {
+          const focusNode = selection.focusNode;
+          const element =
+            focusNode.nodeType === 3 ? focusNode.parentElement : focusNode;
+          const blockElement = element.closest("h1, h2, h3, blockquote");
+
+          if (blockElement) {
+            setTimeout(() => {
+              const newSelection = window.getSelection();
+              if (newSelection && newSelection.focusNode) {
+                const newNode = newSelection.focusNode;
+                const newElement =
+                  newNode.nodeType === 3 ? newNode.parentElement : newNode;
+
+                if (
+                  newElement &&
+                  newElement.closest("h1, h2, h3, blockquote") &&
+                  (newElement.textContent.trim() === "" ||
+                    newElement.innerHTML === "<br>")
+                ) {
+                  document.execCommand("formatBlock", false, "P");
+                  syncContentToState();
+                }
+              }
+            }, 0);
+          }
+
+          const liElement = element.closest("li");
+          if (liElement) {
+            setTimeout(() => {
+              const newSel = window.getSelection();
+              if (newSel && newSel.focusNode) {
+                const newNode =
+                  newSel.focusNode.nodeType === 3
+                    ? newSel.focusNode.parentElement
+                    : newSel.focusNode;
+                const newLi = newNode.closest("li");
+                if (
+                  newLi &&
+                  newLi !== liElement &&
+                  newLi.classList.contains("checked") &&
+                  newLi.textContent.trim() === ""
+                ) {
+                  newLi.classList.remove("checked");
+                  syncContentToState();
+                }
+              }
+            }, 10);
+          }
+        }
+      }
+    },
+    [slashState, filteredCommands, syncContentToState],
+  );
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      setSlashState((prev) => ({ ...prev, isOpen: false }));
+      if (
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(event.target)
+      ) {
+        setIsEmojiPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const pinnedDocs = docs.filter((d) => d.isPinned);
+  const regularDocs = docs.filter((d) => !d.isPinned);
+  const activeDoc = docs.find((d) => d.id === activeDocId) || docs[0];
+
+  const renderDocItem = (doc) => (
+    <div
+      key={doc.id}
+      onClick={() => {
+        setActiveDocId(doc.id);
+        if (!isSidebarOpen) setIsSidebarPeeking(false);
+      }}
+      className={`group flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${activeDocId === doc.id ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"}`}
+    >
+      <div className="flex items-center gap-2.5 overflow-hidden">
+        <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+          {doc.emoji ? (
+            <span className="animate-in zoom-in spin-in-12 duration-300">
+              {doc.emoji}
+            </span>
+          ) : (
+            <FileText
+              size={16}
+              className={
+                activeDocId === doc.id ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"
+              }
+            />
+          )}
+        </div>
+                <span className="text-[14px] text-[var(--color-text-muted)] truncate select-none">
+                  {doc.title || "Untitled"}
+                </span>
+      </div>
+      <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e) => togglePinDoc(e, doc.id)}
+          className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
+          title={doc.isPinned ? "Unpin" : "Pin"}
+        >
+          <Pin size={13} className={doc.isPinned ? "fill-gray-400" : ""} />
+        </button>
+        <button
+          onClick={(e) => deleteDoc(e, doc.id)}
+          className="p-1 text-[var(--color-text-muted)] hover:text-red-500 rounded transition-colors"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans selection:bg-[#2383e233] overflow-hidden relative w-full">
+      {/* Dynamic Editor Typography */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: ` .editor-content { outline: none; padding-bottom: 30vh; color:
+              var(--color-text-primary); } .editor-content::after { content: "" ; display: table; clear: both; } .editor-content>
+              * {
+                margin-top: 2px;
+                margin-bottom: 2px;
+                line-height: 1.5;
+              }
+
+              .editor-content h1,
+              .editor-content h2,
+              .editor-content h3,
+              .editor-content .table-container,
+              .editor-content blockquote {
+                clear: both;
+              }
+
+              .editor-content h1 {
+                font-size: 1.875rem;
+                font-weight: 600;
+                margin-top: 1.4em;
+                margin-bottom: 0.25em;
+                line-height: 1.3;
+              }
+
+              .editor-content h2 {
+                font-size: 1.5rem;
+                font-weight: 600;
+                margin-top: 1.4em;
+                margin-bottom: 0.25em;
+                line-height: 1.3;
+              }
+
+              .editor-content h3 {
+                font-size: 1.25rem;
+                font-weight: 600;
+                margin-top: 1em;
+                margin-bottom: 0.25em;
+              }
+
+              .editor-content p {
+                font-size: 1rem;
+                min-height: 1.5em;
+                margin-top: 4px;
+                margin-bottom: 4px;
+              }
+
+              .editor-content ul {
+                list-style-type: disc;
+                padding-left: 1.5em;
+                margin-top: 0.5em;
+                margin-bottom: 0.5em;
+              }
+
+              .editor-content ul ul {
+                list-style-type: circle;
+                margin-top: 0.25em;
+                margin-bottom: 0.25em;
+              }
+
+              .editor-content ul ul ul {
+                list-style-type: square;
+              }
+
+              .editor-content ul.checklist {
+                list-style: none;
+                padding-left: 0;
+              }
+
+              .editor-content ul.checklist>li {
+                position: relative;
+                padding-left: 1.8em;
+                margin-bottom: 4px;
+              }
+
+              .editor-content ul.checklist>li::before {
+                content: '';
+                position: absolute;
+                left: 0.1em;
+                top: 0.35em;
+                width: 16px;
+                height: 16px;
+                border: 1.5px solid var(--color-icon-muted);
+                border-radius: 4px;
+                cursor: pointer;
+                background-color: white;
+                transition: all 0.2s ease;
+              }
+
+              .editor-content ul.checklist>li.checked::before {
+                background-color: var(--color-accent);
+                border-color: var(--color-accent);
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
+                background-size: 12px 12px;
+                background-position: center;
+                background-repeat: no-repeat;
+              }
+
+              .editor-content ul.checklist>li.checked {
+                text-decoration: line-through;
+                color: var(--color-text-muted);
+              }
+
+              .editor-content ol {
+                list-style-type: decimal !important;
+                padding-left: 1.5em;
+                margin-top: 0.5em;
+                margin-bottom: 0.5em;
+              }
+
+              .editor-content ol li {
+                display: list-item;
+                list-style-type: decimal !important;
+              }
+
+              .editor-content ol ol {
+                list-style-type: lower-alpha !important;
+              }
+
+              .editor-content ol ol ol {
+                list-style-type: lower-roman !important;
+              }
+
+              .editor-content li {
+                font-size: 1rem;
+                margin-bottom: 0.25em;
+              }
+
+              .editor-content blockquote {
+                border-left: 3px solid var(--color-text-primary);
+                padding-left: 0.9em;
+                margin-top: 0.8em;
+                margin-bottom: 0.8em;
+                font-size: 1rem;
+              }
+
+              .editor-content span[style*="background-color"] {
+                padding: 0.1em 0.2em;
+                border-radius: 3px;
+              }
+
+              /* Strict Inline Math Preview Styling */
+              .editor-content .math-preview {
+                display: inline !important;
+                color: var(--color-text-muted) !important;
+                pointer-events: none !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+                white-space: pre !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+
+              /* Image Hover Delete Button */
+              .image-wrapper .image-delete-btn {
+                position: absolute;
+                top: 8px;
+                right: 8px;
+                width: 24px;
+                height: 24px;
+                background: rgba(0, 0, 0, 0.6);
+                color: white;
+                border-radius: 6px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                opacity: 0;
+                transition: opacity 0.2s, background 0.2s;
+                cursor: pointer;
+                border: none;
+                z-index: 10;
+              }
+
+              .image-wrapper:hover .image-delete-btn {
+                opacity: 1;
+              }
+
+              .image-wrapper .image-delete-btn:hover {
+                background: rgba(220, 38, 38, 0.9);
+              }
+
+              /* Clean Tables */
+              .editor-content .table-container {
+                margin: 1.5em 0;
+                clear: both;
+              }
+
+              .editor-content .table-title {
+                font-size: 1.125rem;
+                font-weight: 600;
+                color: var(--color-text-primary);
+                outline: none;
+                margin-bottom: 0.5em;
+                display: block;
+              }
+
+              .editor-content .table-title:empty:before {
+                content: attr(data-placeholder);
+                color: var(--color-text-muted);
+                pointer-events: none;
+              }
+
+              .editor-content .table-wrapper {
+                position: relative;
+                display: block;
+                width: 100%;
+                max-width: 100%;
+                box-shadow: none !important;
+                outline: none !important;
+              }
+
+              .editor-content .table-scroll {
+                overflow-x: auto;
+                width: 100%;
+                padding-bottom: 2px;
+              }
+
+              .editor-content table {
+                min-width: 100%;
+                border-collapse: collapse;
+                outline: none !important;
+                box-shadow: none !important;
+                table-layout: fixed;
+              }
+
+              .editor-content tr {
+                outline: none !important;
+              }
+
+              .editor-content td {
+                border: 1px solid var(--color-border-primary);
+                padding: 8px 12px;
+                width: 120px;
+                min-width: 120px;
+                vertical-align: top;
+                word-break: break-word;
+                outline: none !important;
+                transition: background 0.1s ease;
+              }
+
+              .editor-content td:focus-within {
+                background: var(--color-bg-tertiary);
+              }
+
+              .table-resize-handle {
+                position: absolute;
+                bottom: -2px;
+                right: -2px;
+                width: 14px;
+                height: 14px;
+                background: var(--color-icon-muted);
+                border-radius: 50%;
+                cursor: se-resize;
+                z-index: 10;
+                border: 2px solid white;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+                transition: transform 0.1s;
+              }
+
+              .table-resize-handle:hover {
+                transform: scale(1.2);
+                background: var(--color-accent);
+              }
+
+              /* Placeholders */
+              .editor-content p:empty:first-child::before,
+              .editor-content:empty::before {
+                content: "Type '/' for commands";
+                color: rgba(55, 53, 47, 0.4);
+                pointer-events: none;
+                display: block;
+              }
+
+              .title-input:empty::before {
+                content: "Untitled";
+                color: var(--color-text-faint);
+                
+                pointer-events: none;
+                display: block;
+              }
+
+              .no-scrollbar::-webkit-scrollbar {
+                display: none;
+              }
+
+              .no-scrollbar {
+                -ms-overflow-style: none;
+                scrollbar-width: none;
+              }
+
+              `,
+        }}
+      />{" "}
+      {/* Sidebar Hover Trigger Zone (Active when closed) */}
+      {!isSidebarOpen && !isSidebarPeeking && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-4 z-40"
+          onMouseEnter={() => setIsSidebarPeeking(true)}
+        />
+      )}
+      {/* Hamburger Menu */}
+      <div
+        className={`absolute top-4 left-4 z-30 transition-opacity duration-300 ${
+          !isSidebarOpen && !isSidebarPeeking
+            ? "opacity-100"
+            : "opacity-0 pointer-events-none"
+        }
+
+                `}
+      >
+        <button
+          onClick={() => setIsSidebarOpen(true)}
+          className="p-2 text-[var(--color-text-faint)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
+        >
+          <Menu size={20} />
+        </button>
+      </div>{" "}
+      {/* Collapsible Sidebar */}
+      <div
+        onMouseLeave={() => {
+          if (!isSidebarOpen) setIsSidebarPeeking(false);
+        }}
+        className={`absolute top-0 bottom-0 left-0 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border-primary)] flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] z-50 overflow-hidden w-64 ${
+          isSidebarOpen || isSidebarPeeking
+            ? "translate-x-0"
+            : "-translate-x-full"
+        }
+
+                ${
+                  isSidebarPeeking && !isSidebarOpen
+                    ? "shadow-[4px_0_24px_rgba(0,0,0,0.1)]"
+                    : "shadow-none"
+                }
+
+                `}
+      >
+        <div className="w-64 h-full flex flex-col">
+          {" "}
+          {/* Sidebar Header with Image Logo */}
+          <div className="px-5 py-5 flex items-center justify-between group text-[var(--color-text-primary)]">
+            <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight select-none">
+              <div className="w-6 h-6 rounded flex items-center justify-center dark:invert">
+                <img src="/Logo.png" alt="Words Logo" className="w-full h-full object-contain" />
+              </div>
+              Words
+            </div>
+            <button
+              onClick={() => {
+                setIsSidebarOpen(false);
+                setIsSidebarPeeking(false);
+              }}
+              className="p-1 rounded-md text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover-strong)] transition-colors"
+            >
+              <ChevronsLeft size={18} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto no-scrollbar pb-6 mt-2">
+            {" "}
+            {pinnedDocs.length > 0 && (
+              <div className="px-3 mb-6">
+                {" "}
+                <div className="flex flex-wrap gap-2">
+                  {" "}
+                  {pinnedDocs.map((doc) => (
+                    <div
+                      key={doc.id}
+                      onClick={() => {
+                        setActiveDocId(doc.id);
+                        if (!isSidebarOpen) setIsSidebarPeeking(false);
+                      }}
+                      className={`group relative flex-1 min-w-[100px] max-w-full flex items-center gap-2.5 p-2 rounded-lg cursor-pointer transition-all border ${
+                        activeDocId === doc.id
+                          ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-sm text-[var(--color-text-primary)]"
+                          : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
+                      }
+
+                          `}
+                    >
+                      {" "}
+                      <div className="text-lg flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                        {" "}
+                        {doc.emoji ? (
+                          <span className="animate-in zoom-in spin-in-12 duration-300">
+                            {" "}
+                            {doc.emoji}
+                          </span>
+                        ) : (
+                          <FileText
+                            size={16}
+                            className={
+                              activeDocId === doc.id
+                                ? "text-[var(--color-text-muted)]"
+                                : "text-[var(--color-icon-muted)]"
+                            }
+                          />
+                        )}
+                      </div>{" "}
+                      <div className="text-[14px] text-[var(--color-text-muted)] font-medium truncate select-none pr-8">
+                        {" "}
+                        {doc.title || "Untitled"}
+                      </div>{" "}
+                      {activeDocId === doc.id && (
+                        <button
+                          onClick={(e) => togglePinDoc(e, doc.id)}
+                          className="absolute top-1/2 -translate-y-1/2 right-2 opacity-0 group-hover:opacity-100 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                          title="Unpin"
+                        >
+                          {" "}
+                          <PinOff size={14} />{" "}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>{" "}
+              </div>
+            )}
+            <div>
+              <div className="px-4 py-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-[var(--color-text-muted)] uppercase tracking-widest select-none">
+                  Documents
+                </span>
+                <button
+                  onClick={createNewDoc}
+                  className="p-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover-strong)] transition-colors"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+              <div className="px-2 space-y-[2px]">
+                {" "}
+                {regularDocs.map(renderDocItem)}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>{" "}
+      {/* Main Content Area */}
+      <div
+        className={`flex-1 flex flex-col min-w-0 h-full overflow-y-auto relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${
+          isSidebarOpen ? "ml-64" : "ml-0"
+        }
+
+                `}
+        onClick={() => {
+          if (isSidebarPeeking && !isSidebarOpen) {
+            setIsSidebarPeeking(false);
+          }
+        }}
+      >
+        <main className="w-full max-w-3xl mx-auto px-12 pt-24 pb-32 flex-grow">
+          {" "}
+          {/* Title Field */}
+          <div className="flex items-start gap-3 mb-8 group">
+            <div className="relative mt-1" ref={emojiPickerRef}>
+              <button
+                className="w-12 h-12 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
+                onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+              >
+                {" "}
+                {activeDoc.emoji ? (
+                  <span
+                    key={activeDoc.emoji}
+                    className="animate-in zoom-in spin-in-12 duration-300 block leading-none"
+                  >
+                    {" "}
+                    {activeDoc.emoji}
+                  </span>
+                ) : (
+                  <FileText
+                    size={32}
+                    className="text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-muted)] transition-colors"
+                  />
+                )}
+              </button>{" "}
+              {isEmojiPickerOpen && (
+                <div className="absolute top-full left-0 mt-2 p-3 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-xl z-50 w-64 grid grid-cols-6 gap-1 animate-in fade-in zoom-in-95 duration-100">
+                  {" "}
+                  {EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      className="text-2xl p-2 hover:bg-[var(--color-bg-hover)] rounded-lg flex items-center justify-center transition-colors"
+                      onClick={() => {
+                        setDocs((prev) =>
+                          prev.map((d) =>
+                            d.id === activeDocId
+                              ? {
+                                  ...d,
+                                  emoji,
+                                  hasCustomEmoji: true,
+                                }
+                              : d,
+                          ),
+                        );
+                        setIsEmojiPickerOpen(false);
+                      }}
+                    >
+                      {" "}
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <h1
+              ref={titleRef}
+              className="flex-1 title-input text-4xl font-bold outline-none w-full break-words tracking-tight mt-1"
+              contentEditable
+              suppressContentEditableWarning
+              spellCheck={true}
+              autoCapitalize="off"
+              autoCorrect="on"
+              onInput={handleTitleInput}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  editorRef.current.focus();
+                }
+              }}
+            ></h1>
+          </div>{" "}
+          {/* Body Field */}
+          <div
+            ref={editorRef}
+            className="editor-content w-full"
+            contentEditable
+            suppressContentEditableWarning
+            spellCheck={true}
+            autoCapitalize="off"
+            autoCorrect="on"
+            onInput={handleEditorInput}
+            onKeyDown={handleKeyDown}
+            onMouseDown={handleEditorMouseDown}
+            onPaste={handlePaste}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onClick={() =>
+              setSlashState((prev) => ({
+                ...prev,
+                isOpen: false,
+              }))
+            }
+          ></div>
+        </main>
+      </div>{" "}
+      {/* Floating Formatting Toolbar */}
+      {toolbarState.show && (
+        <div
+          className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-1 py-1 flex items-center gap-1 animate-in fade-in zoom-in duration-100"
+          style={{
+            top: `${toolbarState.y}px`,
+            left: `${toolbarState.x}px`,
+            transform: "translate(-50%, -100%)",
+          }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {" "}
+          <button
+            onClick={(e) => formatText(e, "bold")}
+            className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+          >
+            <Bold size={15} strokeWidth={2.5} />
+          </button>{" "}
+          <button
+            onClick={(e) => formatText(e, "italic")}
+            className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+          >
+            <Italic size={15} strokeWidth={2.5} />
+          </button>{" "}
+          <button
+            onClick={(e) => formatText(e, "strikeThrough")}
+            className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+          >
+            <Strikethrough size={15} strokeWidth={2.5} />
+          </button>{" "}
+          <div className="w-px h-4 bg-gray-200 mx-1"></div>{" "}
+          <button
+            onClick={(e) => {
+              const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+              formatText(e, "backColor", isDark ? '#716215' : '#fef08a');
+            }}
+            className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+            title="Highlight"
+          >
+            <Highlighter size={15} strokeWidth={2.5} />
+          </button>{" "}
+        </div>
+      )}
+      {/* Unified Slash Command Menu Popover */}
+      {slashState.isOpen && filteredCommands.length > 0 && (
+        <div
+          className="fixed z-50 bg-[var(--color-bg-primary)] shadow-xl rounded-lg border border-[var(--color-border-primary)] w-72 flex flex-col transition-all duration-75 ease-out transform overflow-hidden"
+          style={{
+            top: `${slashState.y + 24}px`,
+            left: `${slashState.x}px`,
+            transform: `translateX(min(0px, calc(100vw - ${slashState.x}px - 300px)))`,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {" "}
+          <div className="px-3 py-2 text-xs font-medium text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)] border-b border-[var(--color-border-primary)]">
+            {" "}
+            Basic Blocks{" "}
+          </div>{" "}
+          <div className="py-1 max-h-72 overflow-y-auto no-scrollbar">
+            {" "}
+            {filteredCommands.map((cmd, index) => {
+              const Icon = cmd.icon;
+              const isActive = index === slashState.activeIndex;
+
+              return (
+                <button
+                  key={cmd.id}
+                  className={`w-full text-left px-3 py-2 flex items-center gap-3 transition-colors ${
+                    isActive ? "bg-[var(--color-bg-hover)]" : "hover:bg-black/[0.02]"
+                  }
+
+                            `}
+                  onClick={() => executeCommand(cmd)}
+                  onMouseEnter={() =>
+                    setSlashState((prev) => ({
+                      ...prev,
+                      activeIndex: index,
+                    }))
+                  }
+                >
+                  {" "}
+                  <div
+                    className={`p-1.5 rounded-md shadow-sm border ${
+                      isActive
+                        ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]"
+                        : "bg-[var(--color-bg-secondary)] border-[var(--color-border-primary)]"
+                    }
+
+                          `}
+                  >
+                    {" "}
+                    <Icon
+                      size={16}
+                      className={isActive ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"}
+                    />{" "}
+                  </div>{" "}
+                  <div className="flex flex-col">
+                    {" "}
+                    <span className="text-sm font-medium text-[var(--color-text-primary)]">
+                      {" "}
+                      {cmd.title}
+                    </span>{" "}
+                    <span className="text-xs text-[var(--color-text-faint)] truncate">
+                      {" "}
+                      {cmd.description}
+                    </span>{" "}
+                  </div>{" "}
+                </button>
+              );
+            })}
+          </div>{" "}
+        </div>
+      )}
+    </div>
+  );
+}
