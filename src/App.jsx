@@ -1637,8 +1637,9 @@ export default function App() {
           {/* Sidebar Header with Image Logo */}
           <div className="px-5 py-5 flex items-center justify-between group text-[var(--color-text-primary)]">
             <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight select-none">
-              <div className="w-6 h-6 rounded flex items-center justify-center dark:invert">
-                <img src="/Logo.png" alt="Words Logo" className="w-full h-full object-contain" />
+              <div className="w-6 h-6 rounded flex items-center justify-center">
+                <img src="/logolight.png" alt="Words Logo" className="w-full h-full object-contain dark:hidden" />
+                <img src="/logodark.png" alt="Words Logo" className="w-full h-full object-contain hidden dark:block" />
               </div>
               Words
             </div>
