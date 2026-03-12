@@ -21,6 +21,13 @@ import {
   CheckSquare,
   Table,
   Image as ImageIcon,
+  Folder,
+  FolderMinus,
+  ChevronRight,
+  ChevronDown,
+  MoreHorizontal,
+  Circle,
+  GripVertical
 } from "lucide-react";
 
 const EMOJIS = [
@@ -294,6 +301,65 @@ const getEmojiForTitle = (title) => {
     thing: "📦",
     beatles: "🎸",
     beatle: "🎸",
+    poster: "🖼️",
+    wireframe: "📐",
+    mockup: "📱",
+    prototype: "🪄",
+    standup: "🗣️",
+    sync: "🔄",
+    huddle: "👥",
+    kickoff: "🚀",
+    retro: "⏪",
+    retrospective: "⏪",
+    architecture: "🏛️",
+    diagram: "📊",
+    flow: "🌊",
+    flowchart: "🌊",
+    interview: "🎙️",
+    synthesis: "🧩",
+    brief: "📋",
+    spec: "📄",
+    specs: "📄",
+    sprint: "🏃",
+    planning: "📅",
+    backlog: "🗃️",
+    roadmap: "🛣️",
+    milestone: "🚩",
+    launch: "🚀",
+    demo: "🎉",
+    brainstorm: "⛈️",
+    workshop: "🛠️",
+    onboarding: "👋",
+    offboarding: "👋",
+    typography: "🔤",
+    font: "🔤",
+    typeface: "🔤",
+    layout: "📏",
+    grid: "🔲",
+    logo: "📛",
+    branding: "✨",
+    brand: "✨",
+    palette: "🎨",
+    moodboard: "📌",
+    illustration: "🖌️",
+    animation: "🎞️",
+    motion: "🎬",
+    edit: "✂️",
+    cut: "✂️",
+    mix: "🎛️",
+    master: "🎛️",
+    review: "👀",
+    feedback: "💬",
+    critique: "🧐",
+    crit: "🧐",
+    testing: "🧪",
+    prod: "🏭",
+    staging: "🚧",
+    hotfix: "🚑",
+    epic: "📚",
+    minutes: "⏱️",
+    agenda: "📋",
+    action: "⚡",
   };
 
   const words = t.match(/\b\w+\b/g) || [];
@@ -436,12 +502,28 @@ export default function App() {
         isPinned: false,
         emoji: null,
         hasCustomEmoji: false,
+        groupId: null,
       },
     ];
+  });
+  const [groups, setGroups] = useState(() => {
+    const saved = localStorage.getItem("words_groups");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error("Failed to parse local storage groups:", e);
+      }
+    }
+    return [];
   });
   const [activeDocId, setActiveDocId] = useState(() => {
     return localStorage.getItem("words_active_doc") || "1";
   });
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [draggedItem, setDraggedItem] = useState(null); // { type: 'doc' | 'group', id: string }
+  const [dragTarget, setDragTarget] = useState(null); // { id: string, position: 'before' | 'after' | 'inset', type: 'doc' | 'group' }
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
 
   // Editor UI State
@@ -461,6 +543,7 @@ export default function App() {
   const editorRef = useRef(null);
   const titleRef = useRef(null);
   const emojiPickerRef = useRef(null);
+  const slashMenuRef = useRef(null);
   const docsRef = useRef(docs);
   const isInternalEdit = useRef(false);
   const titleTimeoutRef = useRef(null);
@@ -505,7 +588,6 @@ export default function App() {
       document.removeEventListener("selectionchange", handleSelectionChange);
   }, []);
 
-  // Sync to ref and localStorage normally
   useEffect(() => {
     docsRef.current = docs;
     try {
@@ -517,6 +599,14 @@ export default function App() {
       );
     }
   }, [docs]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("words_groups", JSON.stringify(groups));
+    } catch (error) {
+      console.warn("Failed to save groups to local storage.", error);
+    }
+  }, [groups]);
 
   useEffect(() => {
     try {
@@ -671,7 +761,8 @@ export default function App() {
     }
   }, [syncContentToState]);
 
-  const createNewDoc = () => {
+  const createNewDoc = (e, targetGroupId = null) => {
+    if (e) e.stopPropagation();
     const newId = Math.random().toString(36).substring(2, 9);
     const newDoc = {
       id: newId,
@@ -680,9 +771,53 @@ export default function App() {
       isPinned: false,
       emoji: null,
       hasCustomEmoji: false,
+      groupId: targetGroupId,
     };
-    setDocs((prev) => [newDoc, ...prev]);
+    
+    // Insert new document immediately after the active document if possible,
+    // otherwise at the top of the target group or top of the list
+    setDocs((prev) => {
+      const activeIndex = prev.findIndex(d => d.id === activeDocId);
+      if (activeIndex !== -1) {
+        const newDocs = [...prev];
+        newDocs.splice(activeIndex + 1, 0, newDoc);
+        return newDocs;
+      }
+      return [newDoc, ...prev];
+    });
+    
     setActiveDocId(newId);
+    setSelectedDocIds([newId]);
+  };
+
+  const createGroup = () => {
+    const newGroupId = Math.random().toString(36).substring(2, 9);
+    const newGroup = {
+      id: newGroupId,
+      name: "New Group",
+      color: "#9ca3af", // default gray
+      isCollapsed: false,
+    };
+    setGroups(prev => [newGroup, ...prev]);
+    
+    // If docs are selected, move them to the new group
+    if (selectedDocIds.length > 0) {
+      setDocs(prev => prev.map(d => 
+        selectedDocIds.includes(d.id) ? { ...d, groupId: newGroupId } : d
+      ));
+      setSelectedDocIds([]); // Clear selection to revert to 'New Document' button
+    }
+  };
+
+  const updateGroup = (id, updates) => {
+    setGroups(prev => prev.map(g => g.id === id ? { ...g, ...updates } : g));
+  };
+  
+  const deleteGroup = (e, id) => {
+    e.stopPropagation();
+    // Move all docs inside this group to no group
+    setDocs(prev => prev.map(d => d.groupId === id ? { ...d, groupId: null } : d));
+    setGroups(prev => prev.filter(g => g.id !== id));
   };
 
   const deleteDoc = (e, id) => {
@@ -696,6 +831,7 @@ export default function App() {
           isPinned: false,
           emoji: null,
           hasCustomEmoji: false,
+          groupId: null,
         },
       ]);
       setActiveDocId("1");
@@ -706,6 +842,7 @@ export default function App() {
     const newDocs = docs.filter((d) => d.id !== id);
     setDocs(newDocs);
     if (activeDocId === id) setActiveDocId(newDocs[0].id);
+    setSelectedDocIds(prev => prev.filter(selectedId => selectedId !== id));
   };
 
   const togglePinDoc = (e, id) => {
@@ -713,6 +850,161 @@ export default function App() {
     setDocs((prev) =>
       prev.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned } : d)),
     );
+  };
+  
+  const handleDocClick = (e, id) => {
+    if (e.shiftKey && selectedDocIds.length > 0) {
+      e.preventDefault();
+      // Simple range selection: select everything between last active and current
+      const lastSelectedIdx = docs.findIndex(d => d.id === activeDocId);
+      const currentIdx = docs.findIndex(d => d.id === id);
+      
+      if (lastSelectedIdx !== -1 && currentIdx !== -1) {
+        const start = Math.min(lastSelectedIdx, currentIdx);
+        const end = Math.max(lastSelectedIdx, currentIdx);
+        const rangeIds = docs.slice(start, end + 1).map(d => d.id);
+        
+        // Add rangeIds to existing selection, making sure not to duplicate
+        setSelectedDocIds(prev => [...new Set([...prev, ...rangeIds])]);
+      }
+    } else if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      // Toggle selection
+      setSelectedDocIds(prev => {
+        if (prev.includes(id)) {
+          return prev.filter(item => item !== id);
+        } else {
+          return [...prev, id];
+        }
+      });
+    } else {
+      // Normal click
+      setActiveDocId(id);
+      setSelectedDocIds([id]);
+      if (!isSidebarOpen) setIsSidebarPeeking(false);
+    }
+  };
+
+  // --- Drag and Drop Handlers ---
+  const handleDragStart = (e, type, id) => {
+    e.dataTransfer.effectAllowed = "move";
+    setDraggedItem({ type, id });
+    
+    // If dragging a doc that isn't selected, select only it
+    if (type === 'doc' && !selectedDocIds.includes(id)) {
+      setSelectedDocIds([id]);
+      setActiveDocId(id);
+    }
+    
+    // Custom drag ghost
+    if (type === 'doc' && selectedDocIds.length > 1) {
+      const ghost = document.createElement("div");
+      ghost.className = "bg-blue-500 text-white px-3 py-1 rounded-md text-sm shadow-lg pointer-events-none fixed -top-10";
+      ghost.innerHTML = `Moving ${selectedDocIds.includes(id) ? selectedDocIds.length : 1} documents`;
+      document.body.appendChild(ghost);
+      e.dataTransfer.setDragImage(ghost, 15, 15);
+      setTimeout(() => document.body.removeChild(ghost), 0);
+    }
+  };
+
+  const handleSidebarDragOver = (e, targetId = null, targetType = 'root') => {
+    e.preventDefault(); // Necessary to allow dropping
+    e.dataTransfer.dropEffect = "move";
+    if (targetType === 'doc' && targetId) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const position = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+      setDragTarget({ id: targetId, position, type: 'doc' });
+    } else if (targetType === 'group' && targetId) {
+      setDragTarget({ id: targetId, position: 'inset', type: 'group' });
+    } else {
+      setDragTarget(null);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragTarget(null);
+  };
+
+  const handleDropOnGroup = (e, groupId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragTarget(null);
+    if (!draggedItem) return;
+
+    if (draggedItem.type === 'doc') {
+      // Move all selected docs into this group
+      const idsToMove = selectedDocIds.includes(draggedItem.id) ? selectedDocIds : [draggedItem.id];
+      setDocs(prev => {
+        let newDocs = [...prev];
+        idsToMove.forEach(docId => {
+          const idx = newDocs.findIndex(d => d.id === docId);
+          if (idx !== -1) {
+            newDocs[idx] = { ...newDocs[idx], groupId };
+          }
+        });
+        return newDocs;
+      });
+    }
+    setDraggedItem(null);
+  };
+
+  const handleDropOnDoc = (e, targetDocId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragTarget(null);
+    if (!draggedItem) return;
+
+    if (draggedItem.type === 'doc') {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const position = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+
+      setDocs(prev => {
+        const idsToMove = selectedDocIds.includes(draggedItem.id) ? selectedDocIds : [draggedItem.id];
+        if (idsToMove.includes(targetDocId)) return prev; // Don't drop onto itself
+
+        let newDocs = prev.filter(d => !idsToMove.includes(d.id)); // Remove dragged items
+        
+        const targetIdx = newDocs.findIndex(d => d.id === targetDocId);
+        if (targetIdx === -1) return prev;
+        
+        const targetDoc = newDocs[targetIdx];
+        const targetGroupId = targetDoc.groupId;
+
+        // Collect the docs to move, updating their groupId to match the target
+        const docsToInsert = prev
+          .filter(d => idsToMove.includes(d.id))
+          .map(d => ({ ...d, groupId: targetGroupId }));
+
+        // Insert at target index
+        newDocs.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, ...docsToInsert);
+        return newDocs;
+      });
+    } else if (draggedItem.type === 'group') {
+       // Group reordering logic if needed
+    }
+    setDraggedItem(null);
+  };
+  
+  const handleDropOnSidebarRoot = (e) => {
+    e.preventDefault();
+    setDragTarget(null);
+    if (!draggedItem) return;
+
+    if (draggedItem.type === 'doc') {
+      // Move selected docs to root (no group)
+      const idsToMove = selectedDocIds.includes(draggedItem.id) ? selectedDocIds : [draggedItem.id];
+      setDocs(prev => {
+        let newDocs = [...prev];
+        idsToMove.forEach(docId => {
+          const idx = newDocs.findIndex(d => d.id === docId);
+          if (idx !== -1) {
+            newDocs[idx] = { ...newDocs[idx], groupId: null };
+          }
+        });
+        return newDocs;
+      });
+    }
+    setDraggedItem(null);
   };
 
   const getCaretCoordinates = () => {
@@ -1230,7 +1522,12 @@ export default function App() {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      setSlashState((prev) => ({ ...prev, isOpen: false }));
+      if (
+        slashMenuRef.current &&
+        !slashMenuRef.current.contains(event.target)
+      ) {
+        setSlashState((prev) => ({ ...prev, isOpen: false }));
+      }
       if (
         emojiPickerRef.current &&
         !emojiPickerRef.current.contains(event.target)
@@ -1244,17 +1541,30 @@ export default function App() {
 
   const pinnedDocs = docs.filter((d) => d.isPinned);
   const regularDocs = docs.filter((d) => !d.isPinned);
+  const ungroupedDocs = regularDocs.filter((d) => !d.groupId);
   const activeDoc = docs.find((d) => d.id === activeDocId) || docs[0];
 
-  const renderDocItem = (doc) => (
+  const renderDocItem = (doc) => {
+    const isSelected = selectedDocIds.includes(doc.id);
+    const isActive = activeDocId === doc.id;
+    return (
     <div
       key={doc.id}
-      onClick={() => {
-        setActiveDocId(doc.id);
-        if (!isSidebarOpen) setIsSidebarPeeking(false);
-      }}
-      className={`group flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${activeDocId === doc.id ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"}`}
+      draggable
+      onDragStart={(e) => handleDragStart(e, 'doc', doc.id)}
+      onDragOver={(e) => handleSidebarDragOver(e, doc.id, 'doc')}
+      onDragLeave={handleDragLeave}
+      onDrop={(e) => handleDropOnDoc(e, doc.id)}
+      onClick={(e) => handleDocClick(e, doc.id)}
+      className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${
+        isSelected
+          ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium" 
+          : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+      }`}
     >
+      {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+      )}
       <div className="flex items-center gap-2.5 overflow-hidden">
         <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
           {doc.emoji ? (
@@ -1265,14 +1575,14 @@ export default function App() {
             <FileText
               size={16}
               className={
-                activeDocId === doc.id ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"
+                isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"
               }
             />
           )}
         </div>
-                <span className="text-[14px] text-[var(--color-text-muted)] truncate select-none">
-                  {doc.title || "Untitled"}
-                </span>
+        <span className="text-[14px] truncate select-none">
+          {doc.title || "Untitled"}
+        </span>
       </div>
       <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
         <button
@@ -1289,8 +1599,11 @@ export default function App() {
           <Trash2 size={13} />
         </button>
       </div>
+      {dragTarget?.id === doc.id && dragTarget?.position === 'after' && (
+        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+      )}
     </div>
-  );
+  )};
 
   return (
     <div className="flex h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans selection:bg-[#2383e233] overflow-hidden relative w-full">
@@ -1653,82 +1966,177 @@ export default function App() {
               <ChevronsLeft size={18} />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto no-scrollbar pb-6 mt-2">
-            {" "}
+          <div 
+            className="flex-1 overflow-y-auto no-scrollbar pb-6 mt-2 flex flex-col h-full px-2"
+            onDragOver={handleSidebarDragOver}
+            onDrop={handleDropOnSidebarRoot}
+          >
+
+            {/* Pinned Tabs (Icons Only) */}
             {pinnedDocs.length > 0 && (
-              <div className="px-3 mb-6">
-                {" "}
-                <div className="flex flex-wrap gap-2">
-                  {" "}
-                  {pinnedDocs.map((doc) => (
+              <div className="mb-4">
+                <div className="flex flex-wrap gap-1">
+                  {pinnedDocs.map((doc) => {
+                    const isActive = activeDocId === doc.id;
+                    const isSelected = selectedDocIds.includes(doc.id);
+                    return (
                     <div
                       key={doc.id}
-                      onClick={() => {
-                        setActiveDocId(doc.id);
-                        if (!isSidebarOpen) setIsSidebarPeeking(false);
-                      }}
-                      className={`group relative flex-1 min-w-[100px] max-w-full flex items-center gap-2.5 p-2 rounded-lg cursor-pointer transition-all border ${
-                        activeDocId === doc.id
-                          ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-sm text-[var(--color-text-primary)]"
+                      onClick={(e) => handleDocClick(e, doc.id)}
+                      className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${
+                        isSelected || isActive
+                          ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
                           : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
-                      }
-
-                          `}
+                      }`}
+                      title={doc.title || "Untitled"}
                     >
-                      {" "}
-                      <div className="text-lg flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
-                        {" "}
+                      <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
                         {doc.emoji ? (
                           <span className="animate-in zoom-in spin-in-12 duration-300">
-                            {" "}
                             {doc.emoji}
                           </span>
                         ) : (
                           <FileText
-                            size={16}
+                            size={20}
                             className={
-                              activeDocId === doc.id
+                              isSelected || isActive
                                 ? "text-[var(--color-text-muted)]"
                                 : "text-[var(--color-icon-muted)]"
                             }
                           />
                         )}
-                      </div>{" "}
-                      <div className="text-[14px] text-[var(--color-text-muted)] font-medium truncate select-none pr-8">
-                        {" "}
-                        {doc.title || "Untitled"}
-                      </div>{" "}
-                      {activeDocId === doc.id && (
-                        <button
-                          onClick={(e) => togglePinDoc(e, doc.id)}
-                          className="absolute top-1/2 -translate-y-1/2 right-2 opacity-0 group-hover:opacity-100 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-                          title="Unpin"
-                        >
-                          {" "}
-                          <PinOff size={14} />{" "}
-                        </button>
-                      )}
+                      </div>
+                      <button
+                        onClick={(e) => togglePinDoc(e, doc.id)}
+                        className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
+                        title="Unpin"
+                      >
+                        <PinOff size={10} />
+                      </button>
                     </div>
-                  ))}
-                </div>{" "}
+                  )})}
+                </div>
               </div>
             )}
-            <div>
-              <div className="px-4 py-2 flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-[var(--color-text-muted)] uppercase tracking-widest select-none">
-                  Documents
-                </span>
-                <button
-                  onClick={createNewDoc}
-                  className="p-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover-strong)] transition-colors"
-                >
-                  <Plus size={16} />
-                </button>
+
+            {/* New Document Button or Create Group Button */}
+            <div className="flex-1 flex flex-col">
+              <div className="space-y-[1px] mb-2">
+                {selectedDocIds.length > 1 ? (
+                  <div 
+                    onClick={createGroup}
+                    className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+                  >
+                    <div className="flex items-center gap-2.5 overflow-hidden">
+                      <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                        <Folder size={16} className="text-[var(--color-icon-muted)]" />
+                      </div>
+                      <span className="text-[14px] truncate select-none font-medium text-[var(--color-text-primary)]">
+                        Group {selectedDocIds.length} items
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div 
+                    onClick={createNewDoc}
+                    className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+                  >
+                    <div className="flex items-center gap-2.5 overflow-hidden">
+                      <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                        <Plus size={16} className="text-[var(--color-icon-muted)]" />
+                      </div>
+                      <span className="text-[14px] truncate select-none text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors">
+                        New Document
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="px-2 space-y-[2px]">
-                {" "}
-                {regularDocs.map(renderDocItem)}
+              {/* Document Groups */}
+              <div className="space-y-[2px] mb-2">
+                {groups.map((group) => {
+                  const groupDocs = regularDocs.filter((d) => d.groupId === group.id);
+                  return (
+                    <div 
+                      key={group.id} 
+                      className="flex flex-col"
+                      onDragOver={handleSidebarDragOver}
+                      onDrop={(e) => handleDropOnGroup(e, group.id)}
+                    >
+                      <div 
+                        className="group flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
+                      >
+                        <div 
+                          className="flex items-center gap-1.5 flex-1 cursor-pointer overflow-hidden"
+                          onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
+                        >
+                          <button className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)]">
+                            {group.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                          </button>
+                          <div 
+                            className="flex-shrink-0 cursor-pointer transition-transform hover:scale-110"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const FOLDER_COLORS = ['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
+                              const nextColor = FOLDER_COLORS[(FOLDER_COLORS.indexOf(group.color) + 1) % FOLDER_COLORS.length] || FOLDER_COLORS[0];
+                              updateGroup(group.id, { color: nextColor });
+                            }}
+                            title="Change folder color"
+                          >
+                            <Folder size={14} color={group.color} fill={group.color + '40'} />
+                          </div>
+                          <input
+                            type="text"
+                            value={group.name}
+                            onChange={(e) => updateGroup(group.id, { name: e.target.value })}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
+                          />
+                        </div>
+                        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                          <button
+                            onClick={(e) => createNewDoc(e, group.id)}
+                            className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
+                            title="New doc in folder"
+                          >
+                            <Plus size={13} />
+                          </button>
+                          <button
+                            onClick={(e) => deleteGroup(e, group.id)}
+                            className="p-1 text-[var(--color-text-muted)] hover:text-red-500 rounded"
+                            title="Ungroup folder"
+                          >
+                            <FolderMinus size={13} />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {/* Docs mapping inside this group */}
+                      {!group.isCollapsed && groupDocs.length > 0 && (
+                        <div className="pl-4 pr-1 mt-0.5 space-y-[1px]">
+                          {groupDocs.map(renderDocItem)}
+                        </div>
+                      )}
+                      
+                      {/* Empty state for group */}
+                      {!group.isCollapsed && groupDocs.length === 0 && (
+                        <div className="pl-8 py-2 text-[12px] text-[var(--color-text-faint)] italic select-none">
+                          Empty
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
+
+              {/* Ungrouped Documents */}
+              <div className="space-y-[1px]">
+                {ungroupedDocs.map(renderDocItem)}
+              </div>
+              
+              {/* Drop padding so you can always drop at the very bottom */}
+              <div className="h-24 w-full flex-shrink-0" onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
             </div>
           </div>
         </div>
@@ -1875,7 +2283,19 @@ export default function App() {
           <button
             onClick={(e) => {
               const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-              formatText(e, "backColor", isDark ? '#716215' : '#fef08a');
+              const targetColor = isDark ? '#716215' : '#fef08a';
+              const currentColor = document.queryCommandValue('backColor');
+              
+              const isHighlighted = currentColor && (
+                currentColor.replace(/\s+/g, '').toLowerCase() === '#fef08a' ||
+                currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(254,240,138)' ||
+                currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(254,240,138,1)' ||
+                currentColor.replace(/\s+/g, '').toLowerCase() === '#716215' ||
+                currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(113,98,21)' ||
+                currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(113,98,21,1)'
+              );
+              
+              formatText(e, "backColor", isHighlighted ? "transparent" : targetColor);
             }}
             className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
             title="Highlight"
@@ -1887,6 +2307,7 @@ export default function App() {
       {/* Unified Slash Command Menu Popover */}
       {slashState.isOpen && filteredCommands.length > 0 && (
         <div
+          ref={slashMenuRef}
           className="fixed z-50 bg-[var(--color-bg-primary)] shadow-xl rounded-lg border border-[var(--color-border-primary)] w-72 flex flex-col transition-all duration-75 ease-out transform overflow-hidden"
           style={{
             top: `${slashState.y + 24}px`,
