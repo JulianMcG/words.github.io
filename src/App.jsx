@@ -2089,11 +2089,12 @@ export default function App() {
               }
 
               .editor-content p:only-child:empty::before,
+              .editor-content p:only-child:has(> br:only-child)::before,
               .editor-content:empty::before {
                 content: "Type '/' for commands";
                 color: var(--color-text-faint);
                 pointer-events: none;
-                display: block;
+                position: absolute;
               }
 
               .title-input:empty::before {
