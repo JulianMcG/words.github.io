@@ -555,6 +555,7 @@ export default function App() {
   const docsRef = useRef(docs);
   const isInternalEdit = useRef(false);
   const titleTimeoutRef = useRef(null);
+  const prevActiveDocIdRef = useRef(activeDocId);
 
   const filteredCommands = COMMANDS.filter(
     (cmd) =>
@@ -562,13 +563,34 @@ export default function App() {
       cmd.id.toLowerCase().includes(slashState.query.toLowerCase()),
   );
 
+  // Synchronous flush: saves current editor state to docsRef + state
+  const flushCurrentDoc = useCallback(() => {
+    if (!editorRef.current || !titleRef.current) return;
+    const currentId = prevActiveDocIdRef.current;
+    const content = editorRef.current.innerHTML || "<p><br></p>";
+    const title = titleRef.current.innerText || "";
+    // Update ref synchronously so subsequent reads are correct
+    docsRef.current = docsRef.current.map((d) =>
+      d.id === currentId ? { ...d, content, title } : d
+    );
+    setDocs(docsRef.current);
+  }, []);
+
   useEffect(() => {
-    const activeDoc = docs.find((d) => d.id === activeDocId);
+    // Flush the PREVIOUS doc's content before loading the new one
+    const prevId = prevActiveDocIdRef.current;
+    if (prevId && prevId !== activeDocId) {
+      flushCurrentDoc();
+    }
+    prevActiveDocIdRef.current = activeDocId;
+
+    // Load synchronously from docsRef (already updated by flush above)
+    const activeDoc = docsRef.current.find((d) => d.id === activeDocId);
     if (activeDoc && editorRef.current && titleRef.current) {
       titleRef.current.innerText = activeDoc.title;
       editorRef.current.innerHTML = activeDoc.content;
     }
-  }, [activeDocId]);
+  }, [activeDocId, flushCurrentDoc]);
 
   useEffect(() => {
     const handleSelectionChange = () => {
@@ -624,9 +646,9 @@ export default function App() {
     }
   }, [activeDocId]);
 
-  // Failsafe: Synchronous save on unmount/refresh
+  // Failsafe: Synchronous save on unmount/refresh + visibility change
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    const flushSave = () => {
       if (editorRef.current && titleRef.current) {
         const currentDocs = docsRef.current.map((d) =>
           d.id === activeDocId
@@ -643,8 +665,18 @@ export default function App() {
         } catch (e) {}
       }
     };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    const handleVisibilityChange = () => {
+      if (document.hidden) flushSave();
+    };
+    window.addEventListener("beforeunload", flushSave);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    // Periodic auto-save every 5 seconds
+    const autoSaveInterval = setInterval(flushSave, 5000);
+    return () => {
+      window.removeEventListener("beforeunload", flushSave);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearInterval(autoSaveInterval);
+    };
   }, [activeDocId]);
 
   const handleTitleInput = () => {
@@ -771,6 +803,8 @@ export default function App() {
 
   const createNewDoc = (e, targetGroupId = null) => {
     if (e) e.stopPropagation();
+    // Flush current doc before creating new one
+    flushCurrentDoc();
     const newId = Math.random().toString(36).substring(2, 9);
     const newDoc = {
       id: newId,
@@ -782,12 +816,17 @@ export default function App() {
       groupId: targetGroupId,
     };
     
-    // Insert new document immediately after the active document if possible,
-    // otherwise at the top of the target group or top of the list
-    setDocs((prev) => [newDoc, ...prev]);
+    const newDocs = [newDoc, ...docsRef.current];
+    docsRef.current = newDocs;
+    setDocs(newDocs);
     
+    prevActiveDocIdRef.current = newId;
     setActiveDocId(newId);
     setSelectedDocIds([newId]);
+    
+    // Load the new doc into the editor directly
+    if (titleRef.current) titleRef.current.innerText = "";
+    if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
   };
 
   const createGroup = () => {
@@ -802,9 +841,11 @@ export default function App() {
     
     // If docs are selected, move them to the new group
     if (selectedDocIds.length > 0) {
-      setDocs(prev => prev.map(d => 
+      const newDocs = docsRef.current.map(d => 
         selectedDocIds.includes(d.id) ? { ...d, groupId: newGroupId } : d
-      ));
+      );
+      docsRef.current = newDocs;
+      setDocs(newDocs);
       setSelectedDocIds([]); // Clear selection to revert to 'New Document' button
     }
   };
@@ -816,15 +857,17 @@ export default function App() {
   const deleteGroup = (e, id) => {
     e.stopPropagation();
     // Move all docs inside this group to no group
-    setDocs(prev => prev.map(d => d.groupId === id ? { ...d, groupId: null } : d));
+    const newDocs = docsRef.current.map(d => d.groupId === id ? { ...d, groupId: null } : d);
+    docsRef.current = newDocs;
+    setDocs(newDocs);
     setGroups(prev => prev.filter(g => g.id !== id));
   };
 
   const deleteDoc = (e, id) => {
     e.stopPropagation();
-    if (docs.length === 1) {
-      setDocs([
-        {
+    setDocs((prev) => {
+      if (prev.length === 1) {
+        const freshDoc = {
           id: "1",
           title: "",
           content: "<p><br></p>",
@@ -832,28 +875,32 @@ export default function App() {
           emoji: null,
           hasCustomEmoji: false,
           groupId: null,
-        },
-      ]);
-      setActiveDocId("1");
-      if (titleRef.current) titleRef.current.innerText = "";
-      if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
-      return;
-    }
-    const newDocs = docs.filter((d) => d.id !== id);
-    setDocs(newDocs);
-    if (activeDocId === id) setActiveDocId(newDocs[0].id);
+        };
+        setActiveDocId("1");
+        if (titleRef.current) titleRef.current.innerText = "";
+        if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
+        docsRef.current = [freshDoc];
+        return [freshDoc];
+      }
+      const newDocs = prev.filter((d) => d.id !== id);
+      if (activeDocId === id) {
+        setActiveDocId(newDocs[0].id);
+      }
+      docsRef.current = newDocs;
+      return newDocs;
+    });
     setSelectedDocIds(prev => prev.filter(selectedId => selectedId !== id));
   };
 
   const togglePinDoc = (e, id) => {
     e.stopPropagation();
-    setDocs((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned } : d)),
-    );
+    const newDocs = docsRef.current.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned } : d));
+    docsRef.current = newDocs;
+    setDocs(newDocs);
   };
 
   const toggleLockDoc = (docId) => {
-    const doc = docs.find(d => d.id === docId);
+    const doc = docsRef.current.find(d => d.id === docId);
     if (!doc) return;
     
     if (doc.isLocked) {
@@ -866,7 +913,9 @@ export default function App() {
         setLockModal({ mode: 'create', docId });
         setPasscodeInput('');
       } else {
-        setDocs(prev => prev.map(d => d.id === docId ? { ...d, isLocked: true } : d));
+        const newDocs = docsRef.current.map(d => d.id === docId ? { ...d, isLocked: true } : d);
+        docsRef.current = newDocs;
+        setDocs(newDocs);
       }
     }
     setContextMenu(null);
@@ -880,16 +929,29 @@ export default function App() {
       // Creating first passcode
       localStorage.setItem('words_lock_passcode', pin);
       setLockPasscode(pin);
-      setDocs(prev => prev.map(d => d.id === lockModal.docId ? { ...d, isLocked: true } : d));
+      const newDocs = docsRef.current.map(d => d.id === lockModal.docId ? { ...d, isLocked: true } : d);
+      docsRef.current = newDocs;
+      setDocs(newDocs);
       setLockModal(null);
       setPasscodeInput('');
     } else if (lockModal.mode === 'unlock') {
       if (pin === lockPasscode) {
         if (lockModal.action === 'toggle') {
-          setDocs(prev => prev.map(d => d.id === lockModal.docId ? { ...d, isLocked: false } : d));
+          const newDocs = docsRef.current.map(d => d.id === lockModal.docId ? { ...d, isLocked: false } : d);
+          docsRef.current = newDocs;
+          setDocs(newDocs);
         } else {
+          // Opening locked doc — flush first, then switch
+          flushCurrentDoc();
+          prevActiveDocIdRef.current = lockModal.docId;
           setActiveDocId(lockModal.docId);
           setSelectedDocIds([lockModal.docId]);
+          // Load the doc directly
+          const doc = docsRef.current.find(d => d.id === lockModal.docId);
+          if (doc && editorRef.current && titleRef.current) {
+            titleRef.current.innerText = doc.title;
+            editorRef.current.innerHTML = doc.content;
+          }
           if (!isSidebarOpen) setIsSidebarPeeking(false);
         }
         setLockModal(null);
@@ -964,9 +1026,13 @@ export default function App() {
     setDraggedItem({ type, id });
     
     // If dragging a doc that isn't selected, select only it
+    // But don't switch to locked docs (would bypass passcode)
     if (type === 'doc' && !selectedDocIds.includes(id)) {
+      const doc = docs.find(d => d.id === id);
       setSelectedDocIds([id]);
-      setActiveDocId(id);
+      if (!doc?.isLocked) {
+        setActiveDocId(id);
+      }
     }
     
     // Custom drag ghost
@@ -1635,7 +1701,19 @@ export default function App() {
       {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
       )}
-      <div className="flex items-center gap-2.5 overflow-hidden">
+      <div
+        ref={(el) => {
+          if (el) {
+            const isOverflowing = el.scrollWidth > el.clientWidth;
+            if (isOverflowing) {
+              el.classList.add('sidebar-doc-text');
+            } else {
+              el.classList.remove('sidebar-doc-text');
+            }
+          }
+        }}
+        className="flex items-center gap-2.5 flex-1 min-w-0 overflow-hidden"
+      >
         <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
           {doc.isLocked ? (
             <Lock
@@ -1655,11 +1733,11 @@ export default function App() {
             />
           )}
         </div>
-        <span className="text-[14px] truncate select-none">
+        <span className="text-[14px] select-none whitespace-nowrap">
           {doc.title || "Untitled"}
         </span>
       </div>
-      <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
         <button
           onClick={(e) => handleContextMenu(e, doc.id)}
           className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
@@ -1874,6 +1952,17 @@ export default function App() {
                 border-color: transparent;
               }
 
+              /* Sidebar doc text fade */
+              .sidebar-doc-text {
+                -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+                mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+                transition: -webkit-mask-image 0.15s, mask-image 0.15s;
+              }
+              .group:hover .sidebar-doc-text {
+                -webkit-mask-image: linear-gradient(to right, black calc(100% - 40px), transparent calc(100% - 8px));
+                mask-image: linear-gradient(to right, black calc(100% - 40px), transparent calc(100% - 8px));
+              }
+
               /* Clean Tables */
               .editor-content .table-container {
                 margin: 1.5em 0;
@@ -1957,7 +2046,7 @@ export default function App() {
                 background: var(--color-accent);
               }
 
-              .editor-content p:empty:first-child::before,
+              .editor-content p:only-child:empty::before,
               .editor-content:empty::before {
                 content: "Type '/' for commands";
                 color: var(--color-text-faint);
@@ -2242,8 +2331,8 @@ export default function App() {
           }
         }}
       >
-        {lockModal ? (
-          <div className="flex-1 flex flex-col items-center justify-center px-12">
+        {lockModal && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-12 z-30 bg-[var(--color-bg-primary)]">
             <div className="w-full max-w-xs flex flex-col items-center">
               <Lock size={24} className="text-[var(--color-text-faint)] mb-4" />
               <p className="text-[15px] text-[var(--color-text-muted)] text-center mb-1">
@@ -2283,14 +2372,23 @@ export default function App() {
                 />
               </div>
               <button
-                onClick={() => { setLockModal(null); setPasscodeInput(''); }}
+                onClick={() => {
+                  setLockModal(null);
+                  setPasscodeInput('');
+                  // Reload active doc to restore editor content
+                  const doc = docsRef.current.find(d => d.id === activeDocId);
+                  if (doc && editorRef.current && titleRef.current) {
+                    titleRef.current.innerText = doc.title;
+                    editorRef.current.innerHTML = doc.content;
+                  }
+                }}
                 className="text-[12px] text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] transition-colors"
               >
                 Cancel
               </button>
             </div>
           </div>
-        ) : (
+        )}
         <main className="w-full max-w-3xl mx-auto px-12 pt-24 pb-32 flex-grow">
           {" "}
           {/* Title Field */}
@@ -2385,7 +2483,6 @@ export default function App() {
             }
           ></div>
         </main>
-        )}
       </div>{" "}
       {/* Floating Formatting Toolbar */}
       {toolbarState.show && (
