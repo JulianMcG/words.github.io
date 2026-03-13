@@ -662,20 +662,30 @@ export default function App() {
       document.head.appendChild(link);
     }
     
-    if (activeDoc.emoji) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 64;
-      canvas.height = 64;
-      const ctx = canvas.getContext('2d');
-      ctx.font = '48px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(activeDoc.emoji, 32, 36);
-      link.href = canvas.toDataURL('image/png');
-    } else {
-      const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      link.href = isDark ? '/logodark.png' : '/logolight.png';
-    }
+    const setFavicon = () => {
+      if (activeDoc.emoji) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.font = '48px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(activeDoc.emoji, 32, 36);
+        link.href = canvas.toDataURL('image/png');
+      } else {
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        link.href = isDark ? '/favicondark.png' : '/faviconlight.png';
+      }
+    };
+    
+    setFavicon();
+    
+    // Listen for theme changes to update favicon
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => setFavicon();
+    mq.addEventListener('change', handleChange);
+    return () => mq.removeEventListener('change', handleChange);
   }, [activeDocId, docs]);
 
   // Failsafe: Synchronous save on unmount/refresh + visibility change
