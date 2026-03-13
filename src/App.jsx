@@ -12,6 +12,7 @@ import {
   Trash2,
   Menu,
   ChevronsLeft,
+  ChevronsRight,
   Bold,
   Italic,
   Strikethrough,
@@ -27,7 +28,10 @@ import {
   ChevronDown,
   MoreHorizontal,
   Circle,
-  GripVertical
+  GripVertical,
+  Lock,
+  Unlock,
+  X
 } from "lucide-react";
 
 const EMOJIS = [
@@ -525,6 +529,10 @@ export default function App() {
   const [draggedItem, setDraggedItem] = useState(null); // { type: 'doc' | 'group', id: string }
   const [dragTarget, setDragTarget] = useState(null); // { id: string, position: 'before' | 'after' | 'inset', type: 'doc' | 'group' }
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState(null); // { docId, x, y }
+  const [lockPasscode, setLockPasscode] = useState(() => localStorage.getItem('words_lock_passcode') || null);
+  const [lockModal, setLockModal] = useState(null); // { mode: 'create' | 'unlock', docId }
+  const [passcodeInput, setPasscodeInput] = useState('');
 
   // Editor UI State
   const [slashState, setSlashState] = useState({
@@ -851,8 +859,79 @@ export default function App() {
       prev.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned } : d)),
     );
   };
+
+  const toggleLockDoc = (docId) => {
+    const doc = docs.find(d => d.id === docId);
+    if (!doc) return;
+    
+    if (doc.isLocked) {
+      // Unlock: prompt for passcode
+      setLockModal({ mode: 'unlock', docId, action: 'toggle' });
+      setPasscodeInput('');
+    } else {
+      // Lock: if no passcode exists yet, create one first
+      if (!lockPasscode) {
+        setLockModal({ mode: 'create', docId });
+        setPasscodeInput('');
+      } else {
+        setDocs(prev => prev.map(d => d.id === docId ? { ...d, isLocked: true } : d));
+      }
+    }
+    setContextMenu(null);
+  };
+
+  const handlePasscodeSubmit = (code) => {
+    const pin = code || passcodeInput;
+    if (pin.length !== 4 || !/^\d{4}$/.test(pin)) return;
+    
+    if (lockModal.mode === 'create') {
+      // Creating first passcode
+      localStorage.setItem('words_lock_passcode', pin);
+      setLockPasscode(pin);
+      setDocs(prev => prev.map(d => d.id === lockModal.docId ? { ...d, isLocked: true } : d));
+      setLockModal(null);
+      setPasscodeInput('');
+    } else if (lockModal.mode === 'unlock') {
+      if (pin === lockPasscode) {
+        if (lockModal.action === 'toggle') {
+          setDocs(prev => prev.map(d => d.id === lockModal.docId ? { ...d, isLocked: false } : d));
+        } else {
+          setActiveDocId(lockModal.docId);
+          setSelectedDocIds([lockModal.docId]);
+          if (!isSidebarOpen) setIsSidebarPeeking(false);
+        }
+        setLockModal(null);
+        setPasscodeInput('');
+      } else {
+        setPasscodeInput('');
+      }
+    }
+  };
+
+  const handleContextMenu = (e, docId) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    setContextMenu({
+      docId,
+      x: rect.right,
+      y: rect.top,
+    });
+  };
   
   const handleDocClick = (e, id) => {
+    // Close context menu on any click
+    setContextMenu(null);
+
+    // Check if the doc is locked
+    const doc = docs.find(d => d.id === id);
+    if (doc?.isLocked && activeDocId !== id) {
+      e.preventDefault();
+      setLockModal({ mode: 'unlock', docId: id, action: 'open' });
+      setPasscodeInput('');
+      return;
+    }
+
     if (e.shiftKey && selectedDocIds.length > 0) {
       e.preventDefault();
       // Simple range selection: select everything between last active and current
@@ -881,6 +960,8 @@ export default function App() {
       // Normal click
       setActiveDocId(id);
       setSelectedDocIds([id]);
+      setLockModal(null);
+      setPasscodeInput('');
       if (!isSidebarOpen) setIsSidebarPeeking(false);
     }
   };
@@ -1081,18 +1162,15 @@ export default function App() {
 
   // --- Image Insertion Utilities ---
   const createImgWrapperHTML = (src) => {
-    return `<span class="image-wrapper" contenteditable="false"
-    style="float: left; resize: horizontal; overflow: hidden; display: block; max-width: 100%; width: 320px; min-width: 100px; min-height: 50px; border-radius: 8px; margin: 0.5em 1.5em 1em 0; position: relative;"><img
-      src="${src}" style="width: 100%; height: 100%; display: block; object-fit: cover; pointer-events: none;" /><button
+    return `<div class="image-outer" contenteditable="false" style="display: block; max-width: 100%; width: 320px; min-width: 100px; margin: 0.75em 0; position: relative;"><span class="image-wrapper" style="display: block; border-radius: 8px; overflow: hidden; resize: horizontal; min-height: 50px;"><img
+      src="${src}" style="width: 100%; height: auto; display: block; object-fit: cover; pointer-events: none;" /></span><button
       class="image-delete-btn" contenteditable="false" title="Delete image"><svg xmlns="http://www.w3.org/2000/svg"
-        width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
         stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 6h18" />
         <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
         <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-        <line x1="10" x2="10" y1="11" y2="17" />
-        <line x1="14" x2="14" y1="11" y2="17" />
-      </svg></button></span>&nbsp;`;
+      </svg></button></div>&nbsp;`;
   };
 
   const insertImageFile = (file, targetNodeToReplace = null) => {
@@ -1139,7 +1217,7 @@ export default function App() {
   const handleEditorMouseDown = (e) => {
     if (e.target.closest(".image-delete-btn")) {
       e.preventDefault();
-      const wrapper = e.target.closest(".image-wrapper");
+      const wrapper = e.target.closest(".image-outer") || e.target.closest(".image-wrapper");
       if (wrapper) {
         if (
           wrapper.nextSibling &&
@@ -1567,7 +1645,12 @@ export default function App() {
       )}
       <div className="flex items-center gap-2.5 overflow-hidden">
         <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
-          {doc.emoji ? (
+          {doc.isLocked ? (
+            <Lock
+              size={16}
+              className="text-[var(--color-icon-muted)]"
+            />
+          ) : doc.emoji ? (
             <span className="animate-in zoom-in spin-in-12 duration-300">
               {doc.emoji}
             </span>
@@ -1586,17 +1669,11 @@ export default function App() {
       </div>
       <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
         <button
-          onClick={(e) => togglePinDoc(e, doc.id)}
+          onClick={(e) => handleContextMenu(e, doc.id)}
           className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
-          title={doc.isPinned ? "Unpin" : "Pin"}
+          title="More options"
         >
-          <Pin size={13} className={doc.isPinned ? "fill-gray-400" : ""} />
-        </button>
-        <button
-          onClick={(e) => deleteDoc(e, doc.id)}
-          className="p-1 text-[var(--color-text-muted)] hover:text-red-500 rounded transition-colors"
-        >
-          <Trash2 size={13} />
+          <MoreHorizontal size={14} />
         </button>
       </div>
       {dragTarget?.id === doc.id && dragTarget?.position === 'after' && (
@@ -1763,31 +1840,46 @@ export default function App() {
               }
 
               /* Image Hover Delete Button */
+              .image-outer {
+                position: relative;
+              }
+
+              .image-wrapper {
+                border-radius: 8px;
+                overflow: hidden;
+              }
+
+              .image-outer .image-delete-btn,
               .image-wrapper .image-delete-btn {
                 position: absolute;
-                top: 8px;
-                right: 8px;
-                width: 24px;
-                height: 24px;
-                background: rgba(0, 0, 0, 0.6);
-                color: white;
-                border-radius: 6px;
+                top: -6px;
+                right: -6px;
+                width: 22px;
+                height: 22px;
+                background: var(--color-bg-secondary, #fff);
+                color: var(--color-text-muted, #888);
+                border-radius: 50%;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 opacity: 0;
-                transition: opacity 0.2s, background 0.2s;
+                transition: opacity 0.15s, background 0.15s, color 0.15s;
                 cursor: pointer;
-                border: none;
-                z-index: 10;
+                border: 1px solid var(--color-border-primary, #e5e7eb);
+                box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+                z-index: 20;
               }
 
+              .image-outer:hover .image-delete-btn,
               .image-wrapper:hover .image-delete-btn {
                 opacity: 1;
               }
 
+              .image-outer .image-delete-btn:hover,
               .image-wrapper .image-delete-btn:hover {
                 background: rgba(220, 38, 38, 0.9);
+                color: white;
+                border-color: transparent;
               }
 
               /* Clean Tables */
@@ -1873,11 +1965,10 @@ export default function App() {
                 background: var(--color-accent);
               }
 
-              /* Placeholders */
               .editor-content p:empty:first-child::before,
               .editor-content:empty::before {
                 content: "Type '/' for commands";
-                color: rgba(55, 53, 47, 0.4);
+                color: var(--color-text-faint);
                 pointer-events: none;
                 display: block;
               }
@@ -1958,12 +2049,17 @@ export default function App() {
             </div>
             <button
               onClick={() => {
-                setIsSidebarOpen(false);
-                setIsSidebarPeeking(false);
+                if (isSidebarPeeking) {
+                  setIsSidebarOpen(true);
+                  setIsSidebarPeeking(false);
+                } else {
+                  setIsSidebarOpen(false);
+                  setIsSidebarPeeking(false);
+                }
               }}
               className="p-1 rounded-md text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover-strong)] transition-colors"
             >
-              <ChevronsLeft size={18} />
+              {isSidebarPeeking ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
             </button>
           </div>
           <div 
@@ -2154,11 +2250,60 @@ export default function App() {
           }
         }}
       >
+        {lockModal ? (
+          <div className="flex-1 flex flex-col items-center justify-center px-12">
+            <div className="w-full max-w-xs flex flex-col items-center">
+              <Lock size={24} className="text-[var(--color-text-faint)] mb-4" />
+              <p className="text-[15px] text-[var(--color-text-muted)] text-center mb-1">
+                {lockModal.mode === 'create' ? 'Create a passcode' : 'Locked Document'}
+              </p>
+              <p className="text-[12px] text-[var(--color-text-faint)] text-center mb-8">
+                {lockModal.mode === 'create' 
+                  ? 'This will be used for all locked documents'
+                  : 'Enter passcode to continue'}
+              </p>
+              <div className="relative flex justify-center gap-4 mb-8">
+                {[0, 1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className={`w-4 h-4 rounded-full transition-all pointer-events-none ${
+                      passcodeInput.length > i
+                        ? 'bg-[var(--color-text-primary)] scale-110'
+                        : 'bg-[var(--color-border-primary)]'
+                    }`}
+                  />
+                ))}
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={4}
+                  autoFocus
+                  value={passcodeInput}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                    setPasscodeInput(val);
+                    if (val.length === 4) {
+                      setTimeout(() => handlePasscodeSubmit(val), 150);
+                    }
+                  }}
+                  className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                />
+              </div>
+              <button
+                onClick={() => { setLockModal(null); setPasscodeInput(''); }}
+                className="text-[12px] text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
         <main className="w-full max-w-3xl mx-auto px-12 pt-24 pb-32 flex-grow">
           {" "}
           {/* Title Field */}
           <div className="flex items-start gap-3 mb-8 group">
-            <div className="relative mt-1" ref={emojiPickerRef}>
+            <div className="relative" ref={emojiPickerRef}>
               <button
                 className="w-12 h-12 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
                 onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
@@ -2248,6 +2393,7 @@ export default function App() {
             }
           ></div>
         </main>
+        )}
       </div>{" "}
       {/* Floating Formatting Toolbar */}
       {toolbarState.show && (
@@ -2375,6 +2521,38 @@ export default function App() {
             })}
           </div>{" "}
         </div>
+      )}
+      {/* Context Menu for Documents */}
+      {contextMenu && (
+        <div
+          className="fixed z-[60] bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg py-1 w-44 animate-in fade-in zoom-in-95 duration-100"
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x + 4}px` }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => { togglePinDoc(e, contextMenu.docId); setContextMenu(null); }}
+          >
+            {docs.find(d => d.id === contextMenu.docId)?.isPinned ? <><PinOff size={14} /> Unpin</> : <><Pin size={14} /> Pin</>}
+          </button>
+          <button
+            className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={() => toggleLockDoc(contextMenu.docId)}
+          >
+            {docs.find(d => d.id === contextMenu.docId)?.isLocked ? <><Unlock size={14} /> Unlock</> : <><Lock size={14} /> Lock</>}
+          </button>
+          <div className="h-px bg-[var(--color-border-primary)] my-1" />
+          <button
+            className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => { deleteDoc(e, contextMenu.docId); setContextMenu(null); }}
+          >
+            <Trash2 size={14} /> Delete
+          </button>
+        </div>
+      )}
+      {/* Click-away overlay for context menu */}
+      {contextMenu && (
+        <div className="fixed inset-0 z-[59]" onClick={() => setContextMenu(null)} />
       )}
     </div>
   );
