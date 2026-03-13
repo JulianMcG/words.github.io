@@ -784,15 +784,7 @@ export default function App() {
     
     // Insert new document immediately after the active document if possible,
     // otherwise at the top of the target group or top of the list
-    setDocs((prev) => {
-      const activeIndex = prev.findIndex(d => d.id === activeDocId);
-      if (activeIndex !== -1) {
-        const newDocs = [...prev];
-        newDocs.splice(activeIndex + 1, 0, newDoc);
-        return newDocs;
-      }
-      return [newDoc, ...prev];
-    });
+    setDocs((prev) => [newDoc, ...prev]);
     
     setActiveDocId(newId);
     setSelectedDocIds([newId]);
