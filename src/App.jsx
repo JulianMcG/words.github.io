@@ -1096,7 +1096,14 @@ export default function App() {
       const position = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
       setDragTarget({ id: targetId, position, type: 'doc' });
     } else if (targetType === 'group' && targetId) {
-      setDragTarget({ id: targetId, position: 'inset', type: 'group' });
+      // If dragging a group over another group, show before/after for reordering
+      if (draggedItem?.type === 'group') {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const position = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+        setDragTarget({ id: targetId, position, type: 'group' });
+      } else {
+        setDragTarget({ id: targetId, position: 'inset', type: 'group' });
+      }
     } else {
       setDragTarget(null);
     }
@@ -1124,6 +1131,19 @@ export default function App() {
           }
         });
         return newDocs;
+      });
+    } else if (draggedItem.type === 'group' && draggedItem.id !== groupId) {
+      // Reorder groups
+      const rect = e.currentTarget.getBoundingClientRect();
+      const position = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+      setGroups(prev => {
+        const draggedIdx = prev.findIndex(g => g.id === draggedItem.id);
+        if (draggedIdx === -1) return prev;
+        const newGroups = prev.filter(g => g.id !== draggedItem.id);
+        const targetIdx = newGroups.findIndex(g => g.id === groupId);
+        if (targetIdx === -1) return prev;
+        newGroups.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, prev[draggedIdx]);
+        return newGroups;
       });
     }
     setDraggedItem(null);
@@ -2246,8 +2266,9 @@ export default function App() {
             onDragOver={handleSidebarDragOver}
             onDrop={handleDropOnSidebarRoot}
             onDoubleClick={(e) => {
-              // Create new doc on double-click anywhere in sidebar, unless clicking an interactive element
-              if (e.target.closest('button, input, a')) return;
+              // Only create new doc if double-clicking truly empty sidebar space
+              // Skip if clicking on any sidebar content item
+              if (e.target.closest('button, input, a, [draggable], [data-sidebar-item]')) return;
               createNewDoc(e);
             }}
           >
@@ -2262,6 +2283,7 @@ export default function App() {
                     return (
                     <div
                       key={doc.id}
+                      data-sidebar-item
                       onClick={(e) => handleDocClick(e, doc.id)}
                       className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${
                         isSelected || isActive
@@ -2304,6 +2326,7 @@ export default function App() {
               <div className="space-y-[1px] mb-2">
                 {selectedDocIds.length > 1 ? (
                   <div 
+                    data-sidebar-item
                     onClick={createGroup}
                     className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
                   >
@@ -2318,6 +2341,7 @@ export default function App() {
                   </div>
                 ) : (
                   <div 
+                    data-sidebar-item
                     onClick={createNewDoc}
                     className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
                   >
@@ -2340,13 +2364,25 @@ export default function App() {
                     <div 
                       key={group.id} 
                       className="flex flex-col"
-                      onDragOver={handleSidebarDragOver}
+                      onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
                       onDrop={(e) => handleDropOnGroup(e, group.id)}
                     >
                       <div 
-                        className="group flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        className="group relative flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors"
                         style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
+                        draggable
+                        data-sidebar-item
+                        onDragStart={(e) => handleDragStart(e, 'group', group.id)}
+                        onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDropOnGroup(e, group.id)}
                       >
+                        {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'before' && (
+                          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+                        )}
+                        {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'after' && (
+                          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+                        )}
                         <div 
                           className="flex items-center gap-1.5 flex-1 cursor-pointer overflow-hidden"
                           onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
