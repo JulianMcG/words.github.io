@@ -2190,6 +2190,12 @@ export default function App() {
             className="flex-1 overflow-y-auto no-scrollbar pb-6 mt-2 flex flex-col h-full px-2"
             onDragOver={handleSidebarDragOver}
             onDrop={handleDropOnSidebarRoot}
+            onDoubleClick={(e) => {
+              // Only create doc if double-clicking empty space (not on a doc item, button, input, etc.)
+              if (e.target === e.currentTarget || e.target.closest('[data-sidebar-empty-zone]')) {
+                createNewDoc(e);
+              }
+            }}
           >
 
             {/* Pinned Tabs (Icons Only) */}
@@ -2356,14 +2362,14 @@ export default function App() {
               </div>
               
               {/* Drop padding so you can always drop at the very bottom */}
-              <div className="h-24 w-full flex-shrink-0" onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
+              <div className="h-24 w-full flex-shrink-0" data-sidebar-empty-zone onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
             </div>
           </div>
         </div>
       </div>{" "}
       {/* Main Content Area */}
       <div
-        className={`flex-1 flex flex-col min-w-0 h-full overflow-y-auto relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${
+        className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${
           isSidebarOpen ? "ml-64" : "ml-0"
         }
 
