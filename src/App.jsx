@@ -1088,6 +1088,11 @@ export default function App() {
     }
   };
 
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDragTarget(null);
+  };
+
   const handleSidebarDragOver = (e, targetId = null, targetType = 'root') => {
     e.preventDefault(); // Necessary to allow dropping
     e.dataTransfer.dropEffect = "move";
@@ -1471,6 +1476,15 @@ export default function App() {
         }
       });
 
+      // Unwrap spans that have no remaining attributes (they cause cursor/caret issues)
+      container.querySelectorAll('span').forEach(span => {
+        if (span.attributes.length === 0) {
+          const parent = span.parentNode;
+          while (span.firstChild) parent.insertBefore(span.firstChild, span);
+          parent.removeChild(span);
+        }
+      });
+
       // Re-apply bold/italic from semantic tags (b, strong, i, em are preserved naturally)
       // Insert the cleaned HTML
       const sel = window.getSelection();
@@ -1805,6 +1819,7 @@ export default function App() {
       key={doc.id}
       draggable
       onDragStart={(e) => handleDragStart(e, 'doc', doc.id)}
+      onDragEnd={handleDragEnd}
       onDragOver={(e) => handleSidebarDragOver(e, doc.id, 'doc')}
       onDragLeave={handleDragLeave}
       onDrop={(e) => handleDropOnDoc(e, doc.id)}
@@ -2368,11 +2383,19 @@ export default function App() {
                       onDrop={(e) => handleDropOnGroup(e, group.id)}
                     >
                       <div 
-                        className="group relative flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        className="group relative flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
                         style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
                         draggable
                         data-sidebar-item
-                        onDragStart={(e) => handleDragStart(e, 'group', group.id)}
+                        onDragStart={(e) => {
+                          // Prevent input from blocking the drag
+                          if (e.target.tagName === 'INPUT') {
+                            e.preventDefault();
+                            return;
+                          }
+                          handleDragStart(e, 'group', group.id);
+                        }}
+                        onDragEnd={handleDragEnd}
                         onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDropOnGroup(e, group.id)}
@@ -2407,6 +2430,8 @@ export default function App() {
                             value={group.name}
                             onChange={(e) => updateGroup(group.id, { name: e.target.value })}
                             onClick={(e) => e.stopPropagation()}
+                            draggable={false}
+                            onDragStart={(e) => e.stopPropagation()}
                             className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
                           />
                         </div>
