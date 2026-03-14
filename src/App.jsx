@@ -2191,10 +2191,9 @@ export default function App() {
             onDragOver={handleSidebarDragOver}
             onDrop={handleDropOnSidebarRoot}
             onDoubleClick={(e) => {
-              // Only create doc if double-clicking empty space (not on a doc item, button, input, etc.)
-              if (e.target === e.currentTarget || e.target.closest('[data-sidebar-empty-zone]')) {
-                createNewDoc(e);
-              }
+              // Create new doc on double-click anywhere in sidebar, unless clicking an interactive element
+              if (e.target.closest('button, input, a')) return;
+              createNewDoc(e);
             }}
           >
 
