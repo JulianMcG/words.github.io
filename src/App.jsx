@@ -1404,6 +1404,8 @@ export default function App() {
   const handlePaste = (e) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+
+    // Handle image paste
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf("image") !== -1) {
         e.preventDefault();
@@ -1411,6 +1413,59 @@ export default function App() {
         insertImageFile(file);
         return;
       }
+    }
+
+    // Handle HTML paste: strip external font/color styles so content uses our native fonts
+    const html = e.clipboardData.getData('text/html');
+    if (html) {
+      e.preventDefault();
+      const container = document.createElement('div');
+      container.innerHTML = html;
+
+      // Strip font-related inline styles from all elements
+      const stylesToRemove = [
+        'font-family', 'font-size', 'font-weight', 'color', 'background-color',
+        'background', 'line-height', 'letter-spacing', 'word-spacing',
+        'text-indent', 'margin', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right',
+        'padding', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right',
+      ];
+
+      container.querySelectorAll('*').forEach(el => {
+        // Remove class attributes that carry external styling
+        el.removeAttribute('class');
+        el.removeAttribute('id');
+
+        if (el.style) {
+          stylesToRemove.forEach(prop => el.style.removeProperty(prop));
+          // If style attribute is now empty, remove it entirely
+          if (!el.getAttribute('style')?.trim()) {
+            el.removeAttribute('style');
+          }
+        }
+
+        // Remove <font> tags by unwrapping their children
+        if (el.tagName === 'FONT') {
+          const parent = el.parentNode;
+          while (el.firstChild) parent.insertBefore(el.firstChild, el);
+          parent.removeChild(el);
+        }
+      });
+
+      // Re-apply bold/italic from semantic tags (b, strong, i, em are preserved naturally)
+      // Insert the cleaned HTML
+      const sel = window.getSelection();
+      if (sel.rangeCount) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const frag = range.createContextualFragment(container.innerHTML);
+        range.insertNode(frag);
+        // Move cursor to end of inserted content
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+
+      syncContentToState();
     }
   };
   const handleDrop = (e) => {
