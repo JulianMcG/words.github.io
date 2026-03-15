@@ -31,7 +31,10 @@ import {
   GripVertical,
   Lock,
   Unlock,
-  X
+  X,
+  Share,
+  Printer,
+  Pencil
 } from "lucide-react";
 
 const EMOJIS = [
@@ -488,6 +491,7 @@ const COMMANDS = [
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [docs, setDocs] = useState(() => {
     const saved = localStorage.getItem("words_docs");
     if (saved) {
@@ -530,6 +534,8 @@ export default function App() {
   const [dragTarget, setDragTarget] = useState(null); // { id: string, position: 'before' | 'after' | 'inset', type: 'doc' | 'group' }
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { docId, x, y }
+  const [groupMenuOpen, setGroupMenuOpen] = useState(null);
+  const [editingGroupId, setEditingGroupId] = useState(null);
   const [lockPasscode, setLockPasscode] = useState(() => localStorage.getItem('words_lock_passcode') || null);
   const [lockModal, setLockModal] = useState(null); // { mode: 'create' | 'unlock', docId }
   const [passcodeInput, setPasscodeInput] = useState('');
@@ -1094,7 +1100,11 @@ export default function App() {
   };
 
   const handleSidebarDragOver = (e, targetId = null, targetType = 'root') => {
+    if (draggedItem?.type === 'group' && targetType === 'doc') {
+      return; // allow bubble to group flex-col
+    }
     e.preventDefault(); // Necessary to allow dropping
+    e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
     if (targetType === 'doc' && targetId) {
       const rect = e.currentTarget.getBoundingClientRect();
@@ -1135,6 +1145,7 @@ export default function App() {
             newDocs[idx] = { ...newDocs[idx], groupId };
           }
         });
+        docsRef.current = newDocs;
         return newDocs;
       });
     } else if (draggedItem.type === 'group' && draggedItem.id !== groupId) {
@@ -1183,6 +1194,7 @@ export default function App() {
 
         // Insert at target index
         newDocs.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, ...docsToInsert);
+        docsRef.current = newDocs;
         return newDocs;
       });
     } else if (draggedItem.type === 'group') {
@@ -1207,6 +1219,7 @@ export default function App() {
             newDocs[idx] = { ...newDocs[idx], groupId: null };
           }
         });
+        docsRef.current = newDocs;
         return newDocs;
       });
     }
@@ -2214,6 +2227,44 @@ export default function App() {
           onMouseEnter={() => setIsSidebarPeeking(true)}
         />
       )}
+      {/* Share Menu */}
+      <div className="absolute top-4 right-4 z-30 print:hidden">
+        <div className="relative">
+          <button
+            onClick={() => setShareMenuOpen(!shareMenuOpen)}
+            className="p-2 text-[var(--color-text-faint)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
+            title="Share"
+          >
+            <Share size={20} />
+          </button>
+          {shareMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-[39]" onClick={() => setShareMenuOpen(false)} />
+              <div className="absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-48 animate-in fade-in zoom-in-95 duration-100">
+                <button 
+                  className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => {
+                    setShareMenuOpen(false);
+                    setTimeout(() => window.print(), 100);
+                  }}
+                >
+                  <Share size={14} /> Export to PDF
+                </button>
+                <div className="h-px bg-[var(--color-border-primary)] my-1" />
+                <button 
+                  className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => {
+                    setShareMenuOpen(false);
+                    setTimeout(() => window.print(), 100);
+                  }}
+                >
+                  <Printer size={14} /> Print
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
       {/* Hamburger Menu */}
       <div
         className={`absolute top-4 left-4 z-30 transition-opacity duration-300 ${
@@ -2378,10 +2429,16 @@ export default function App() {
                   return (
                     <div 
                       key={group.id} 
-                      className="flex flex-col"
+                      className="flex flex-col relative"
                       onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
                       onDrop={(e) => handleDropOnGroup(e, group.id)}
                     >
+                      {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'before' && (
+                        <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+                      )}
+                      {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'after' && (
+                        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+                      )}
                       <div 
                         className="group relative flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
                         style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
@@ -2396,16 +2453,8 @@ export default function App() {
                           handleDragStart(e, 'group', group.id);
                         }}
                         onDragEnd={handleDragEnd}
-                        onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
                         onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDropOnGroup(e, group.id)}
                       >
-                        {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'before' && (
-                          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
-                        )}
-                        {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'after' && (
-                          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
-                        )}
                         <div 
                           className="flex items-center gap-1.5 flex-1 cursor-pointer overflow-hidden"
                           onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
@@ -2425,31 +2474,74 @@ export default function App() {
                           >
                             <Folder size={14} color={group.color} fill={group.color + '40'} />
                           </div>
-                          <input
-                            type="text"
-                            value={group.name}
-                            onChange={(e) => updateGroup(group.id, { name: e.target.value })}
-                            onClick={(e) => e.stopPropagation()}
-                            draggable={false}
-                            onDragStart={(e) => e.stopPropagation()}
-                            className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
-                          />
+                          {editingGroupId === group.id ? (
+                            <input
+                              type="text"
+                              autoFocus
+                              value={group.name}
+                              onChange={(e) => updateGroup(group.id, { name: e.target.value })}
+                              onClick={(e) => e.stopPropagation()}
+                              draggable={false}
+                              onDragStart={(e) => e.stopPropagation()}
+                              onBlur={() => setEditingGroupId(null)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') setEditingGroupId(null);
+                              }}
+                              className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
+                            />
+                          ) : (
+                            <span 
+                              className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none"
+                            >
+                              {group.name}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
                           <button
-                            onClick={(e) => createNewDoc(e, group.id)}
+                            onClick={(e) => { e.stopPropagation(); createNewDoc(e, group.id); }}
                             className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
                             title="New doc in folder"
                           >
                             <Plus size={13} />
                           </button>
-                          <button
-                            onClick={(e) => deleteGroup(e, group.id)}
-                            className="p-1 text-[var(--color-text-muted)] hover:text-red-500 rounded"
-                            title="Ungroup folder"
-                          >
-                            <FolderMinus size={13} />
-                          </button>
+                          <div className="relative">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(groupMenuOpen === group.id ? null : group.id); }}
+                              className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
+                              title="More options"
+                            >
+                              <MoreHorizontal size={13} />
+                            </button>
+                            {groupMenuOpen === group.id && (
+                              <>
+                                <div className="fixed inset-0 z-[59]" onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(null); }} />
+                                <div className="absolute right-0 top-full mt-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100">
+                                  <button 
+                                    className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingGroupId(group.id);
+                                      setGroupMenuOpen(null);
+                                    }}
+                                  >
+                                    <Pencil size={14} /> Rename
+                                  </button>
+                                  <div className="h-px bg-[var(--color-border-primary)] my-1" />
+                                  <button 
+                                    className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setGroupMenuOpen(null);
+                                      deleteGroup(e, group.id);
+                                    }}
+                                  >
+                                    <FolderMinus size={14} /> Ungroup
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
                       
@@ -2485,7 +2577,7 @@ export default function App() {
       {/* Main Content Area */}
       <div
         className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${
-          isSidebarOpen ? "ml-64" : "ml-0"
+          isSidebarOpen ? "ml-64 print:ml-0" : "ml-0"
         }
 
                 `}
@@ -2553,11 +2645,16 @@ export default function App() {
             </div>
           </div>
         )}
-        <main className="w-full max-w-3xl mx-auto px-12 pt-24 pb-32 flex-grow">
+        <main className="w-full max-w-3xl mx-auto px-12 pt-24 pb-32 print:pt-0 print:pb-0 flex-grow bg-[var(--color-bg-primary)]">
+          {/* Print Logo */}
+          <div className="hidden print:flex mb-6 items-center gap-2">
+            <img src="/faviconlight.png" alt="Logo" className="w-5 h-5 object-contain" />
+            <span className="font-semibold text-[13px] text-[var(--color-text-muted)]">usewords.app</span>
+          </div>
           {" "}
-          {/* Title Field */}
-          <div className="flex items-start gap-3 mb-8 group">
-            <div className="relative" ref={emojiPickerRef}>
+          {/* Title Field / Header */}
+          <div className={`flex items-start gap-3 group mb-8 print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}>
+            <div className={`relative ${!activeDoc.emoji ? 'print:hidden' : ''}`} ref={emojiPickerRef}>
               <button
                 className="w-12 h-12 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
                 onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
@@ -2566,7 +2663,7 @@ export default function App() {
                 {activeDoc.emoji ? (
                   <span
                     key={activeDoc.emoji}
-                    className="animate-in zoom-in spin-in-12 duration-300 block leading-none"
+                    className="animate-in zoom-in spin-in-12 duration-300 block leading-none print:translate-y-1"
                   >
                     {" "}
                     {activeDoc.emoji}
@@ -2574,7 +2671,7 @@ export default function App() {
                 ) : (
                   <FileText
                     size={32}
-                    className="text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-muted)] transition-colors"
+                    className="text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-muted)] transition-colors print:hidden"
                   />
                 )}
               </button>{" "}
