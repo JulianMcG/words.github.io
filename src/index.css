@@ -53,6 +53,7 @@ body {
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -61,42 +62,54 @@ body {
 
 @media print {
   @page {
-    margin-top: 0;
-    margin-bottom: 2cm;
-    margin-left: 0;
-    margin-right: 0;
+    margin: 0;
   }
-  
+
   body {
     background-color: white !important;
     color: black !important;
     padding-top: 2cm !important;
-    padding-bottom: 0 !important;
+    padding-bottom: 2cm !important;
     padding-left: 2cm !important;
     padding-right: 2cm !important;
   }
 
   /* Hide the sidebar and overlays completely */
-  [data-sidebar], .hamburger-container, .share-container, .z-30, .z-40, .z-50 {
+  [data-sidebar],
+  .hamburger-container,
+  .share-container,
+  .z-30,
+  .z-40,
+  .z-50 {
     display: none !important;
   }
 
   /* The main content area should take full width */
   .flex-1 {
     overflow: visible !important;
+    display: block !important;
     height: auto !important;
+    min-height: 0 !important;
   }
 
-  .editor-content, [data-slate-editor] {
-    min-height: auto !important;
+  .editor-content,
+  [data-slate-editor] {
+    min-height: 0 !important;
     overflow: visible !important;
   }
 
-  #main, .App, html, body, #root, .h-screen, .h-full, .min-h-screen {
+  #main,
+  .App,
+  html,
+  body,
+  #root,
+  .h-screen,
+  .h-full,
+  .min-h-screen {
     overflow: visible !important;
     display: block !important;
     height: auto !important;
-    min-height: auto !important;
+    min-height: 0 !important;
     margin-left: 0 !important;
   }
 
