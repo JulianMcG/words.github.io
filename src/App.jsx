@@ -36,8 +36,12 @@ import {
   Printer,
   Pencil,
   Link,
-  Unlink
+  Unlink,
+  Cloud,
+  CloudOff,
+  LogOut
 } from "lucide-react";
+import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
 
 const EMOJIS = [
   "📄",
@@ -581,6 +585,31 @@ export default function App() {
   const [lockModal, setLockModal] = useState(null); // { mode: 'create' | 'unlock', docId }
   const [passcodeInput, setPasscodeInput] = useState('');
 
+  // Cloud Sync State
+  const [user, setUser] = useState(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [authModal, setAuthModal] = useState(false); // false, 'login', 'signup'
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [showSyncSuggestion, setShowSyncSuggestion] = useState(false);
+  const skipSyncRef = useRef(false);
+  
+  // We don't want to use state for the backups, otherwise they re-render when they shouldn't.
+  // We'll use refs, and initialize them from localStorage if they exist.
+  const localBackupDocsRef = useRef(() => {
+    const saved = localStorage.getItem("words_local_backup_docs");
+    return saved ? JSON.parse(saved) : null;
+  });
+  const localBackupGroupsRef = useRef(() => {
+    const saved = localStorage.getItem("words_local_backup_groups");
+    return saved ? JSON.parse(saved) : null;
+  });
+  const localBackupPasscodeRef = useRef(() => {
+    return localStorage.getItem("words_local_backup_passcode") || null;
+  });
+
   // Editor UI State
   const [slashState, setSlashState] = useState({
     isOpen: false,
@@ -712,31 +741,267 @@ export default function App() {
 
   useEffect(() => {
     docsRef.current = docs;
-    try {
-      localStorage.setItem("words_docs", JSON.stringify(docs));
-    } catch (error) {
-      console.warn(
-        "Local storage quota exceeded. The document is too large to save locally.",
-        error,
-      );
+    if (!user) {
+      try {
+        localStorage.setItem("words_docs", JSON.stringify(docs));
+      } catch (error) {
+        console.warn(
+          "Local storage quota exceeded. The document is too large to save locally.",
+          error,
+        );
+      }
     }
-  }, [docs]);
+  }, [docs, user]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("words_groups", JSON.stringify(groups));
-    } catch (error) {
-      console.warn("Failed to save groups to local storage.", error);
+    if (!user) {
+      try {
+        localStorage.setItem("words_groups", JSON.stringify(groups));
+      } catch (error) {
+        console.warn("Failed to save groups to local storage.", error);
+      }
     }
-  }, [groups]);
+  }, [groups, user]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("words_active_doc", activeDocId);
-    } catch (error) {
-      console.warn("Failed to save active doc state to local storage.", error);
+    if (!user) {
+      try {
+        localStorage.setItem("words_active_doc", activeDocId);
+      } catch (error) {
+        console.warn("Failed to save active doc state to local storage.", error);
+      }
     }
-  }, [activeDocId]);
+  }, [activeDocId, user]);
+
+  // Firebase Auth Listener - Handles Auth State Transitions (Login/Logout)
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setIsAuthLoading(false);
+      if (currentUser && !user) {
+        // Logging in. 
+        // 1. Snapshot the CURRENT local data and save it to the backup keys.
+        localBackupDocsRef.current = docs;
+        localBackupGroupsRef.current = groups;
+        localBackupPasscodeRef.current = lockPasscode;
+        
+        localStorage.setItem("words_local_backup_docs", JSON.stringify(docs));
+        localStorage.setItem("words_local_backup_groups", JSON.stringify(groups));
+        if (lockPasscode) {
+          localStorage.setItem("words_local_backup_passcode", lockPasscode);
+        } else {
+          localStorage.removeItem("words_local_backup_passcode");
+        }
+        
+      } else if (!currentUser && user) {
+        // Logging out.
+        // 1. Prevent sync from firing up to the cloud while we swap out the local state.
+        skipSyncRef.current = true;
+        
+        // 2. Load the backups we stored
+        const savedDocs = localStorage.getItem("words_local_backup_docs");
+        const savedGroups = localStorage.getItem("words_local_backup_groups");
+        const savedPasscode = localStorage.getItem("words_local_backup_passcode");
+        
+        const parsedDocs = savedDocs ? JSON.parse(savedDocs) : [];
+        const finalDocs = parsedDocs.length > 0 ? parsedDocs : [
+           { id: "1", title: "", content: "<p><br></p>", isPinned: false, emoji: null, hasCustomEmoji: false, groupId: null }
+        ];
+        
+        const parsedGroups = savedGroups ? JSON.parse(savedGroups) : [];
+        const nextId = finalDocs[0]?.id || "1";
+        
+        // 3. Set standard React state and synchronous refs to prevent flush race conditions
+        docsRef.current = finalDocs;
+        prevActiveDocIdRef.current = nextId;
+
+        setDocs(finalDocs);
+        setGroups(parsedGroups);
+        setLockPasscode(savedPasscode || null);
+        setActiveDocId(nextId);
+
+        // Instantly force the DOM to match the loaded state for snappiness
+        const docToLoad = finalDocs.find(d => d.id === nextId);
+        if (docToLoad && editorRef.current && titleRef.current) {
+           titleRef.current.innerText = docToLoad.title;
+           editorRef.current.innerHTML = docToLoad.content;
+        }
+        
+        // 4. Also immediately update the regular local storage keys so next refresh is correct
+        localStorage.setItem("words_docs", JSON.stringify(finalDocs));
+        localStorage.setItem("words_groups", JSON.stringify(parsedGroups));
+        if (savedPasscode) {
+          localStorage.setItem("words_lock_passcode", savedPasscode);
+        } else {
+          localStorage.removeItem("words_lock_passcode");
+        }
+        
+        // 5. Allow sync to operate normally again (which does nothing as !user)
+        setTimeout(() => { skipSyncRef.current = false; }, 100);
+      }
+      
+      setUser(currentUser);
+      if (currentUser) {
+        setAuthModal(false);
+      }
+    });
+    return () => unsubscribe();
+  }, [user, docs, groups, lockPasscode]);
+
+  // Sync Suggestion Logic
+  useEffect(() => {
+    if (user) return; // Already logged in
+    
+    // Suggest if they have more than 3 documents
+    if (docs.length >= 4) {
+       const hasDismissed = localStorage.getItem('words_dismissed_sync');
+       if (!hasDismissed) {
+         setShowSyncSuggestion(true);
+       }
+    }
+  }, [docs, user]);
+
+  // Two-way Sync with Firestore
+  useEffect(() => {
+    if (!user) return;
+    
+    // Subscribe to changes from the cloud.
+    const unsubscribe = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.docs && data.groups) {
+          skipSyncRef.current = true; // prevent the local useEffect from bouncing this right back
+          
+          docsRef.current = data.docs;
+          setDocs(data.docs);
+          setGroups(data.groups);
+          setLockPasscode(data.lockPasscode || null);
+          
+          let nextActiveId = data.activeDocId;
+          if (nextActiveId && data.docs.some(d => d.id === nextActiveId)) {
+            setActiveDocId(nextActiveId);
+          } else if (data.docs.length > 0) {
+            nextActiveId = data.docs[0].id;
+            setActiveDocId(nextActiveId);
+          }
+          
+          // Force immediate synchronous DOM update ONLY if the active doc actually changed from an external source or transition
+          if (nextActiveId && nextActiveId !== prevActiveDocIdRef.current) {
+             prevActiveDocIdRef.current = nextActiveId;
+             const activeDoc = data.docs.find(d => d.id === nextActiveId);
+             if (activeDoc && editorRef.current && titleRef.current) {
+                titleRef.current.innerText = activeDoc.title;
+                editorRef.current.innerHTML = activeDoc.content;
+             }
+          }
+          
+          // DO NOT WRITE TO LOCALSTORAGE HERE. We keep "words_docs" pure for the unauthenticated state.
+          
+          setTimeout(() => {
+             skipSyncRef.current = false;
+          }, 100);
+        }
+      } else {
+        // New user (document does not exist in Firestore).
+        // Transfer all existing local data to the cloud seamlessly.
+        skipSyncRef.current = true;
+        
+        // Grab exactly what is in the main local storage right now
+        const localDocs = JSON.parse(localStorage.getItem("words_docs") || "[]");
+        const localGroups = JSON.parse(localStorage.getItem("words_groups") || "[]");
+        const actId = localStorage.getItem("words_active_doc");
+        const lp = localStorage.getItem("words_lock_passcode");
+        
+        setDoc(doc(db, "users", user.uid), {
+          docs: localDocs.length > 0 ? localDocs : docsRef.current, // Fallback to current state if empty
+          groups: localGroups,
+          activeDocId: actId || activeDocId,
+          lockPasscode: lp || lockPasscode,
+          lastUpdated: new Date().toISOString()
+        }).then(() => {
+          skipSyncRef.current = false;
+        });
+      }
+    });
+    
+    return () => unsubscribe();
+  }, [user]);
+
+  // Sync to Firebase whenever local docs/groups change
+  useEffect(() => {
+    if (!user || skipSyncRef.current) return;
+    
+    const syncData = async () => {
+      try {
+        await setDoc(doc(db, "users", user.uid), {
+          docs: docsRef.current,
+          groups,
+          activeDocId,
+          lockPasscode,
+          lastUpdated: new Date().toISOString()
+        });
+      } catch (e) {
+        console.error("Error syncing to cloud:", e);
+      }
+    };
+    
+    const timeout = setTimeout(syncData, 500); // debounce sync
+    return () => clearTimeout(timeout);
+  }, [docs, groups, activeDocId, lockPasscode, user]);
+
+  const handleGoogleLogin = async () => {
+    try {
+      setAuthError('');
+      await signInWithPopup(auth, googleProvider);
+    } catch (e) {
+      setAuthError(e.message);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!authPassword) {
+      setAuthError('Please enter a new password above.');
+      return;
+    }
+    try {
+      setAuthError('');
+      const { updatePassword } = await import("firebase/auth");
+      await updatePassword(user, authPassword);
+      setAuthModal(false);
+      setAuthPassword('');
+      alert("Password updated successfully!");
+    } catch (e) {
+      setAuthError(e.message.replace('Firebase: ', ''));
+    }
+  };
+
+  const handleEmailAuth = async () => {
+    if (!authEmail || !authPassword) {
+      setAuthError('Email and password required');
+      return;
+    }
+    try {
+      setAuthError('');
+      await signInWithEmailAndPassword(auth, authEmail, authPassword);
+    } catch (e) {
+      if (e.code === 'auth/invalid-credential' || e.code === 'auth/user-not-found') {
+        try {
+          await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        } catch (createErr) {
+          if (createErr.code === 'auth/email-already-in-use') {
+            setAuthError('Incorrect password.');
+          } else {
+            setAuthError(createErr.message.replace('Firebase: ', ''));
+          }
+        }
+      } else {
+        setAuthError(e.message.replace('Firebase: ', ''));
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
 
   // Update tab title and favicon based on active document
   useEffect(() => {
@@ -847,14 +1112,14 @@ export default function App() {
   const syncContentToState = useCallback(() => {
     const newContent = editorRef.current?.innerHTML || "<p><br></p>";
     setDocs((prev) => {
+      const activeDoc = prev.find((d) => d.id === activeDocId);
+      if (activeDoc && activeDoc.content === newContent) {
+        return prev;
+      }
       const updatedDocs = prev.map((d) =>
         d.id === activeDocId ? { ...d, content: newContent } : d,
       );
-      const activeDoc = updatedDocs.find((d) => d.id === activeDocId);
-
-      const hasContent =
-        newContent !== "<p><br></p>" && newContent.trim() !== "";
-
+      docsRef.current = updatedDocs;
       return updatedDocs;
     });
   }, [activeDocId]);
@@ -1011,7 +1276,10 @@ export default function App() {
         }));
       }
     } else {
-      setSlashState((prev) => ({ ...prev, isOpen: false }));
+      setSlashState((prev) => {
+        if (!prev.isOpen) return prev;
+        return { ...prev, isOpen: false };
+      });
     }
   }, [syncContentToState]);
 
@@ -1393,18 +1661,31 @@ export default function App() {
   };
 
   const getCaretCoordinates = () => {
-    const selection = window.getSelection();
-    if (!selection || !selection.rangeCount) return null;
-    const range = selection.getRangeAt(0);
-    const rects = range.getClientRects();
-    if (rects.length > 0) return { x: rects[0].left, y: rects[0].bottom };
-
-    const node = selection.focusNode;
-    if (node && node.nodeType === Node.ELEMENT_NODE) {
-      const rect = node.getBoundingClientRect();
-      return { x: rect.left, y: rect.bottom };
+    let x = 0, y = 0;
+    const isSupported = typeof window.getSelection !== "undefined";
+    if (isSupported) {
+      const selection = window.getSelection();
+      if (selection.rangeCount !== 0) {
+        const range = selection.getRangeAt(0).cloneRange();
+        range.collapse(true);
+        const rect = range.getBoundingClientRect();
+        if (rect.x === 0 && rect.y === 0) {
+           const span = document.createElement("span");
+           span.appendChild(document.createTextNode("\u200b"));
+           range.insertNode(span);
+           const spanRect = span.getBoundingClientRect();
+           x = spanRect.left;
+           y = spanRect.bottom;
+           const spanParent = span.parentNode;
+           spanParent.removeChild(span);
+           spanParent.normalize();
+        } else {
+           x = rect.left;
+           y = rect.bottom;
+        }
+      }
     }
-    return null;
+    return { x, y };
   };
 
   const executeCommand = (command) => {
@@ -2613,7 +2894,17 @@ export default function App() {
               createNewDoc(e);
             }}
           >
-
+            {isAuthLoading ? (
+               <div className="px-3 py-2 space-y-3">
+                 {[1, 2, 3, 4, 5].map(i => (
+                   <div key={i} className="flex items-center gap-2">
+                     <div className="w-5 h-5 rounded-[4px] bg-[var(--color-bg-hover)] animate-pulse" />
+                     <div className="flex-1 h-3 rounded-[4px] bg-[var(--color-bg-hover)] animate-pulse opacity-60" />
+                   </div>
+                 ))}
+               </div>
+            ) : (
+            <>
             {/* Pinned Tabs (Icons Only) */}
             {pinnedDocs.length > 0 && (
               <div className="mb-4">
@@ -2843,12 +3134,56 @@ export default function App() {
                 {ungroupedDocs.map(renderDocItem)}
               </div>
 
-              {/* Drop padding so you can always drop at the very bottom */}
               <div className="h-24 w-full flex-shrink-0" data-sidebar-empty-zone onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
+            </div>
+            </>
+            )}
+            </div>
+            
+            {/* Cloud Sync Toggle */}
+            <div className="absolute bottom-4 left-4 z-40">
+              <button 
+                onClick={() => user ? setUserMenuOpen(!userMenuOpen) : setAuthModal('login')}
+                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
+                title={user ? "Cloud Sync Active" : "Enable Cloud Sync"}
+              >
+                {user ? <Cloud size={16} className={userMenuOpen ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"} /> : <CloudOff size={16} className={authModal ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"} />}
+              </button>
+
+              {userMenuOpen && user && (
+                <>
+                  <div className="fixed inset-0 z-[59]" onClick={() => setUserMenuOpen(false)} />
+                  <div className="absolute left-0 bottom-full mb-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-2 z-[60] min-w-[180px] animate-in fade-in zoom-in-95 duration-100">
+                    <div className="px-3 py-1.5 mb-1 border-b border-[var(--color-border-primary)]">
+                      <p className="text-[11px] font-semibold text-[var(--color-text-faint)] uppercase tracking-wider mb-0.5">Signed in as</p>
+                      <p className="text-[13px] text-[var(--color-text-primary)] truncate" title={user.email}>{user.email}</p>
+                    </div>
+                    {user.providerData.some(p => p.providerId === 'password') && (
+                      <button
+                        className="w-full text-left px-3 py-1.5 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        onClick={() => {
+                          setAuthModal('change_password');
+                          setUserMenuOpen(false);
+                        }}
+                      >
+                        Change Password
+                      </button>
+                    )}
+                    <button
+                      className="w-full text-left px-3 py-1.5 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-black/5 transition-colors"
+                      onClick={() => {
+                        handleLogout();
+                        setUserMenuOpen(false);
+                      }}
+                    >
+                      <LogOut size={14} /> Log out
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
-      </div>{" "}
       {/* Main Content Area */}
       <div
         className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${isSidebarOpen ? "ml-64 print:ml-0" : "ml-0"
@@ -3277,6 +3612,139 @@ export default function App() {
       {/* Click-away overlay for context menu */}
       {contextMenu && (
         <div className="fixed inset-0 z-[59]" onClick={() => setContextMenu(null)} />
+      )}
+
+      {/* Auth Modal */}
+      {authModal && (
+        <>
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] transition-opacity" onClick={() => setAuthModal(false)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[var(--color-bg-primary)] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-6 w-full max-w-[320px] z-[101] border border-[var(--color-border-primary)] animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start mb-6">
+              <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+                {authModal === 'change_password' ? 'Change Password' : 'Sync with Cloud'}
+              </h2>
+              <button onClick={() => { setAuthModal(false); setAuthError(''); setAuthPassword(''); }} className="text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md p-1 transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            
+            {authModal === 'change_password' ? (
+              <form onSubmit={(e) => { e.preventDefault(); handleChangePassword(); }} className="space-y-3 animate-in fade-in duration-200">
+                <p className="text-sm text-[var(--color-text-muted)] mb-4 text-center">
+                  Enter a new password below.
+                </p>
+                <input 
+                  type="password" 
+                  placeholder="New Password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-text-primary)] transition-colors"
+                  required
+                />
+                {authError && <p className="text-red-500 text-xs text-center">{authError}</p>}
+                <button 
+                  type="submit" 
+                  className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] py-2 rounded-lg text-sm font-medium hover:bg-[var(--color-bg-hover)] transition-colors"
+                >
+                  Update Password
+                </button>
+              </form>
+            ) : (
+              <>
+                <p className="text-sm text-[var(--color-text-muted)] mb-6 text-center">
+                  Back up your documents and access them from anywhere.
+                </p>
+
+                <button
+                  onClick={handleGoogleLogin}
+                  className="w-full flex items-center justify-center gap-2 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] py-2.5 px-4 rounded-lg mb-4 hover:opacity-90 transition-opacity shadow-sm font-medium text-sm"
+                >
+                  <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/></svg>
+                  Continue with Google
+                </button>
+                
+                {authModal === 'email' ? (
+                  <form onSubmit={(e) => { e.preventDefault(); handleEmailAuth(); }} className="space-y-3 animate-in fade-in duration-200">
+                    <input 
+                      type="email" 
+                      placeholder="Email address" 
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-text-primary)] transition-colors"
+                      required
+                    />
+                    <input 
+                      type="password" 
+                      placeholder="Password"
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-text-primary)] transition-colors"
+                      required
+                    />
+                    {authError && <p className="text-red-500 text-xs text-center">{authError}</p>}
+                    <button 
+                      type="submit" 
+                      className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] py-2 rounded-lg text-sm font-medium hover:bg-[var(--color-bg-hover)] transition-colors"
+                    >
+                      Continue
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    onClick={() => setAuthModal('email')}
+                    className="w-full bg-transparent border border-[var(--color-border-primary)] text-[var(--color-text-primary)] py-2.5 px-4 rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors shadow-sm font-medium text-sm"
+                  >
+                    Continue with Email
+                  </button>
+                )}
+              </>
+            )}
+            
+          </div>
+        </>
+      )}
+
+      {/* Sync Suggestion Popup */}
+      {showSyncSuggestion && (
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[90] animate-in slide-in-from-bottom-5">
+          <div className="flex justify-between items-start mb-2">
+            <h3 className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+              <Cloud size={16} className="text-[var(--color-text-primary)]" /> Back up your data
+            </h3>
+            <button 
+              onClick={() => {
+                setShowSyncSuggestion(false);
+                localStorage.setItem('words_dismissed_sync', 'true');
+              }} 
+              className="text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] p-1 rounded-md"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <p className="text-sm text-[var(--color-text-muted)] mb-4 leading-relaxed">
+            You've created a few documents! Consider enabling Cloud Sync so you don't lose your work.
+          </p>
+          <div className="flex flex-col gap-2">
+            <button 
+              onClick={() => {
+                setShowSyncSuggestion(false);
+                setAuthModal('login');
+              }}
+              className="w-full py-2 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] rounded-lg text-sm font-medium transition-opacity hover:opacity-90"
+            >
+              Enable Sync
+            </button>
+            <button 
+              onClick={() => {
+                setShowSyncSuggestion(false);
+                localStorage.setItem('words_dismissed_sync', 'true');
+              }}
+              className="w-full py-2 bg-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg text-sm font-medium transition-colors"
+            >
+              Maybe later
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
