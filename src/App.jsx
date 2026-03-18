@@ -41,7 +41,7 @@ import {
   CloudOff,
   LogOut
 } from "lucide-react";
-import { auth, db, googleProvider, signInWithRedirect, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
+import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
 
 const EMOJIS = [
   "📄",
@@ -948,13 +948,15 @@ export default function App() {
     return () => clearTimeout(timeout);
   }, [docs, groups, activeDocId, lockPasscode, user]);
 
-  const handleGoogleLogin = async () => {
-    try {
-      setAuthError('');
-      await signInWithRedirect(auth, googleProvider);
-    } catch (e) {
-      setAuthError(e.message);
-    }
+  const handleGoogleLogin = (e) => {
+    e.preventDefault();
+    signInWithPopup(auth, googleProvider)
+      .then(() => {
+        setAuthError('');
+      })
+      .catch((error) => {
+        setAuthError(error.message.replace('Firebase: ', ''));
+      });
   };
 
 
@@ -3605,7 +3607,12 @@ export default function App() {
               Back up your documents and access them from anywhere.
             </p>
 
+            {authError && authModal !== 'email' && (
+              <p className="text-red-500 text-xs text-center mb-4">{authError}</p>
+            )}
+
             <button
+              type="button"
               onClick={handleGoogleLogin}
               className="w-full flex items-center justify-center gap-2 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] py-2.5 px-4 rounded-lg mb-4 hover:opacity-90 transition-opacity shadow-sm font-medium text-sm"
             >
