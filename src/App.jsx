@@ -41,7 +41,7 @@ import {
   CloudOff,
   LogOut
 } from "lucide-react";
-import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
+import { auth, db, googleProvider, signInWithRedirect, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
 
 const EMOJIS = [
   "📄",
@@ -951,7 +951,7 @@ export default function App() {
   const handleGoogleLogin = async () => {
     try {
       setAuthError('');
-      await signInWithPopup(auth, googleProvider);
+      await signInWithRedirect(auth, googleProvider);
     } catch (e) {
       setAuthError(e.message);
     }
