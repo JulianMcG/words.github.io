@@ -41,7 +41,7 @@ import {
   CloudOff,
   LogOut
 } from "lucide-react";
-import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
+import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot, updatePassword } from "./firebase";
 
 const EMOJIS = [
   "📄",
@@ -964,7 +964,6 @@ export default function App() {
     }
     try {
       setAuthError('');
-      const { updatePassword } = await import("firebase/auth");
       await updatePassword(user, authPassword);
       setAuthModal(false);
       setAuthPassword('');
