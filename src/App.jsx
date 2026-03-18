@@ -34,7 +34,9 @@ import {
   X,
   Share,
   Printer,
-  Pencil
+  Pencil,
+  Link,
+  Unlink
 } from "lucide-react";
 
 const EMOJIS = [
@@ -370,7 +372,7 @@ const getEmojiForTitle = (title) => {
   };
 
   const words = t.match(/\b\w+\b/g) || [];
-  
+
   // Iterate backwards to prioritize trailing head nouns (the most important words)
   for (let i = words.length - 1; i >= 0; i--) {
     const word = words[i];
@@ -488,6 +490,31 @@ const COMMANDS = [
   },
 ];
 
+const fetchLinkPreviewData = async (url) => {
+  try {
+    const response = await fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`);
+    const data = await response.json();
+    if (data.status !== "success") return null;
+
+    const title = data.data.title || url;
+    const image = data.data.image?.url || data.data.logo?.url || '';
+    const description = data.data.description || '';
+    
+    let domain = '';
+    let displayUrl = url;
+    try {
+      const urlObj = new URL(url);
+      domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
+      displayUrl = `${urlObj.protocol}//${domain}${urlObj.pathname}${urlObj.search}`;
+    } catch(e) {}
+
+    return { title, image, description, domain, url: displayUrl };
+  } catch (error) {
+    console.error("Link preview fetch failed:", error);
+    return null;
+  }
+};
+
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
@@ -552,6 +579,15 @@ export default function App() {
     show: false,
     x: 0,
     y: 0,
+    showLinkInput: false,
+    linkUrl: "",
+    savedRange: null,
+  });
+  const [linkPopoverState, setLinkPopoverState] = useState({
+    show: false,
+    url: "",
+    x: 0,
+    y: 0,
   });
 
   const editorRef = useRef(null);
@@ -601,6 +637,30 @@ export default function App() {
   useEffect(() => {
     const handleSelectionChange = () => {
       const selection = window.getSelection();
+      
+      // Handle Link Popover
+      if (selection && selection.rangeCount > 0 && editorRef.current?.contains(selection.anchorNode)) {
+        let node = selection.focusNode;
+        if (node?.nodeType === 3) node = node.parentNode; // Get element if text node
+        
+        const anchor = node?.closest ? node.closest('a:not(.link-preview-card)') : null;
+        
+        if (anchor && anchor.href) {
+          const rect = anchor.getBoundingClientRect();
+          setLinkPopoverState({
+            show: true,
+            url: anchor.href,
+            x: rect.left + rect.width / 2,
+            y: rect.bottom + window.scrollY + 8, // Position below the link
+          });
+        } else {
+          setLinkPopoverState(prev => prev.show ? { ...prev, show: false } : prev);
+        }
+      } else {
+         setLinkPopoverState(prev => prev.show ? { ...prev, show: false } : prev);
+      }
+
+      // Handle Text Formatting Toolbar
       if (
         selection &&
         !selection.isCollapsed &&
@@ -608,15 +668,27 @@ export default function App() {
       ) {
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
-        setToolbarState({
+        
+        let node = selection.focusNode;
+        if (node?.nodeType === 3) node = node.parentNode;
+        const isLinkActive = !!(node?.closest && node.closest('a'));
+
+        setToolbarState((prev) => ({
+          ...prev,
           show: true,
           x: rect.left + rect.width / 2,
           y: rect.top - 8,
-        });
+          showLinkInput: false,
+          linkUrl: "",
+          isLinkActive,
+          savedRange: range,
+        }));
       } else {
-        setToolbarState((prev) =>
-          prev.show ? { ...prev, show: false } : prev,
-        );
+        setToolbarState((prev) => {
+          const isEditorClick = selection && editorRef.current?.contains(selection.anchorNode);
+          if (prev.showLinkInput && !isEditorClick) return prev; 
+          return prev.show ? { ...prev, show: false, showLinkInput: false } : prev;
+        });
       }
     };
     document.addEventListener("selectionchange", handleSelectionChange);
@@ -656,10 +728,10 @@ export default function App() {
   useEffect(() => {
     const activeDoc = docsRef.current.find(d => d.id === activeDocId);
     if (!activeDoc) return;
-    
+
     // Update tab title
     document.title = activeDoc.title || 'Untitled';
-    
+
     // Update favicon with emoji
     let link = document.querySelector("link[rel~='icon']");
     if (!link) {
@@ -667,7 +739,7 @@ export default function App() {
       link.rel = 'icon';
       document.head.appendChild(link);
     }
-    
+
     const setFavicon = () => {
       if (activeDoc.emoji) {
         const canvas = document.createElement('canvas');
@@ -684,9 +756,9 @@ export default function App() {
         link.href = isDark ? '/favicondark.png' : '/faviconlight.png';
       }
     };
-    
+
     setFavicon();
-    
+
     // Listen for theme changes to update favicon
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = () => setFavicon();
@@ -701,16 +773,16 @@ export default function App() {
         const currentDocs = docsRef.current.map((d) =>
           d.id === activeDocId
             ? {
-                ...d,
-                title: titleRef.current.innerText || "",
-                content: editorRef.current.innerHTML || "<p><br></p>",
-              }
+              ...d,
+              title: titleRef.current.innerText || "",
+              content: editorRef.current.innerHTML || "<p><br></p>",
+            }
             : d,
         );
         try {
           localStorage.setItem("words_docs", JSON.stringify(currentDocs));
           localStorage.setItem("words_active_doc", activeDocId);
-        } catch (e) {}
+        } catch (e) { }
       }
     };
     const handleVisibilityChange = () => {
@@ -729,7 +801,7 @@ export default function App() {
 
   const handleTitleInput = () => {
     const newTitle = titleRef.current?.innerText || "";
-    
+
     // Instantly sync the text typed to the document state
     setDocs((prev) =>
       prev.map((d) => (d.id === activeDocId ? { ...d, title: newTitle } : d))
@@ -746,7 +818,7 @@ export default function App() {
         prev.map((d) => {
           if (d.id !== activeDocId) return d;
           let nextEmoji = d.emoji;
-          
+
           if (!d.hasCustomEmoji) {
             const autoEmoji = getEmojiForTitle(newTitle);
             if (autoEmoji) nextEmoji = autoEmoji;
@@ -826,8 +898,76 @@ export default function App() {
               syncContentToState();
             }
           }
-        } catch (e) {}
+        } catch (e) { }
       }
+    }
+
+    // --- Link Preview Detection ---
+    const urlMatch = text.match(/(?:^|[\s\u00A0])(https?:\/\/[^\s\u00A0]+)[\s\u00A0]$/);
+    if (urlMatch) {
+      const url = urlMatch[1];
+      
+      const range = selection.getRangeAt(0);
+      
+      // Delete the typed URL + space
+      range.setStart(node, selection.focusOffset - url.length - 1);
+      range.deleteContents();
+
+      // Insert placeholder
+      const placeholderId = `link-preview-${Date.now()}`;
+      const placeholder = document.createElement("div");
+      placeholder.id = placeholderId;
+      placeholder.contentEditable = "false";
+      placeholder.className = "link-preview-loading";
+      
+      range.insertNode(placeholder);
+      
+      const space = document.createTextNode("\u00A0");
+      placeholder.after(space);
+      range.setStartAfter(space);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      
+      syncContentToState();
+
+      // Fetch asynchronously
+      fetchLinkPreviewData(url).then(preview => {
+        const el = document.getElementById(placeholderId);
+        if (!el) return;
+        
+        if (preview) {
+          el.outerHTML = `
+            <div class="link-preview-outer" contenteditable="false">
+              <a href="${preview.url}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
+                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" />` : ''}
+                <div class="link-preview-content">
+                  <div class="link-preview-title">${preview.title}</div>
+                  <div class="link-preview-domain">${preview.domain}</div>
+                </div>
+              </a>
+              <button class="link-remove-btn" contenteditable="false" title="Convert to plain link" data-url="${preview.url}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+            </div>
+          `;
+        } else {
+          // If fetch fails, replace with simple text link
+          const link = document.createElement("a");
+          link.href = url;
+          link.textContent = url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.style.color = "var(--color-accent)";
+          link.style.textDecoration = "underline";
+          link.style.cursor = "pointer";
+          el.parentNode.replaceChild(link, el);
+        }
+        syncContentToState();
+      });
+      return;
     }
 
     // --- Slash command trigger ---
@@ -863,15 +1003,15 @@ export default function App() {
       hasCustomEmoji: false,
       groupId: targetGroupId,
     };
-    
+
     const newDocs = [newDoc, ...docsRef.current];
     docsRef.current = newDocs;
     setDocs(newDocs);
-    
+
     prevActiveDocIdRef.current = newId;
     setActiveDocId(newId);
     setSelectedDocIds([newId]);
-    
+
     // Load the new doc into the editor directly
     if (titleRef.current) titleRef.current.innerText = "";
     if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
@@ -886,10 +1026,10 @@ export default function App() {
       isCollapsed: false,
     };
     setGroups(prev => [newGroup, ...prev]);
-    
+
     // If docs are selected, move them to the new group
     if (selectedDocIds.length > 0) {
-      const newDocs = docsRef.current.map(d => 
+      const newDocs = docsRef.current.map(d =>
         selectedDocIds.includes(d.id) ? { ...d, groupId: newGroupId } : d
       );
       docsRef.current = newDocs;
@@ -901,7 +1041,7 @@ export default function App() {
   const updateGroup = (id, updates) => {
     setGroups(prev => prev.map(g => g.id === id ? { ...g, ...updates } : g));
   };
-  
+
   const deleteGroup = (e, id) => {
     e.stopPropagation();
     // Move all docs inside this group to no group
@@ -950,7 +1090,7 @@ export default function App() {
   const toggleLockDoc = (docId) => {
     const doc = docsRef.current.find(d => d.id === docId);
     if (!doc) return;
-    
+
     if (doc.isLocked) {
       // Unlock: prompt for passcode
       setLockModal({ mode: 'unlock', docId, action: 'toggle' });
@@ -972,7 +1112,7 @@ export default function App() {
   const handlePasscodeSubmit = (code) => {
     const pin = code || passcodeInput;
     if (pin.length !== 4 || !/^\d{4}$/.test(pin)) return;
-    
+
     if (lockModal.mode === 'create') {
       // Creating first passcode
       localStorage.setItem('words_lock_passcode', pin);
@@ -1020,7 +1160,7 @@ export default function App() {
       y: rect.top,
     });
   };
-  
+
   const handleDocClick = (e, id) => {
     // Close context menu on any click
     setContextMenu(null);
@@ -1039,12 +1179,12 @@ export default function App() {
       // Simple range selection: select everything between last active and current
       const lastSelectedIdx = docs.findIndex(d => d.id === activeDocId);
       const currentIdx = docs.findIndex(d => d.id === id);
-      
+
       if (lastSelectedIdx !== -1 && currentIdx !== -1) {
         const start = Math.min(lastSelectedIdx, currentIdx);
         const end = Math.max(lastSelectedIdx, currentIdx);
         const rangeIds = docs.slice(start, end + 1).map(d => d.id);
-        
+
         // Add rangeIds to existing selection, making sure not to duplicate
         setSelectedDocIds(prev => [...new Set([...prev, ...rangeIds])]);
       }
@@ -1072,7 +1212,7 @@ export default function App() {
   const handleDragStart = (e, type, id) => {
     e.dataTransfer.effectAllowed = "move";
     setDraggedItem({ type, id });
-    
+
     // If dragging a doc that isn't selected, select only it
     // But don't switch to locked docs (would bypass passcode)
     if (type === 'doc' && !selectedDocIds.includes(id)) {
@@ -1082,7 +1222,7 @@ export default function App() {
         setActiveDocId(id);
       }
     }
-    
+
     // Custom drag ghost
     if (type === 'doc' && selectedDocIds.length > 1) {
       const ghost = document.createElement("div");
@@ -1180,10 +1320,10 @@ export default function App() {
         if (idsToMove.includes(targetDocId)) return prev; // Don't drop onto itself
 
         let newDocs = prev.filter(d => !idsToMove.includes(d.id)); // Remove dragged items
-        
+
         const targetIdx = newDocs.findIndex(d => d.id === targetDocId);
         if (targetIdx === -1) return prev;
-        
+
         const targetDoc = newDocs[targetIdx];
         const targetGroupId = targetDoc.groupId;
 
@@ -1198,11 +1338,11 @@ export default function App() {
         return newDocs;
       });
     } else if (draggedItem.type === 'group') {
-       // Group reordering logic if needed
+      // Group reordering logic if needed
     }
     setDraggedItem(null);
   };
-  
+
   const handleDropOnSidebarRoot = (e) => {
     e.preventDefault();
     setDragTarget(null);
@@ -1353,6 +1493,32 @@ export default function App() {
 
   // --- Editor Wide Interactivity ---
   const handleEditorMouseDown = (e) => {
+    if (e.target.closest(".link-remove-btn")) {
+      e.preventDefault();
+      const btn = e.target.closest(".link-remove-btn");
+      const url = btn.getAttribute("data-url");
+      const wrapper = e.target.closest(".link-preview-outer");
+      if (wrapper) {
+        // Create a plain span that looks like a link or standard slate text
+        // Slate might overwrite standard <a> tags if not configured correctly,
+        // but since we rely on `contenteditable="false"`, an <a> tag is fine.
+        const link = document.createElement("a");
+        link.href = url;
+        link.textContent = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        // Ensure it looks like a standard hyperlink within the editor
+        link.style.color = "var(--color-accent)";
+        link.style.textDecoration = "underline";
+        link.style.cursor = "pointer";
+        
+        wrapper.parentNode.replaceChild(link, wrapper);
+        
+        syncContentToState();
+      }
+      return;
+    }
+
     if (e.target.closest(".image-delete-btn")) {
       e.preventDefault();
       const wrapper = e.target.closest(".image-outer") || e.target.closest(".image-wrapper");
@@ -1455,6 +1621,75 @@ export default function App() {
 
     // Handle HTML paste: strip external font/color styles so content uses our native fonts
     const html = e.clipboardData.getData('text/html');
+
+    // Handle Link paste
+    const textData = e.clipboardData.getData('text/plain');
+    const isExactUrl = /^https?:\/\/[^\s]+$/.test(textData.trim());
+    
+    if (isExactUrl) {
+      e.preventDefault();
+      const url = textData.trim();
+      
+      const selection = window.getSelection();
+      if (!selection.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      
+      const placeholderId = `link-preview-${Date.now()}`;
+      const placeholder = document.createElement("div");
+      placeholder.id = placeholderId;
+      placeholder.contentEditable = "false";
+      placeholder.className = "link-preview-loading";
+      
+      range.deleteContents();
+      range.insertNode(placeholder);
+      
+      const space = document.createTextNode("\u00A0");
+      placeholder.after(space);
+      range.setStartAfter(space);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      
+      syncContentToState();
+
+      fetchLinkPreviewData(url).then(preview => {
+        const el = document.getElementById(placeholderId);
+        if (!el) return;
+        
+        if (preview) {
+          el.outerHTML = `
+            <div class="link-preview-outer" contenteditable="false">
+              <a href="${preview.url}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
+                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" />` : ''}
+                <div class="link-preview-content">
+                  <div class="link-preview-title">${preview.title}</div>
+                  <div class="link-preview-domain">${preview.domain}</div>
+                </div>
+              </a>
+              <button class="link-remove-btn" contenteditable="false" title="Convert to plain link" data-url="${preview.url}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+            </div>
+          `;
+        } else {
+          // Fallback
+          const link = document.createElement("a");
+          link.href = url;
+          link.textContent = url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.style.color = "var(--color-accent)";
+          link.style.textDecoration = "underline";
+          link.style.cursor = "pointer";
+          el.parentNode.replaceChild(link, el);
+        }
+        syncContentToState();
+      });
+      return;
+    }
+
     if (html) {
       e.preventDefault();
       const container = document.createElement('div');
@@ -1828,74 +2063,74 @@ export default function App() {
     const isSelected = selectedDocIds.includes(doc.id);
     const isActive = activeDocId === doc.id;
     return (
-    <div
-      key={doc.id}
-      draggable
-      onDragStart={(e) => handleDragStart(e, 'doc', doc.id)}
-      onDragEnd={handleDragEnd}
-      onDragOver={(e) => handleSidebarDragOver(e, doc.id, 'doc')}
-      onDragLeave={handleDragLeave}
-      onDrop={(e) => handleDropOnDoc(e, doc.id)}
-      onClick={(e) => handleDocClick(e, doc.id)}
-      className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${
-        isSelected
-          ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium" 
-          : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-      }`}
-    >
-      {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
-        <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
-      )}
       <div
-        ref={(el) => {
-          if (el) {
-            const isOverflowing = el.scrollWidth > el.clientWidth;
-            if (isOverflowing) {
-              el.classList.add('sidebar-doc-text');
-            } else {
-              el.classList.remove('sidebar-doc-text');
-            }
-          }
-        }}
-        className="flex items-center gap-2.5 flex-1 min-w-0 overflow-hidden"
+        key={doc.id}
+        draggable
+        onDragStart={(e) => handleDragStart(e, 'doc', doc.id)}
+        onDragEnd={handleDragEnd}
+        onDragOver={(e) => handleSidebarDragOver(e, doc.id, 'doc')}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => handleDropOnDoc(e, doc.id)}
+        onClick={(e) => handleDocClick(e, doc.id)}
+        className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${isSelected
+          ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
+          : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+          }`}
       >
-        <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
-          {doc.isLocked ? (
-            <Lock
-              size={16}
-              className="text-[var(--color-icon-muted)]"
-            />
-          ) : doc.emoji ? (
-            <span className="animate-in zoom-in spin-in-12 duration-300">
-              {doc.emoji}
-            </span>
-          ) : (
-            <FileText
-              size={16}
-              className={
-                isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"
+        {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+        )}
+        <div
+          ref={(el) => {
+            if (el) {
+              const isOverflowing = el.scrollWidth > el.clientWidth;
+              if (isOverflowing) {
+                el.classList.add('sidebar-doc-text');
+              } else {
+                el.classList.remove('sidebar-doc-text');
               }
-            />
-          )}
-        </div>
-        <span className="text-[14px] select-none whitespace-nowrap">
-          {doc.title || "Untitled"}
-        </span>
-      </div>
-      <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-        <button
-          onClick={(e) => handleContextMenu(e, doc.id)}
-          className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
-          title="More options"
+            }
+          }}
+          className="flex items-center gap-2.5 flex-1 min-w-0 overflow-hidden"
         >
-          <MoreHorizontal size={14} />
-        </button>
+          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+            {doc.isLocked ? (
+              <Lock
+                size={16}
+                className="text-[var(--color-icon-muted)]"
+              />
+            ) : doc.emoji ? (
+              <span className="animate-in zoom-in spin-in-12 duration-300">
+                {doc.emoji}
+              </span>
+            ) : (
+              <FileText
+                size={16}
+                className={
+                  isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"
+                }
+              />
+            )}
+          </div>
+          <span className="text-[14px] select-none whitespace-nowrap">
+            {doc.title || "Untitled"}
+          </span>
+        </div>
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+          <button
+            onClick={(e) => handleContextMenu(e, doc.id)}
+            className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
+            title="More options"
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        </div>
+        {dragTarget?.id === doc.id && dragTarget?.position === 'after' && (
+          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+        )}
       </div>
-      {dragTarget?.id === doc.id && dragTarget?.position === 'after' && (
-        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
-      )}
-    </div>
-  )};
+    )
+  };
 
   return (
     <div className="flex h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans selection:bg-[#2383e233] overflow-hidden relative w-full">
@@ -2029,12 +2264,23 @@ export default function App() {
                 margin-bottom: 0.25em;
               }
 
+              .editor-content a {
+                color: var(--color-accent);
+                text-decoration: underline;
+                cursor: pointer;
+              }
+
               .editor-content blockquote {
                 border-left: 3px solid var(--color-text-primary);
                 padding-left: 0.9em;
                 margin-top: 0.8em;
                 margin-bottom: 0.8em;
                 font-size: 1rem;
+              }
+              
+              .editor-content blockquote p {
+                margin-top: 0;
+                margin-bottom: 0;
               }
 
               .editor-content span[style*="background-color"] {
@@ -2241,7 +2487,7 @@ export default function App() {
             <>
               <div className="fixed inset-0 z-[39]" onClick={() => setShareMenuOpen(false)} />
               <div className="absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-48 animate-in fade-in zoom-in-95 duration-100">
-                <button 
+                <button
                   className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => {
                     setShareMenuOpen(false);
@@ -2251,7 +2497,7 @@ export default function App() {
                   <Share size={14} /> Export to PDF
                 </button>
                 <div className="h-px bg-[var(--color-border-primary)] my-1" />
-                <button 
+                <button
                   className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => {
                     setShareMenuOpen(false);
@@ -2267,11 +2513,10 @@ export default function App() {
       </div>
       {/* Hamburger Menu */}
       <div
-        className={`absolute top-4 left-4 z-30 transition-opacity duration-300 ${
-          !isSidebarOpen && !isSidebarPeeking
-            ? "opacity-100"
-            : "opacity-0 pointer-events-none"
-        }
+        className={`absolute top-4 left-4 z-30 transition-opacity duration-300 ${!isSidebarOpen && !isSidebarPeeking
+          ? "opacity-100"
+          : "opacity-0 pointer-events-none"
+          }
 
                 `}
       >
@@ -2287,17 +2532,15 @@ export default function App() {
         onMouseLeave={() => {
           if (!isSidebarOpen) setIsSidebarPeeking(false);
         }}
-        className={`absolute top-0 bottom-0 left-0 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border-primary)] flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] z-50 overflow-hidden w-64 ${
-          isSidebarOpen || isSidebarPeeking
-            ? "translate-x-0"
-            : "-translate-x-full"
-        }
+        className={`absolute top-0 bottom-0 left-0 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border-primary)] flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] z-50 overflow-hidden w-64 ${isSidebarOpen || isSidebarPeeking
+          ? "translate-x-0"
+          : "-translate-x-full"
+          }
 
-                ${
-                  isSidebarPeeking && !isSidebarOpen
-                    ? "shadow-[4px_0_24px_rgba(0,0,0,0.1)]"
-                    : "shadow-none"
-                }
+                ${isSidebarPeeking && !isSidebarOpen
+            ? "shadow-[4px_0_24px_rgba(0,0,0,0.1)]"
+            : "shadow-none"
+          }
 
                 `}
       >
@@ -2327,7 +2570,7 @@ export default function App() {
               {isSidebarPeeking ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
             </button>
           </div>
-          <div 
+          <div
             className="flex-1 overflow-y-auto no-scrollbar pb-6 mt-2 flex flex-col h-full px-2"
             onDragOver={handleSidebarDragOver}
             onDrop={handleDropOnSidebarRoot}
@@ -2347,42 +2590,42 @@ export default function App() {
                     const isActive = activeDocId === doc.id;
                     const isSelected = selectedDocIds.includes(doc.id);
                     return (
-                    <div
-                      key={doc.id}
-                      data-sidebar-item
-                      onClick={(e) => handleDocClick(e, doc.id)}
-                      className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${
-                        isSelected || isActive
+                      <div
+                        key={doc.id}
+                        data-sidebar-item
+                        onClick={(e) => handleDocClick(e, doc.id)}
+                        className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${isSelected || isActive
                           ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
                           : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
-                      }`}
-                      title={doc.title || "Untitled"}
-                    >
-                      <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
-                        {doc.emoji ? (
-                          <span className="animate-in zoom-in spin-in-12 duration-300">
-                            {doc.emoji}
-                          </span>
-                        ) : (
-                          <FileText
-                            size={20}
-                            className={
-                              isSelected || isActive
-                                ? "text-[var(--color-text-muted)]"
-                                : "text-[var(--color-icon-muted)]"
-                            }
-                          />
-                        )}
-                      </div>
-                      <button
-                        onClick={(e) => togglePinDoc(e, doc.id)}
-                        className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
-                        title="Unpin"
+                          }`}
+                        title={doc.title || "Untitled"}
                       >
-                        <PinOff size={10} />
-                      </button>
-                    </div>
-                  )})}
+                        <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
+                          {doc.emoji ? (
+                            <span className="animate-in zoom-in spin-in-12 duration-300">
+                              {doc.emoji}
+                            </span>
+                          ) : (
+                            <FileText
+                              size={20}
+                              className={
+                                isSelected || isActive
+                                  ? "text-[var(--color-text-muted)]"
+                                  : "text-[var(--color-icon-muted)]"
+                              }
+                            />
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => togglePinDoc(e, doc.id)}
+                          className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
+                          title="Unpin"
+                        >
+                          <PinOff size={10} />
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -2391,7 +2634,7 @@ export default function App() {
             <div className="flex-1 flex flex-col">
               <div className="space-y-[1px] mb-2">
                 {selectedDocIds.length > 1 ? (
-                  <div 
+                  <div
                     data-sidebar-item
                     onClick={createGroup}
                     className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
@@ -2406,7 +2649,7 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div 
+                  <div
                     data-sidebar-item
                     onClick={createNewDoc}
                     className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
@@ -2427,8 +2670,8 @@ export default function App() {
                 {groups.map((group) => {
                   const groupDocs = regularDocs.filter((d) => d.groupId === group.id);
                   return (
-                    <div 
-                      key={group.id} 
+                    <div
+                      key={group.id}
                       className="flex flex-col relative"
                       onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
                       onDrop={(e) => handleDropOnGroup(e, group.id)}
@@ -2439,7 +2682,7 @@ export default function App() {
                       {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'after' && (
                         <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
                       )}
-                      <div 
+                      <div
                         className="group relative flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
                         style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
                         draggable
@@ -2455,14 +2698,14 @@ export default function App() {
                         onDragEnd={handleDragEnd}
                         onDragLeave={handleDragLeave}
                       >
-                        <div 
+                        <div
                           className="flex items-center gap-1.5 flex-1 cursor-pointer overflow-hidden"
                           onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
                         >
                           <button className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)]">
                             {group.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                           </button>
-                          <div 
+                          <div
                             className="flex-shrink-0 cursor-pointer transition-transform hover:scale-110"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -2490,7 +2733,7 @@ export default function App() {
                               className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
                             />
                           ) : (
-                            <span 
+                            <span
                               className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none"
                             >
                               {group.name}
@@ -2517,7 +2760,7 @@ export default function App() {
                               <>
                                 <div className="fixed inset-0 z-[59]" onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(null); }} />
                                 <div className="absolute right-0 top-full mt-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100">
-                                  <button 
+                                  <button
                                     className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -2528,7 +2771,7 @@ export default function App() {
                                     <Pencil size={14} /> Rename
                                   </button>
                                   <div className="h-px bg-[var(--color-border-primary)] my-1" />
-                                  <button 
+                                  <button
                                     className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -2544,14 +2787,14 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      
+
                       {/* Docs mapping inside this group */}
                       {!group.isCollapsed && groupDocs.length > 0 && (
                         <div className="pl-4 pr-1 mt-0.5 space-y-[1px]">
                           {groupDocs.map(renderDocItem)}
                         </div>
                       )}
-                      
+
                       {/* Empty state for group */}
                       {!group.isCollapsed && groupDocs.length === 0 && (
                         <div className="pl-8 py-2 text-[12px] text-[var(--color-text-faint)] italic select-none">
@@ -2567,7 +2810,7 @@ export default function App() {
               <div className="space-y-[1px]">
                 {ungroupedDocs.map(renderDocItem)}
               </div>
-              
+
               {/* Drop padding so you can always drop at the very bottom */}
               <div className="h-24 w-full flex-shrink-0" data-sidebar-empty-zone onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
             </div>
@@ -2576,9 +2819,8 @@ export default function App() {
       </div>{" "}
       {/* Main Content Area */}
       <div
-        className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${
-          isSidebarOpen ? "ml-64 print:ml-0" : "ml-0"
-        }
+        className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${isSidebarOpen ? "ml-64 print:ml-0" : "ml-0"
+          }
 
                 `}
         onClick={() => {
@@ -2595,7 +2837,7 @@ export default function App() {
                 {lockModal.mode === 'create' ? 'Create a passcode' : 'Locked Document'}
               </p>
               <p className="text-[12px] text-[var(--color-text-faint)] text-center mb-8">
-                {lockModal.mode === 'create' 
+                {lockModal.mode === 'create'
                   ? 'This will be used for all locked documents'
                   : 'Enter passcode to continue'}
               </p>
@@ -2603,11 +2845,10 @@ export default function App() {
                 {[0, 1, 2, 3].map((i) => (
                   <div
                     key={i}
-                    className={`w-4 h-4 rounded-full transition-all pointer-events-none ${
-                      passcodeInput.length > i
-                        ? 'bg-[var(--color-text-primary)] scale-110'
-                        : 'bg-[var(--color-border-primary)]'
-                    }`}
+                    className={`w-4 h-4 rounded-full transition-all pointer-events-none ${passcodeInput.length > i
+                      ? 'bg-[var(--color-text-primary)] scale-110'
+                      : 'bg-[var(--color-border-primary)]'
+                      }`}
                   />
                 ))}
                 <input
@@ -2687,10 +2928,10 @@ export default function App() {
                           prev.map((d) =>
                             d.id === activeDocId
                               ? {
-                                  ...d,
-                                  emoji,
-                                  hasCustomEmoji: true,
-                                }
+                                ...d,
+                                emoji,
+                                hasCustomEmoji: true,
+                              }
                               : d,
                           ),
                         );
@@ -2736,16 +2977,58 @@ export default function App() {
             onPaste={handlePaste}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
-            onClick={() =>
+            onClick={(e) => {
               setSlashState((prev) => ({
                 ...prev,
                 isOpen: false,
-              }))
-            }
+              }));
+              // Hide popover if clicking outside of a link
+              if (e.target.tagName !== "A") {
+                setLinkPopoverState(prev => prev.show ? { ...prev, show: false } : prev);
+              }
+            }}
           ></div>
         </main>
       </div>{" "}
       {/* Floating Formatting Toolbar */}
+      {linkPopoverState.show && (
+        <div
+          className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-3 py-2 flex items-center gap-2 animate-in fade-in zoom-in duration-100"
+          style={{
+            top: `${linkPopoverState.y}px`,
+            left: `${linkPopoverState.x}px`,
+            transform: "translate(-50%, 0)",
+          }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {linkPopoverState.url && (() => {
+            try {
+              const urlObj = new URL(linkPopoverState.url);
+              return (
+                <img
+                  src={`https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`}
+                  alt=""
+                  className="w-4 h-4 rounded-sm"
+                  onError={(e) => e.target.style.display = 'none'}
+                />
+              );
+            } catch(e) { return null; }
+          })()}
+          <a
+            href={linkPopoverState.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-[var(--color-accent)] hover:underline truncate max-w-[200px]"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey) return; // Let default new tab behavior happen
+              e.preventDefault();
+              window.open(linkPopoverState.url, "_blank");
+            }}
+          >
+            {linkPopoverState.url}
+          </a>
+        </div>
+      )}
       {toolbarState.show && (
         <div
           className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-1 py-1 flex items-center gap-1 animate-in fade-in zoom-in duration-100"
@@ -2754,50 +3037,111 @@ export default function App() {
             left: `${toolbarState.x}px`,
             transform: "translate(-50%, -100%)",
           }}
-          onMouseDown={(e) => e.preventDefault()}
+          onMouseDown={(e) => {
+            if (!e.target.closest('input')) e.preventDefault();
+          }}
         >
-          {" "}
-          <button
-            onClick={(e) => formatText(e, "bold")}
-            className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-          >
-            <Bold size={15} strokeWidth={2.5} />
-          </button>{" "}
-          <button
-            onClick={(e) => formatText(e, "italic")}
-            className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-          >
-            <Italic size={15} strokeWidth={2.5} />
-          </button>{" "}
-          <button
-            onClick={(e) => formatText(e, "strikeThrough")}
-            className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-          >
-            <Strikethrough size={15} strokeWidth={2.5} />
-          </button>{" "}
-          <div className="w-px h-4 bg-gray-200 mx-1"></div>{" "}
-          <button
-            onClick={(e) => {
-              const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-              const targetColor = isDark ? '#716215' : '#fef08a';
-              const currentColor = document.queryCommandValue('backColor');
-              
-              const isHighlighted = currentColor && (
-                currentColor.replace(/\s+/g, '').toLowerCase() === '#fef08a' ||
-                currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(254,240,138)' ||
-                currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(254,240,138,1)' ||
-                currentColor.replace(/\s+/g, '').toLowerCase() === '#716215' ||
-                currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(113,98,21)' ||
-                currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(113,98,21,1)'
-              );
-              
-              formatText(e, "backColor", isHighlighted ? "transparent" : targetColor);
-            }}
-            className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-            title="Highlight"
-          >
-            <Highlighter size={15} strokeWidth={2.5} />
-          </button>{" "}
+          {toolbarState.showLinkInput ? (
+            <div className="flex items-center gap-2 px-2 py-1">
+              <input
+                autoFocus
+                type="text"
+                value={toolbarState.linkUrl}
+                onChange={(e) => setToolbarState(p => ({ ...p, linkUrl: e.target.value }))}
+                placeholder="Paste or type a link..."
+                className="bg-transparent text-sm text-[var(--color-text-primary)] outline-none min-w-[200px]"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (toolbarState.savedRange) {
+                       const sel = window.getSelection();
+                       sel.removeAllRanges();
+                       sel.addRange(toolbarState.savedRange);
+                       let url = toolbarState.linkUrl;
+                       if (url && !url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+                       if (url) {
+                         document.execCommand('createLink', false, url);
+                         syncContentToState();
+                       }
+                       setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
+                    }
+                  } else if (e.key === 'Escape') {
+                     setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
+                  }
+                }}
+              />
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={(e) => formatText(e, "bold")}
+                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                title="Bold"
+              >
+                <Bold size={15} strokeWidth={2.5} />
+              </button>
+              <button
+                onClick={(e) => formatText(e, "italic")}
+                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                title="Italic"
+              >
+                <Italic size={15} strokeWidth={2.5} />
+              </button>
+              <button
+                onClick={(e) => formatText(e, "strikeThrough")}
+                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                title="Strikethrough"
+              >
+                <Strikethrough size={15} strokeWidth={2.5} />
+              </button>
+              {toolbarState.isLinkActive ? (
+                <button
+                  onClick={(e) => {
+                    document.execCommand('unlink', false, null);
+                    syncContentToState();
+                    setToolbarState(p => ({ ...p, show: false, showLinkInput: false, isLinkActive: false }));
+                  }}
+                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  title="Unlink"
+                >
+                  <Unlink size={15} strokeWidth={2.5} />
+                </button>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    setToolbarState(p => ({ ...p, showLinkInput: true }));
+                  }}
+                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  title="Insert Link"
+                >
+                  <Link size={15} strokeWidth={2.5} />
+                </button>
+              )}
+              <div className="w-px h-4 bg-gray-200 mx-1"></div>
+              <button
+                onClick={(e) => {
+                  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                  const targetColor = isDark ? '#716215' : '#fef08a';
+                  const currentColor = document.queryCommandValue('backColor');
+
+                  const isHighlighted = currentColor && (
+                    currentColor.replace(/\s+/g, '').toLowerCase() === '#fef08a' ||
+                    currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(254,240,138)' ||
+                    currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(254,240,138,1)' ||
+                    currentColor.replace(/\s+/g, '').toLowerCase() === '#716215' ||
+                    currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(113,98,21)' ||
+                    currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(113,98,21,1)'
+                  );
+
+                  formatText(e, "backColor", isHighlighted ? "transparent" : targetColor);
+                }}
+                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                title="Highlight"
+              >
+                <Highlighter size={15} strokeWidth={2.5} />
+              </button>
+            </>
+          )}
         </div>
       )}
       {/* Unified Slash Command Menu Popover */}
@@ -2826,9 +3170,8 @@ export default function App() {
               return (
                 <button
                   key={cmd.id}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-3 transition-colors ${
-                    isActive ? "bg-[var(--color-bg-hover)]" : "hover:bg-black/[0.02]"
-                  }
+                  className={`w-full text-left px-3 py-2 flex items-center gap-3 transition-colors ${isActive ? "bg-[var(--color-bg-hover)]" : "hover:bg-black/[0.02]"
+                    }
 
                             `}
                   onClick={() => executeCommand(cmd)}
@@ -2841,11 +3184,10 @@ export default function App() {
                 >
                   {" "}
                   <div
-                    className={`p-1.5 rounded-md shadow-sm border ${
-                      isActive
-                        ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]"
-                        : "bg-[var(--color-bg-secondary)] border-[var(--color-border-primary)]"
-                    }
+                    className={`p-1.5 rounded-md shadow-sm border ${isActive
+                      ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]"
+                      : "bg-[var(--color-bg-secondary)] border-[var(--color-border-primary)]"
+                      }
 
                           `}
                   >
