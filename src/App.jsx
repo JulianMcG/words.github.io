@@ -492,14 +492,28 @@ const COMMANDS = [
 
 const fetchLinkPreviewData = async (url) => {
   try {
-    const response = await fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`);
-    const data = await response.json();
-    if (data.status !== "success") return null;
-
-    const title = data.data.title || url;
-    const image = data.data.image?.url || data.data.logo?.url || '';
-    const description = data.data.description || '';
+    const response = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(url)}`);
+    const html = await response.text();
     
+    // Parse the HTML
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+
+    // Extract standard and Open Graph tags
+    let title = doc.querySelector('meta[property="og:title"]')?.content;
+    if (!title) title = doc.querySelector('meta[name="twitter:title"]')?.content;
+    if (!title) title = doc.title;
+    if (!title) title = url;
+
+    let image = doc.querySelector('meta[property="og:image"]')?.content;
+    if (!image) image = doc.querySelector('meta[name="twitter:image"]')?.content;
+    if (!image) image = '';
+
+    let description = doc.querySelector('meta[property="og:description"]')?.content;
+    if (!description) description = doc.querySelector('meta[name="twitter:description"]')?.content;
+    if (!description) description = doc.querySelector('meta[name="description"]')?.content;
+    if (!description) description = '';
+
     let domain = '';
     let displayUrl = url;
     try {
@@ -938,21 +952,33 @@ export default function App() {
         
         if (preview) {
           el.outerHTML = `
-            <div class="link-preview-outer" contenteditable="false">
+            <div class="link-preview-outer" contenteditable="false" id="${placeholderId}-resolved">
               <a href="${preview.url}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
-                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" />` : ''}
+                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" onerror="this.onerror=null; this.style.display='none';"/>` : ''}
                 <div class="link-preview-content">
                   <div class="link-preview-title">${preview.title}</div>
                   <div class="link-preview-domain">${preview.domain}</div>
                 </div>
               </a>
-              <button class="link-remove-btn" contenteditable="false" title="Convert to plain link" data-url="${preview.url}">
+              <button class="link-remove-btn" title="Convert to plain link" data-url="${preview.url}">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
               </button>
             </div>
           `;
+          setTimeout(() => {
+            const resolvedEl = document.getElementById(`${placeholderId}-resolved`);
+            if (resolvedEl) {
+              resolvedEl.removeAttribute('id');
+              const sel = window.getSelection();
+              const range = document.createRange();
+              range.setStartAfter(resolvedEl);
+              range.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          }, 10);
         } else {
           // If fetch fails, replace with simple text link
           const link = document.createElement("a");
@@ -1643,12 +1669,12 @@ export default function App() {
       range.deleteContents();
       range.insertNode(placeholder);
       
-      const space = document.createTextNode("\u00A0");
-      placeholder.after(space);
-      range.setStartAfter(space);
+      range.setStartAfter(placeholder);
       range.collapse(true);
       selection.removeAllRanges();
       selection.addRange(range);
+
+      document.execCommand('insertParagraph', false);
       
       syncContentToState();
 
@@ -1658,9 +1684,9 @@ export default function App() {
         
         if (preview) {
           el.outerHTML = `
-            <div class="link-preview-outer" contenteditable="false">
+            <div class="link-preview-outer" contenteditable="false" id="${placeholderId}-resolved">
               <a href="${preview.url}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
-                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" />` : ''}
+                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" onerror="this.onerror=null; this.style.display='none';" />` : ''}
                 <div class="link-preview-content">
                   <div class="link-preview-title">${preview.title}</div>
                   <div class="link-preview-domain">${preview.domain}</div>
@@ -1673,6 +1699,12 @@ export default function App() {
               </button>
             </div>
           `;
+          setTimeout(() => {
+            const resolvedEl = document.getElementById(`${placeholderId}-resolved`);
+            if (resolvedEl) {
+              resolvedEl.removeAttribute('id');
+            }
+          }, 10);
         } else {
           // Fallback
           const link = document.createElement("a");
