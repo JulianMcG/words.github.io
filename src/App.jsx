@@ -41,7 +41,7 @@ import {
   CloudOff,
   LogOut
 } from "lucide-react";
-import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot, updatePassword } from "./firebase";
+import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
 
 const EMOJIS = [
   "📄",
@@ -957,21 +957,6 @@ export default function App() {
     }
   };
 
-  const handleChangePassword = async () => {
-    if (!authPassword) {
-      setAuthError('Please enter a new password above.');
-      return;
-    }
-    try {
-      setAuthError('');
-      await updatePassword(user, authPassword);
-      setAuthModal(false);
-      setAuthPassword('');
-      alert("Password updated successfully!");
-    } catch (e) {
-      setAuthError(e.message.replace('Firebase: ', ''));
-    }
-  };
 
   const handleEmailAuth = async () => {
     if (!authEmail || !authPassword) {
@@ -3157,17 +3142,6 @@ export default function App() {
                       <p className="text-[11px] font-semibold text-[var(--color-text-faint)] uppercase tracking-wider mb-0.5">Signed in as</p>
                       <p className="text-[13px] text-[var(--color-text-primary)] truncate" title={user.email}>{user.email}</p>
                     </div>
-                    {user.providerData.some(p => p.providerId === 'password') && (
-                      <button
-                        className="w-full text-left px-3 py-1.5 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                        onClick={() => {
-                          setAuthModal('change_password');
-                          setUserMenuOpen(false);
-                        }}
-                      >
-                        Change Password
-                      </button>
-                    )}
                     <button
                       className="w-full text-left px-3 py-1.5 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-black/5 transition-colors"
                       onClick={() => {
@@ -3620,36 +3594,14 @@ export default function App() {
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[var(--color-bg-primary)] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-6 w-full max-w-[320px] z-[101] border border-[var(--color-border-primary)] animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-start mb-6">
               <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
-                {authModal === 'change_password' ? 'Change Password' : 'Sync with Cloud'}
+                Sync with Cloud
               </h2>
               <button onClick={() => { setAuthModal(false); setAuthError(''); setAuthPassword(''); }} className="text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md p-1 transition-colors">
                 <X size={16} />
               </button>
             </div>
             
-            {authModal === 'change_password' ? (
-              <form onSubmit={(e) => { e.preventDefault(); handleChangePassword(); }} className="space-y-3 animate-in fade-in duration-200">
-                <p className="text-sm text-[var(--color-text-muted)] mb-4 text-center">
-                  Enter a new password below.
-                </p>
-                <input 
-                  type="password" 
-                  placeholder="New Password"
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-text-primary)] transition-colors"
-                  required
-                />
-                {authError && <p className="text-red-500 text-xs text-center">{authError}</p>}
-                <button 
-                  type="submit" 
-                  className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] py-2 rounded-lg text-sm font-medium hover:bg-[var(--color-bg-hover)] transition-colors"
-                >
-                  Update Password
-                </button>
-              </form>
-            ) : (
-              <>
+            <>
                 <p className="text-sm text-[var(--color-text-muted)] mb-6 text-center">
                   Back up your documents and access them from anywhere.
                 </p>
@@ -3696,7 +3648,6 @@ export default function App() {
                     Continue with Email
                   </button>
                 )}
-              </>
             )}
             
           </div>
