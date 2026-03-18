@@ -498,7 +498,7 @@ const fetchLinkPreviewData = async (url) => {
   try {
     const response = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(url)}`);
     const html = await response.text();
-    
+
     // Parse the HTML
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
@@ -524,7 +524,7 @@ const fetchLinkPreviewData = async (url) => {
       const urlObj = new URL(url);
       domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
       displayUrl = `${urlObj.protocol}//${domain}${urlObj.pathname}${urlObj.search}`;
-    } catch(e) {}
+    } catch (e) { }
 
     return { title, image, description, domain, url: displayUrl };
   } catch (error) {
@@ -595,7 +595,7 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [showSyncSuggestion, setShowSyncSuggestion] = useState(false);
   const skipSyncRef = useRef(false);
-  
+
   // We don't want to use state for the backups, otherwise they re-render when they shouldn't.
   // We'll use refs, and initialize them from localStorage if they exist.
   const localBackupDocsRef = useRef(() => {
@@ -680,14 +680,14 @@ export default function App() {
   useEffect(() => {
     const handleSelectionChange = () => {
       const selection = window.getSelection();
-      
+
       // Handle Link Popover
       if (selection && selection.rangeCount > 0 && editorRef.current?.contains(selection.anchorNode)) {
         let node = selection.focusNode;
         if (node?.nodeType === 3) node = node.parentNode; // Get element if text node
-        
+
         const anchor = node?.closest ? node.closest('a:not(.link-preview-card)') : null;
-        
+
         if (anchor && anchor.href) {
           const rect = anchor.getBoundingClientRect();
           setLinkPopoverState({
@@ -700,7 +700,7 @@ export default function App() {
           setLinkPopoverState(prev => prev.show ? { ...prev, show: false } : prev);
         }
       } else {
-         setLinkPopoverState(prev => prev.show ? { ...prev, show: false } : prev);
+        setLinkPopoverState(prev => prev.show ? { ...prev, show: false } : prev);
       }
 
       // Handle Text Formatting Toolbar
@@ -711,7 +711,7 @@ export default function App() {
       ) {
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
-        
+
         let node = selection.focusNode;
         if (node?.nodeType === 3) node = node.parentNode;
         const isLinkActive = !!(node?.closest && node.closest('a'));
@@ -729,7 +729,7 @@ export default function App() {
       } else {
         setToolbarState((prev) => {
           const isEditorClick = selection && editorRef.current?.contains(selection.anchorNode);
-          if (prev.showLinkInput && !isEditorClick) return prev; 
+          if (prev.showLinkInput && !isEditorClick) return prev;
           return prev.show ? { ...prev, show: false, showLinkInput: false } : prev;
         });
       }
@@ -754,14 +754,12 @@ export default function App() {
   }, [docs, user]);
 
   useEffect(() => {
-    if (!user) {
-      try {
-        localStorage.setItem("words_groups", JSON.stringify(groups));
-      } catch (error) {
-        console.warn("Failed to save groups to local storage.", error);
-      }
+    try {
+      localStorage.setItem("words_groups", JSON.stringify(groups));
+    } catch (error) {
+      console.warn("Failed to save groups to local storage.", error);
     }
-  }, [groups, user]);
+  }, [groups]);
 
   useEffect(() => {
     if (!user) {
@@ -779,11 +777,14 @@ export default function App() {
       setIsAuthLoading(false);
       if (currentUser && !user) {
         // Logging in. 
+        // 0. Prevent local sync to cloud until initialization fetch completes.
+        skipSyncRef.current = true;
+
         // 1. Snapshot the CURRENT local data and save it to the backup keys.
         localBackupDocsRef.current = docs;
         localBackupGroupsRef.current = groups;
         localBackupPasscodeRef.current = lockPasscode;
-        
+
         localStorage.setItem("words_local_backup_docs", JSON.stringify(docs));
         localStorage.setItem("words_local_backup_groups", JSON.stringify(groups));
         if (lockPasscode) {
@@ -791,25 +792,25 @@ export default function App() {
         } else {
           localStorage.removeItem("words_local_backup_passcode");
         }
-        
+
       } else if (!currentUser && user) {
         // Logging out.
         // 1. Prevent sync from firing up to the cloud while we swap out the local state.
         skipSyncRef.current = true;
-        
+
         // 2. Load the backups we stored
         const savedDocs = localStorage.getItem("words_local_backup_docs");
         const savedGroups = localStorage.getItem("words_local_backup_groups");
         const savedPasscode = localStorage.getItem("words_local_backup_passcode");
-        
+
         const parsedDocs = savedDocs ? JSON.parse(savedDocs) : [];
         const finalDocs = parsedDocs.length > 0 ? parsedDocs : [
-           { id: "1", title: "", content: "<p><br></p>", isPinned: false, emoji: null, hasCustomEmoji: false, groupId: null }
+          { id: "1", title: "", content: "<p><br></p>", isPinned: false, emoji: null, hasCustomEmoji: false, groupId: null }
         ];
-        
+
         const parsedGroups = savedGroups ? JSON.parse(savedGroups) : [];
         const nextId = finalDocs[0]?.id || "1";
-        
+
         // 3. Set standard React state and synchronous refs to prevent flush race conditions
         docsRef.current = finalDocs;
         prevActiveDocIdRef.current = nextId;
@@ -822,10 +823,10 @@ export default function App() {
         // Instantly force the DOM to match the loaded state for snappiness
         const docToLoad = finalDocs.find(d => d.id === nextId);
         if (docToLoad && editorRef.current && titleRef.current) {
-           titleRef.current.innerText = docToLoad.title;
-           editorRef.current.innerHTML = docToLoad.content;
+          titleRef.current.innerText = docToLoad.title;
+          editorRef.current.innerHTML = docToLoad.content;
         }
-        
+
         // 4. Also immediately update the regular local storage keys so next refresh is correct
         localStorage.setItem("words_docs", JSON.stringify(finalDocs));
         localStorage.setItem("words_groups", JSON.stringify(parsedGroups));
@@ -834,11 +835,11 @@ export default function App() {
         } else {
           localStorage.removeItem("words_lock_passcode");
         }
-        
+
         // 5. Allow sync to operate normally again (which does nothing as !user)
         setTimeout(() => { skipSyncRef.current = false; }, 100);
       }
-      
+
       setUser(currentUser);
       if (currentUser) {
         setAuthModal(false);
@@ -850,67 +851,77 @@ export default function App() {
   // Sync Suggestion Logic
   useEffect(() => {
     if (user) return; // Already logged in
-    
+
     // Suggest if they have more than 3 documents
     if (docs.length >= 4) {
-       const hasDismissed = localStorage.getItem('words_dismissed_sync');
-       if (!hasDismissed) {
-         setShowSyncSuggestion(true);
-       }
+      const hasDismissed = localStorage.getItem('words_dismissed_sync');
+      if (!hasDismissed) {
+        setShowSyncSuggestion(true);
+      }
     }
   }, [docs, user]);
 
   // Two-way Sync with Firestore
   useEffect(() => {
     if (!user) return;
-    
+
     // Subscribe to changes from the cloud.
     const unsubscribe = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        if (data.docs && data.groups) {
+        
+        // As long as there is SOME valid data, proceed with sync
+        if (data.docs || data.groups) {
           skipSyncRef.current = true; // prevent the local useEffect from bouncing this right back
-          
-          docsRef.current = data.docs;
-          setDocs(data.docs);
-          setGroups(data.groups);
-          setLockPasscode(data.lockPasscode || null);
-          
-          let nextActiveId = data.activeDocId;
-          if (nextActiveId && data.docs.some(d => d.id === nextActiveId)) {
-            setActiveDocId(nextActiveId);
-          } else if (data.docs.length > 0) {
-            nextActiveId = data.docs[0].id;
-            setActiveDocId(nextActiveId);
+
+          if (data.docs) {
+            docsRef.current = data.docs;
+            setDocs(data.docs);
           }
           
-          // Force immediate synchronous DOM update ONLY if the active doc actually changed from an external source or transition
-          if (nextActiveId && nextActiveId !== prevActiveDocIdRef.current) {
-             prevActiveDocIdRef.current = nextActiveId;
-             const activeDoc = data.docs.find(d => d.id === nextActiveId);
-             if (activeDoc && editorRef.current && titleRef.current) {
+          if (data.groups) {
+            setGroups(data.groups);
+          }
+
+          setLockPasscode(data.lockPasscode || null);
+
+          if (data.docs) {
+            let nextActiveId = data.activeDocId;
+            if (nextActiveId && data.docs.some(d => d.id === nextActiveId)) {
+              setActiveDocId(nextActiveId);
+            } else if (data.docs.length > 0) {
+              nextActiveId = data.docs[0].id;
+              setActiveDocId(nextActiveId);
+            }
+
+            // Force immediate synchronous DOM update ONLY if the active doc actually changed from an external source or transition
+            if (nextActiveId && nextActiveId !== prevActiveDocIdRef.current) {
+              prevActiveDocIdRef.current = nextActiveId;
+              const activeDoc = data.docs.find(d => d.id === nextActiveId);
+              if (activeDoc && editorRef.current && titleRef.current) {
                 titleRef.current.innerText = activeDoc.title;
                 editorRef.current.innerHTML = activeDoc.content;
-             }
+              }
+            }
           }
-          
+
           // DO NOT WRITE TO LOCALSTORAGE HERE. We keep "words_docs" pure for the unauthenticated state.
-          
+
           setTimeout(() => {
-             skipSyncRef.current = false;
+            skipSyncRef.current = false;
           }, 100);
         }
       } else {
         // New user (document does not exist in Firestore).
         // Transfer all existing local data to the cloud seamlessly.
         skipSyncRef.current = true;
-        
+
         // Grab exactly what is in the main local storage right now
         const localDocs = JSON.parse(localStorage.getItem("words_docs") || "[]");
         const localGroups = JSON.parse(localStorage.getItem("words_groups") || "[]");
         const actId = localStorage.getItem("words_active_doc");
         const lp = localStorage.getItem("words_lock_passcode");
-        
+
         setDoc(doc(db, "users", user.uid), {
           docs: localDocs.length > 0 ? localDocs : docsRef.current, // Fallback to current state if empty
           groups: localGroups,
@@ -922,14 +933,14 @@ export default function App() {
         });
       }
     });
-    
+
     return () => unsubscribe();
   }, [user]);
 
   // Sync to Firebase whenever local docs/groups change
   useEffect(() => {
     if (!user || skipSyncRef.current) return;
-    
+
     const syncData = async () => {
       try {
         await setDoc(doc(db, "users", user.uid), {
@@ -943,7 +954,7 @@ export default function App() {
         console.error("Error syncing to cloud:", e);
       }
     };
-    
+
     const timeout = setTimeout(syncData, 500); // debounce sync
     return () => clearTimeout(timeout);
   }, [docs, groups, activeDocId, lockPasscode, user]);
@@ -1171,9 +1182,9 @@ export default function App() {
     const urlMatch = text.match(/(?:^|[\s\u00A0])(https?:\/\/[^\s\u00A0]+)[\s\u00A0]$/);
     if (urlMatch) {
       const url = urlMatch[1];
-      
+
       const range = selection.getRangeAt(0);
-      
+
       // Delete the typed URL + space
       range.setStart(node, selection.focusOffset - url.length - 1);
       range.deleteContents();
@@ -1184,23 +1195,23 @@ export default function App() {
       placeholder.id = placeholderId;
       placeholder.contentEditable = "false";
       placeholder.className = "link-preview-loading";
-      
+
       range.insertNode(placeholder);
-      
+
       const space = document.createTextNode("\u00A0");
       placeholder.after(space);
       range.setStartAfter(space);
       range.collapse(true);
       selection.removeAllRanges();
       selection.addRange(range);
-      
+
       syncContentToState();
 
       // Fetch asynchronously
       fetchLinkPreviewData(url).then(preview => {
         const el = document.getElementById(placeholderId);
         if (!el) return;
-        
+
         if (preview) {
           el.outerHTML = `
             <div class="link-preview-outer" contenteditable="false" id="${placeholderId}-resolved">
@@ -1656,18 +1667,18 @@ export default function App() {
         range.collapse(true);
         const rect = range.getBoundingClientRect();
         if (rect.x === 0 && rect.y === 0) {
-           const span = document.createElement("span");
-           span.appendChild(document.createTextNode("\u200b"));
-           range.insertNode(span);
-           const spanRect = span.getBoundingClientRect();
-           x = spanRect.left;
-           y = spanRect.bottom;
-           const spanParent = span.parentNode;
-           spanParent.removeChild(span);
-           spanParent.normalize();
+          const span = document.createElement("span");
+          span.appendChild(document.createTextNode("\u200b"));
+          range.insertNode(span);
+          const spanRect = span.getBoundingClientRect();
+          x = spanRect.left;
+          y = spanRect.bottom;
+          const spanParent = span.parentNode;
+          spanParent.removeChild(span);
+          spanParent.normalize();
         } else {
-           x = rect.left;
-           y = rect.bottom;
+          x = rect.left;
+          y = rect.bottom;
         }
       }
     }
@@ -1804,9 +1815,9 @@ export default function App() {
         link.style.color = "var(--color-accent)";
         link.style.textDecoration = "underline";
         link.style.cursor = "pointer";
-        
+
         wrapper.parentNode.replaceChild(link, wrapper);
-        
+
         syncContentToState();
       }
       return;
@@ -1918,37 +1929,37 @@ export default function App() {
     // Handle Link paste
     const textData = e.clipboardData.getData('text/plain');
     const isExactUrl = /^https?:\/\/[^\s]+$/.test(textData.trim());
-    
+
     if (isExactUrl) {
       e.preventDefault();
       const url = textData.trim();
-      
+
       const selection = window.getSelection();
       if (!selection.rangeCount) return;
       const range = selection.getRangeAt(0);
-      
+
       const placeholderId = `link-preview-${Date.now()}`;
       const placeholder = document.createElement("div");
       placeholder.id = placeholderId;
       placeholder.contentEditable = "false";
       placeholder.className = "link-preview-loading";
-      
+
       range.deleteContents();
       range.insertNode(placeholder);
-      
+
       range.setStartAfter(placeholder);
       range.collapse(true);
       selection.removeAllRanges();
       selection.addRange(range);
 
       document.execCommand('insertParagraph', false);
-      
+
       syncContentToState();
 
       fetchLinkPreviewData(url).then(preview => {
         const el = document.getElementById(placeholderId);
         if (!el) return;
-        
+
         if (preview) {
           el.outerHTML = `
             <div class="link-preview-outer" contenteditable="false" id="${placeholderId}-resolved">
@@ -2355,7 +2366,8 @@ export default function App() {
 
   const pinnedDocs = docs.filter((d) => d.isPinned);
   const regularDocs = docs.filter((d) => !d.isPinned);
-  const ungroupedDocs = regularDocs.filter((d) => !d.groupId);
+  // A document is considered "ungrouped" if it has no groupId, OR if its groupId doesn't exist in the current groups array.
+  const ungroupedDocs = regularDocs.filter((d) => !d.groupId || !groups.some(g => g.id === d.groupId));
   const activeDoc = docs.find((d) => d.id === activeDocId) || docs[0];
 
   const renderDocItem = (doc) => {
@@ -2881,284 +2893,284 @@ export default function App() {
             }}
           >
             {isAuthLoading ? (
-               <div className="px-3 py-2 space-y-3">
-                 {[1, 2, 3, 4, 5].map(i => (
-                   <div key={i} className="flex items-center gap-2">
-                     <div className="w-5 h-5 rounded-[4px] bg-[var(--color-bg-hover)] animate-pulse" />
-                     <div className="flex-1 h-3 rounded-[4px] bg-[var(--color-bg-hover)] animate-pulse opacity-60" />
-                   </div>
-                 ))}
-               </div>
-            ) : (
-            <>
-            {/* Pinned Tabs (Icons Only) */}
-            {pinnedDocs.length > 0 && (
-              <div className="mb-4">
-                <div className="flex flex-wrap gap-1">
-                  {pinnedDocs.map((doc) => {
-                    const isActive = activeDocId === doc.id;
-                    const isSelected = selectedDocIds.includes(doc.id);
-                    return (
-                      <div
-                        key={doc.id}
-                        data-sidebar-item
-                        onClick={(e) => handleDocClick(e, doc.id)}
-                        className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${isSelected || isActive
-                          ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
-                          : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
-                          }`}
-                        title={doc.title || "Untitled"}
-                      >
-                        <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
-                          {doc.emoji ? (
-                            <span className="animate-in zoom-in spin-in-12 duration-300">
-                              {doc.emoji}
-                            </span>
-                          ) : (
-                            <FileText
-                              size={20}
-                              className={
-                                isSelected || isActive
-                                  ? "text-[var(--color-text-muted)]"
-                                  : "text-[var(--color-icon-muted)]"
-                              }
-                            />
-                          )}
-                        </div>
-                        <button
-                          onClick={(e) => togglePinDoc(e, doc.id)}
-                          className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
-                          title="Unpin"
-                        >
-                          <PinOff size={10} />
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* New Document Button or Create Group Button */}
-            <div className="flex-1 flex flex-col">
-              <div className="space-y-[1px] mb-2">
-                {selectedDocIds.length > 1 ? (
-                  <div
-                    data-sidebar-item
-                    onClick={createGroup}
-                    className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-                  >
-                    <div className="flex items-center gap-2.5 overflow-hidden">
-                      <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
-                        <Folder size={16} className="text-[var(--color-icon-muted)]" />
-                      </div>
-                      <span className="text-[14px] truncate select-none font-medium text-[var(--color-text-primary)]">
-                        Group {selectedDocIds.length} items
-                      </span>
-                    </div>
+              <div className="px-3 py-2 space-y-3">
+                {[1, 2, 3, 4, 5].map(i => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-[4px] bg-[var(--color-bg-hover)] animate-pulse" />
+                    <div className="flex-1 h-3 rounded-[4px] bg-[var(--color-bg-hover)] animate-pulse opacity-60" />
                   </div>
-                ) : (
-                  <div
-                    data-sidebar-item
-                    onClick={createNewDoc}
-                    className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-                  >
-                    <div className="flex items-center gap-2.5 overflow-hidden">
-                      <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
-                        <Plus size={16} className="text-[var(--color-icon-muted)]" />
-                      </div>
-                      <span className="text-[14px] truncate select-none text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors">
-                        New Document
-                      </span>
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Pinned Tabs (Icons Only) */}
+                {pinnedDocs.length > 0 && (
+                  <div className="mb-4">
+                    <div className="flex flex-wrap gap-1">
+                      {pinnedDocs.map((doc) => {
+                        const isActive = activeDocId === doc.id;
+                        const isSelected = selectedDocIds.includes(doc.id);
+                        return (
+                          <div
+                            key={doc.id}
+                            data-sidebar-item
+                            onClick={(e) => handleDocClick(e, doc.id)}
+                            className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${isSelected || isActive
+                              ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
+                              : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
+                              }`}
+                            title={doc.title || "Untitled"}
+                          >
+                            <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
+                              {doc.emoji ? (
+                                <span className="animate-in zoom-in spin-in-12 duration-300">
+                                  {doc.emoji}
+                                </span>
+                              ) : (
+                                <FileText
+                                  size={20}
+                                  className={
+                                    isSelected || isActive
+                                      ? "text-[var(--color-text-muted)]"
+                                      : "text-[var(--color-icon-muted)]"
+                                  }
+                                />
+                              )}
+                            </div>
+                            <button
+                              onClick={(e) => togglePinDoc(e, doc.id)}
+                              className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
+                              title="Unpin"
+                            >
+                              <PinOff size={10} />
+                            </button>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
-              </div>
-              {/* Document Groups */}
-              <div className="space-y-[2px] mb-2">
-                {groups.map((group) => {
-                  const groupDocs = regularDocs.filter((d) => d.groupId === group.id);
-                  return (
-                    <div
-                      key={group.id}
-                      className="flex flex-col relative"
-                      onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
-                      onDrop={(e) => handleDropOnGroup(e, group.id)}
-                    >
-                      {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'before' && (
-                        <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
-                      )}
-                      {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'after' && (
-                        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
-                      )}
+
+                {/* New Document Button or Create Group Button */}
+                <div className="flex-1 flex flex-col">
+                  <div className="space-y-[1px] mb-2">
+                    {selectedDocIds.length > 1 ? (
                       <div
-                        className="group relative flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
-                        style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
-                        draggable
                         data-sidebar-item
-                        onDragStart={(e) => {
-                          // Prevent input from blocking the drag
-                          if (e.target.tagName === 'INPUT') {
-                            e.preventDefault();
-                            return;
-                          }
-                          handleDragStart(e, 'group', group.id);
-                        }}
-                        onDragEnd={handleDragEnd}
-                        onDragLeave={handleDragLeave}
+                        onClick={createGroup}
+                        className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
                       >
-                        <div
-                          className="flex items-center gap-1.5 flex-1 cursor-pointer overflow-hidden"
-                          onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
-                        >
-                          <button className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)]">
-                            {group.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                          </button>
-                          <div
-                            className="flex-shrink-0 cursor-pointer transition-transform hover:scale-110"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const FOLDER_COLORS = ['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
-                              const nextColor = FOLDER_COLORS[(FOLDER_COLORS.indexOf(group.color) + 1) % FOLDER_COLORS.length] || FOLDER_COLORS[0];
-                              updateGroup(group.id, { color: nextColor });
-                            }}
-                            title="Change folder color"
-                          >
-                            <Folder size={14} color={group.color} fill={group.color + '40'} />
+                        <div className="flex items-center gap-2.5 overflow-hidden">
+                          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                            <Folder size={16} className="text-[var(--color-icon-muted)]" />
                           </div>
-                          {editingGroupId === group.id ? (
-                            <input
-                              type="text"
-                              autoFocus
-                              value={group.name}
-                              onChange={(e) => updateGroup(group.id, { name: e.target.value })}
-                              onClick={(e) => e.stopPropagation()}
-                              draggable={false}
-                              onDragStart={(e) => e.stopPropagation()}
-                              onBlur={() => setEditingGroupId(null)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') setEditingGroupId(null);
-                              }}
-                              className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
-                            />
-                          ) : (
-                            <span
-                              className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none"
-                            >
-                              {group.name}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); createNewDoc(e, group.id); }}
-                            className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
-                            title="New doc in folder"
-                          >
-                            <Plus size={13} />
-                          </button>
-                          <div className="relative">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(groupMenuOpen === group.id ? null : group.id); }}
-                              className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
-                              title="More options"
-                            >
-                              <MoreHorizontal size={13} />
-                            </button>
-                            {groupMenuOpen === group.id && (
-                              <>
-                                <div className="fixed inset-0 z-[59]" onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(null); }} />
-                                <div className="absolute right-0 top-full mt-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100">
-                                  <button
-                                    className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setEditingGroupId(group.id);
-                                      setGroupMenuOpen(null);
-                                    }}
-                                  >
-                                    <Pencil size={14} /> Rename
-                                  </button>
-                                  <div className="h-px bg-[var(--color-border-primary)] my-1" />
-                                  <button
-                                    className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setGroupMenuOpen(null);
-                                      deleteGroup(e, group.id);
-                                    }}
-                                  >
-                                    <FolderMinus size={14} /> Ungroup
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </div>
+                          <span className="text-[14px] truncate select-none font-medium text-[var(--color-text-primary)]">
+                            Group {selectedDocIds.length} items
+                          </span>
                         </div>
                       </div>
-
-                      {/* Docs mapping inside this group */}
-                      {!group.isCollapsed && groupDocs.length > 0 && (
-                        <div className="pl-4 pr-1 mt-0.5 space-y-[1px]">
-                          {groupDocs.map(renderDocItem)}
+                    ) : (
+                      <div
+                        data-sidebar-item
+                        onClick={createNewDoc}
+                        className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+                      >
+                        <div className="flex items-center gap-2.5 overflow-hidden">
+                          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                            <Plus size={16} className="text-[var(--color-icon-muted)]" />
+                          </div>
+                          <span className="text-[14px] truncate select-none text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors">
+                            New Document
+                          </span>
                         </div>
-                      )}
-
-                      {/* Empty state for group */}
-                      {!group.isCollapsed && groupDocs.length === 0 && (
-                        <div className="pl-8 py-2 text-[12px] text-[var(--color-text-faint)] italic select-none">
-                          Empty
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Ungrouped Documents */}
-              <div className="space-y-[1px]">
-                {ungroupedDocs.map(renderDocItem)}
-              </div>
-
-              <div className="h-24 w-full flex-shrink-0" data-sidebar-empty-zone onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
-            </div>
-            </>
-            )}
-            </div>
-            
-            {/* Cloud Sync Toggle */}
-            <div className="absolute bottom-4 left-4 z-40">
-              <button 
-                onClick={() => user ? setUserMenuOpen(!userMenuOpen) : setAuthModal('login')}
-                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
-                title={user ? "Cloud Sync Active" : "Enable Cloud Sync"}
-              >
-                {user ? <Cloud size={16} className={userMenuOpen ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"} /> : <CloudOff size={16} className={authModal ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"} />}
-              </button>
-
-              {userMenuOpen && user && (
-                <>
-                  <div className="fixed inset-0 z-[59]" onClick={() => setUserMenuOpen(false)} />
-                  <div className="absolute left-0 bottom-full mb-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-2 z-[60] min-w-[180px] animate-in fade-in zoom-in-95 duration-100">
-                    <div className="px-3 py-1.5 mb-1 border-b border-[var(--color-border-primary)]">
-                      <p className="text-[11px] font-semibold text-[var(--color-text-faint)] uppercase tracking-wider mb-0.5">Signed in as</p>
-                      <p className="text-[13px] text-[var(--color-text-primary)] truncate" title={user.email}>{user.email}</p>
-                    </div>
-                    <button
-                      className="w-full text-left px-3 py-1.5 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-black/5 transition-colors"
-                      onClick={() => {
-                        handleLogout();
-                        setUserMenuOpen(false);
-                      }}
-                    >
-                      <LogOut size={14} /> Log out
-                    </button>
+                      </div>
+                    )}
                   </div>
-                </>
-              )}
-            </div>
+                  {/* Document Groups */}
+                  <div className="space-y-[2px] mb-2">
+                    {groups.map((group) => {
+                      const groupDocs = regularDocs.filter((d) => d.groupId === group.id);
+                      return (
+                        <div
+                          key={group.id}
+                          className="flex flex-col relative"
+                          onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
+                          onDrop={(e) => handleDropOnGroup(e, group.id)}
+                        >
+                          {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'before' && (
+                            <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+                          )}
+                          {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'after' && (
+                            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+                          )}
+                          <div
+                            className="group relative flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
+                            style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
+                            draggable
+                            data-sidebar-item
+                            onDragStart={(e) => {
+                              // Prevent input from blocking the drag
+                              if (e.target.tagName === 'INPUT') {
+                                e.preventDefault();
+                                return;
+                              }
+                              handleDragStart(e, 'group', group.id);
+                            }}
+                            onDragEnd={handleDragEnd}
+                            onDragLeave={handleDragLeave}
+                          >
+                            <div
+                              className="flex items-center gap-1.5 flex-1 cursor-pointer overflow-hidden"
+                              onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
+                            >
+                              <button className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)]">
+                                {group.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                              </button>
+                              <div
+                                className="flex-shrink-0 cursor-pointer transition-transform hover:scale-110"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const FOLDER_COLORS = ['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
+                                  const nextColor = FOLDER_COLORS[(FOLDER_COLORS.indexOf(group.color) + 1) % FOLDER_COLORS.length] || FOLDER_COLORS[0];
+                                  updateGroup(group.id, { color: nextColor });
+                                }}
+                                title="Change folder color"
+                              >
+                                <Folder size={14} color={group.color} fill={group.color + '40'} />
+                              </div>
+                              {editingGroupId === group.id ? (
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  value={group.name}
+                                  onChange={(e) => updateGroup(group.id, { name: e.target.value })}
+                                  onClick={(e) => e.stopPropagation()}
+                                  draggable={false}
+                                  onDragStart={(e) => e.stopPropagation()}
+                                  onBlur={() => setEditingGroupId(null)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') setEditingGroupId(null);
+                                  }}
+                                  className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
+                                />
+                              ) : (
+                                <span
+                                  className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none"
+                                >
+                                  {group.name}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); createNewDoc(e, group.id); }}
+                                className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
+                                title="New doc in folder"
+                              >
+                                <Plus size={13} />
+                              </button>
+                              <div className="relative">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(groupMenuOpen === group.id ? null : group.id); }}
+                                  className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
+                                  title="More options"
+                                >
+                                  <MoreHorizontal size={13} />
+                                </button>
+                                {groupMenuOpen === group.id && (
+                                  <>
+                                    <div className="fixed inset-0 z-[59]" onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(null); }} />
+                                    <div className="absolute right-0 top-full mt-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100">
+                                      <button
+                                        className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingGroupId(group.id);
+                                          setGroupMenuOpen(null);
+                                        }}
+                                      >
+                                        <Pencil size={14} /> Rename
+                                      </button>
+                                      <div className="h-px bg-[var(--color-border-primary)] my-1" />
+                                      <button
+                                        className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setGroupMenuOpen(null);
+                                          deleteGroup(e, group.id);
+                                        }}
+                                      >
+                                        <FolderMinus size={14} /> Ungroup
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Docs mapping inside this group */}
+                          {!group.isCollapsed && groupDocs.length > 0 && (
+                            <div className="pl-4 pr-1 mt-0.5 space-y-[1px]">
+                              {groupDocs.map(renderDocItem)}
+                            </div>
+                          )}
+
+                          {/* Empty state for group */}
+                          {!group.isCollapsed && groupDocs.length === 0 && (
+                            <div className="pl-8 py-2 text-[12px] text-[var(--color-text-faint)] italic select-none">
+                              Empty
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Ungrouped Documents */}
+                  <div className="space-y-[1px]">
+                    {ungroupedDocs.map(renderDocItem)}
+                  </div>
+
+                  <div className="h-24 w-full flex-shrink-0" data-sidebar-empty-zone onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Cloud Sync Toggle */}
+          <div className="absolute bottom-4 left-4 z-40">
+            <button
+              onClick={() => user ? setUserMenuOpen(!userMenuOpen) : setAuthModal('login')}
+              className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
+              title={user ? "Cloud Sync Active" : "Enable Cloud Sync"}
+            >
+              {user ? <Cloud size={16} className={userMenuOpen ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"} /> : <CloudOff size={16} className={authModal ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"} />}
+            </button>
+
+            {userMenuOpen && user && (
+              <>
+                <div className="fixed inset-0 z-[59]" onClick={() => setUserMenuOpen(false)} />
+                <div className="absolute left-0 bottom-full mb-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-2 z-[60] min-w-[180px] animate-in fade-in zoom-in-95 duration-100">
+                  <div className="px-3 py-1.5 mb-1 border-b border-[var(--color-border-primary)]">
+                    <p className="text-[11px] font-semibold text-[var(--color-text-faint)] uppercase tracking-wider mb-0.5">Signed in as</p>
+                    <p className="text-[13px] text-[var(--color-text-primary)] truncate" title={user.email}>{user.email}</p>
+                  </div>
+                  <button
+                    className="w-full text-left px-3 py-1.5 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-black/5 transition-colors"
+                    onClick={() => {
+                      handleLogout();
+                      setUserMenuOpen(false);
+                    }}
+                  >
+                    <LogOut size={14} /> Log out
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
+      </div>
       {/* Main Content Area */}
       <div
         className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${isSidebarOpen ? "ml-64 print:ml-0" : "ml-0"
@@ -3354,7 +3366,7 @@ export default function App() {
                   onError={(e) => e.target.style.display = 'none'}
                 />
               );
-            } catch(e) { return null; }
+            } catch (e) { return null; }
           })()}
           <a
             href={linkPopoverState.url}
@@ -3396,19 +3408,19 @@ export default function App() {
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     if (toolbarState.savedRange) {
-                       const sel = window.getSelection();
-                       sel.removeAllRanges();
-                       sel.addRange(toolbarState.savedRange);
-                       let url = toolbarState.linkUrl;
-                       if (url && !url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
-                       if (url) {
-                         document.execCommand('createLink', false, url);
-                         syncContentToState();
-                       }
-                       setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
+                      const sel = window.getSelection();
+                      sel.removeAllRanges();
+                      sel.addRange(toolbarState.savedRange);
+                      let url = toolbarState.linkUrl;
+                      if (url && !url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+                      if (url) {
+                        document.execCommand('createLink', false, url);
+                        syncContentToState();
+                      }
+                      setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
                     }
                   } else if (e.key === 'Escape') {
-                     setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
+                    setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
                   }
                 }}
               />
@@ -3602,7 +3614,7 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
-            
+
             <p className="text-sm text-[var(--color-text-muted)] mb-6 text-center">
               Back up your documents and access them from anywhere.
             </p>
@@ -3616,22 +3628,22 @@ export default function App() {
               onClick={handleGoogleLogin}
               className="w-full flex items-center justify-center gap-2 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] py-2.5 px-4 rounded-lg mb-4 hover:opacity-90 transition-opacity shadow-sm font-medium text-sm"
             >
-              <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/></svg>
+              <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z" /><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z" /><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z" /><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z" /></svg>
               Continue with Google
             </button>
-            
+
             {authModal === 'email' ? (
               <form onSubmit={(e) => { e.preventDefault(); handleEmailAuth(); }} className="space-y-3 animate-in fade-in duration-200">
-                <input 
-                  type="email" 
-                  placeholder="Email address" 
+                <input
+                  type="email"
+                  placeholder="Email address"
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
                   className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-text-primary)] transition-colors"
                   required
                 />
-                <input 
-                  type="password" 
+                <input
+                  type="password"
                   placeholder="Password"
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.target.value)}
@@ -3639,8 +3651,8 @@ export default function App() {
                   required
                 />
                 {authError && <p className="text-red-500 text-xs text-center">{authError}</p>}
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] py-2 rounded-lg text-sm font-medium hover:bg-[var(--color-bg-hover)] transition-colors"
                 >
                   Continue
@@ -3654,7 +3666,7 @@ export default function App() {
                 Continue with Email
               </button>
             )}
-            
+
           </div>
         </>
       )}
@@ -3666,11 +3678,11 @@ export default function App() {
             <h3 className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
               <Cloud size={16} className="text-[var(--color-text-primary)]" /> Back up your data
             </h3>
-            <button 
+            <button
               onClick={() => {
                 setShowSyncSuggestion(false);
                 localStorage.setItem('words_dismissed_sync', 'true');
-              }} 
+              }}
               className="text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] p-1 rounded-md"
             >
               <X size={14} />
@@ -3680,7 +3692,7 @@ export default function App() {
             You've created a few documents! Consider enabling Cloud Sync so you don't lose your work.
           </p>
           <div className="flex flex-col gap-2">
-            <button 
+            <button
               onClick={() => {
                 setShowSyncSuggestion(false);
                 setAuthModal('login');
@@ -3689,7 +3701,7 @@ export default function App() {
             >
               Enable Sync
             </button>
-            <button 
+            <button
               onClick={() => {
                 setShowSyncSuggestion(false);
                 localStorage.setItem('words_dismissed_sync', 'true');
