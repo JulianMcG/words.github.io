@@ -41,7 +41,8 @@ import {
   CloudOff,
   LogOut
 } from "lucide-react";
-import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot, updatePassword } from "./firebase";
+import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
+import { updatePassword } from "firebase/auth";
 
 const EMOJIS = [
   "📄",
