@@ -623,7 +623,7 @@ export default function App() {
     if (sharePopupInfo) {
       const timer = setTimeout(() => {
         setSharePopupInfo(null);
-      }, 8000); // 8 seconds
+      }, 10000); // 10 seconds
       return () => clearTimeout(timer);
     }
   }, [sharePopupInfo]);
@@ -3867,7 +3867,7 @@ export default function App() {
 
       {/* Sync Suggestion Popup */}
       {showSyncSuggestion && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[90] animate-in slide-in-from-bottom-5">
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[90] animate-slide-in-bottom">
           <div className="flex justify-between items-start mb-2">
             <h3 className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
               <Cloud size={16} className="text-[var(--color-text-primary)]" /> Back up your data
@@ -3910,7 +3910,7 @@ export default function App() {
 
       {/* Custom Share UI Popup */}
       {sharePopupInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[100] animate-in slide-in-from-right fade-in duration-300">
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[100] animate-slide-in-right">
           <div className="flex justify-between items-start mb-3">
             <h3 className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
               <Share size={16} className="text-[var(--color-text-primary)]" /> Document Shared
