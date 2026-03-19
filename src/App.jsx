@@ -791,6 +791,50 @@ export default function App() {
     }
   }, [activeDocId, user]);
 
+  // Handle Shared Document Links
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shareId = params.get('share');
+    if (shareId) {
+       const cloneSharedDoc = async () => {
+          try {
+             const sharedSnap = await getDoc(doc(db, "shared_documents", shareId));
+             if (sharedSnap.exists()) {
+                const data = sharedSnap.data();
+                const newDocId = crypto.randomUUID();
+                const newDoc = {
+                   id: newDocId,
+                   title: (data.title || "Untitled") + " (Shared Copy)",
+                   content: data.content,
+                   isPinned: false,
+                   emoji: data.emoji || null,
+                   hasCustomEmoji: data.hasCustomEmoji || false,
+                   groupId: null,
+                   isLocked: false 
+                };
+                
+                setDocs(prev => {
+                   const updated = [newDoc, ...prev];
+                   docsRef.current = updated;
+                   return updated;
+                });
+                setActiveDocId(newDocId);
+                
+                alert("Successfully imported shared document!");
+             } else {
+                alert("Shared document not found or access denied.");
+             }
+          } catch(e) {
+             console.error(e);
+             alert("Error loading shared document: " + e.message);
+          }
+          const newUrl = window.location.origin + window.location.pathname;
+          window.history.replaceState({}, document.title, newUrl);
+       };
+       cloneSharedDoc();
+    }
+  }, []);
+
   // Firebase Auth Listener - Handles Auth State Transitions (Login/Logout)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -1420,6 +1464,28 @@ export default function App() {
     setContextMenu(null);
   };
 
+  const handleShareDoc = async (docId) => {
+    const docToShare = docsRef.current.find(d => d.id === docId);
+    if (!docToShare) return;
+
+    try {
+      if (user) {
+         await setDoc(doc(db, "shared_documents", docId), {
+            ...docToShare,
+            sharedBy: user.uid,
+            sharedAt: new Date().toISOString()
+         });
+      }
+      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${docId}`;
+      await navigator.clipboard.writeText(shareUrl);
+      alert("Share link copied to clipboard! Anyone with this link will receive a copy of this document.");
+    } catch (e) {
+      console.error(e);
+      alert("Failed to share document. " + e.message);
+    }
+    setContextMenu(null);
+  };
+
   const handlePasscodeSubmit = (code) => {
     const pin = code || passcodeInput;
     if (pin.length !== 4 || !/^\d{4}$/.test(pin)) return;
@@ -1879,9 +1945,11 @@ export default function App() {
       const tbody = table.querySelector("tbody");
       const startX = e.clientX;
       const startY = e.clientY;
-      const trs = Array.from(tbody.querySelectorAll("tr"));
-      const startRows = trs.length;
-      const startCols = trs[0] ? trs[0].querySelectorAll("td").length : 1;
+      const allTrs = Array.from(tbody.querySelectorAll("tr"));
+      const visibleTrs = allTrs.filter(tr => tr.style.display !== 'none');
+      const startRows = visibleTrs.length;
+      const startCols = visibleTrs[0] ? Array.from(visibleTrs[0].querySelectorAll("td")).filter(td => td.style.display !== 'none').length : 1;
+      
       const onMouseMove = (moveEvent) => {
         const dx = moveEvent.clientX - startX;
         const dy = moveEvent.clientY - startY;
@@ -1890,16 +1958,21 @@ export default function App() {
         const newRows = Math.max(1, startRows + Math.round(dy / 38));
 
         const currentTrs = Array.from(tbody.querySelectorAll("tr"));
+        const maxCols = currentTrs[0] ? currentTrs[0].querySelectorAll("td").length : newCols;
 
         while (currentTrs.length < newRows) {
           const tr = document.createElement("tr");
-          for (let i = 0; i < newCols; i++) tr.innerHTML += "<td><br></td>";
+          for (let i = 0; i < Math.max(newCols, maxCols); i++) {
+             const td = document.createElement("td");
+             td.innerHTML = "<br>";
+             tr.appendChild(td);
+          }
           tbody.appendChild(tr);
           currentTrs.push(tr);
         }
-        while (currentTrs.length > newRows) {
-          tbody.lastChild.remove();
-          currentTrs.pop();
+
+        for (let r = 0; r < currentTrs.length; r++) {
+           currentTrs[r].style.display = (r < newRows) ? '' : 'none';
         }
 
         currentTrs.forEach((tr) => {
@@ -1910,9 +1983,8 @@ export default function App() {
             tr.appendChild(td);
             tds.push(td);
           }
-          while (tds.length > newCols) {
-            tr.lastChild.remove();
-            tds.pop();
+          for (let c = 0; c < tds.length; c++) {
+            tds[c].style.display = (c < newCols) ? '' : 'none';
           }
         });
       };
@@ -3646,6 +3718,12 @@ export default function App() {
             onClick={() => toggleLockDoc(contextMenu.docId)}
           >
             {docs.find(d => d.id === contextMenu.docId)?.isLocked ? <><Unlock size={14} /> Unlock</> : <><Lock size={14} /> Lock</>}
+          </button>
+          <button
+            className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={() => handleShareDoc(contextMenu.docId)}
+          >
+            <Share size={14} /> Share Link
           </button>
           <div className="h-px bg-[var(--color-border-primary)] my-1" />
           <button
