@@ -38,6 +38,7 @@
 
 * {
   box-sizing: border-box;
+  corner-shape: superellipse(2);
 }
 
 body {
