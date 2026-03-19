@@ -39,7 +39,8 @@ import {
   Unlink,
   Cloud,
   CloudOff,
-  LogOut
+  LogOut,
+  Copy
 } from "lucide-react";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
 
@@ -1461,6 +1462,35 @@ export default function App() {
         setDocs(newDocs);
       }
     }
+    setContextMenu(null);
+  };
+
+  const handleDuplicateDoc = (docId) => {
+    const docToClone = docsRef.current.find((d) => d.id === docId);
+    if (!docToClone) return;
+
+    const newDocId = crypto.randomUUID();
+    const newDoc = {
+      ...docToClone,
+      id: newDocId,
+      title: "Copy of " + (docToClone.title || "Untitled"),
+      createdAt: new Date().toISOString(),
+      isPinned: false,
+    };
+
+    setDocs((prev) => {
+      const idx = prev.findIndex((d) => d.id === docId);
+      const updated = [...prev];
+      if (idx >= 0) {
+        updated.splice(idx + 1, 0, newDoc);
+      } else {
+        updated.unshift(newDoc);
+      }
+      docsRef.current = updated;
+      return updated;
+    });
+
+    setActiveDocId(newDocId);
     setContextMenu(null);
   };
 
@@ -2931,6 +2961,16 @@ export default function App() {
                   className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => {
                     setShareMenuOpen(false);
+                    handleShareDoc(activeDocId);
+                  }}
+                >
+                  <Link size={14} /> Get Shareable Link
+                </button>
+                <div className="h-px bg-[var(--color-border-primary)] my-1" />
+                <button
+                  className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => {
+                    setShareMenuOpen(false);
                     setTimeout(() => window.print(), 100);
                   }}
                 >
@@ -3721,9 +3761,9 @@ export default function App() {
           </button>
           <button
             className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-            onClick={() => handleShareDoc(contextMenu.docId)}
+            onClick={() => handleDuplicateDoc(contextMenu.docId)}
           >
-            <Share size={14} /> Share Link
+            <Copy size={14} /> Duplicate
           </button>
           <div className="h-px bg-[var(--color-border-primary)] my-1" />
           <button
