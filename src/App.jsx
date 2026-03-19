@@ -2550,7 +2550,7 @@ export default function App() {
                 width: 16px;
                 height: 16px;
                 border: 1.5px solid var(--color-icon-muted);
-                border-radius: 4px;
+                border-radius: 6px;
                 cursor: pointer;
                 background-color: white;
                 transition: all 0.2s ease;
