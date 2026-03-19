@@ -2108,6 +2108,29 @@ export default function App() {
 
   const handleKeyDown = useCallback(
     (e) => {
+      // --- 0. Table Deletion Interceptor ---
+      if (e.key === "Backspace" || e.key === "Delete") {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const commonAncestor = range.commonAncestorContainer;
+          const el = commonAncestor.nodeType === 1 ? commonAncestor : commonAncestor.parentElement;
+          const tableContainer = el?.closest('.table-container');
+
+          if (tableContainer) {
+            const cells = Array.from(tableContainer.querySelectorAll('td'));
+            if (cells.length > 0 && sel.containsNode(cells[0], true) && sel.containsNode(cells[cells.length - 1], true)) {
+              e.preventDefault();
+              isInternalEdit.current = true;
+              tableContainer.remove();
+              isInternalEdit.current = false;
+              syncContentToState();
+              return;
+            }
+          }
+        }
+      }
+
       // --- 1. Math Preview Interceptor & Cleanup ---
       const preview = editorRef.current?.querySelector(".math-preview");
       if (preview) {
@@ -2235,27 +2258,6 @@ export default function App() {
 
       // --- 3. Markdown Formatting Shortcuts ---
       const selection = window.getSelection();
-
-      // --- Table Deletion Optimization ---
-      if ((e.key === "Backspace" || e.key === "Delete") && selection && !selection.isCollapsed) {
-        if (selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          const ancestor = range.commonAncestorContainer;
-          const el = ancestor.nodeType === 1 ? ancestor : ancestor.parentElement;
-          const tableContainer = el?.closest ? el.closest(".table-container") : null;
-          
-          if (tableContainer) {
-            // If they highlighted all text inside this specific table, delete the table!
-            const tableText = (tableContainer.textContent || tableContainer.innerText || "").trim();
-            if (tableText && selection.toString().trim() === tableText) {
-              e.preventDefault();
-              tableContainer.remove();
-              syncContentToState();
-              return;
-            }
-          }
-        }
-      }
 
       if (e.key === " " || e.key === "Enter") {
         if (selection && selection.focusNode) {
@@ -2958,9 +2960,9 @@ export default function App() {
                             key={doc.id}
                             data-sidebar-item
                             onClick={(e) => handleDocClick(e, doc.id)}
-                            className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${isSelected || isActive
+                            className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border hover:z-50 ${isSelected || isActive
                               ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
-                              : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
+                              : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)] z-0"
                               }`}
                             title={doc.title || "Untitled"}
                           >
@@ -2982,7 +2984,7 @@ export default function App() {
                             </div>
                             <button
                               onClick={(e) => togglePinDoc(e, doc.id)}
-                              className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
+                              className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
                               title="Unpin"
                             >
                               <PinOff size={10} />
