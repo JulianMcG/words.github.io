@@ -42,7 +42,7 @@
 
 @supports (corner-shape: superellipse(2)) or (-webkit-corner-shape: superellipse(2)) {
   :root {
-    --radius-bonus: 4px;
+    --radius-bonus: 5px;
   }
 }
 
