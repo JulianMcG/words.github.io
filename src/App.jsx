@@ -41,7 +41,7 @@ import {
   CloudOff,
   LogOut
 } from "lucide-react";
-import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
+import { auth, db, googleProvider, driveProvider, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
 
 const EMOJIS = [
   "📄",
@@ -537,6 +537,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [isExportingDocs, setIsExportingDocs] = useState(false);
   const [docs, setDocs] = useState(() => {
     const saved = localStorage.getItem("words_docs");
     if (saved) {
@@ -2798,6 +2799,82 @@ export default function App() {
             <>
               <div className="fixed inset-0 z-[39]" onClick={() => setShareMenuOpen(false)} />
               <div className="absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-48 animate-in fade-in zoom-in-95 duration-100">
+                <button
+                  className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isExportingDocs}
+                  onClick={async () => {
+                    setShareMenuOpen(false);
+                    const activeDoc = docs.find(d => d.id === activeDocId);
+                    if (!activeDoc) return;
+                    
+                    setIsExportingDocs(true);
+                    try {
+                      // 1. Authorize Google Drive API
+                      const result = await signInWithPopup(auth, driveProvider);
+                      const credential = GoogleAuthProvider.credentialFromResult(result);
+                      const accessToken = credential.accessToken;
+                      
+                      if (!accessToken) {
+                        throw new Error("No access token retrieved");
+                      }
+
+                      // 2. Prepare HTML content
+                      const html = `<html><head><meta charset="utf-8"></head><body>
+                        <h1>${activeDoc.title || 'Untitled Document'}</h1>
+                        ${activeDoc.content}
+                      </body></html>`;
+
+                      // 3. Prepare Metadata
+                      const metadata = {
+                        name: activeDoc.title || 'Untitled Document',
+                        mimeType: 'application/vnd.google-apps.document' // This converts HTML to Docs format natively
+                      };
+
+                      // 4. Construct Multipart Request Body
+                      const boundary = '-------314159265358979323846';
+                      const delimiter = "\\r\\n--" + boundary + "\\r\\n";
+                      const close_delim = "\\r\\n--" + boundary + "--";
+
+                      const multipartRequestBody =
+                        delimiter +
+                        'Content-Type: application/json; charset=UTF-8\\r\\n\\r\\n' +
+                        JSON.stringify(metadata) +
+                        delimiter +
+                        'Content-Type: text/html; charset=UTF-8\\r\\n\\r\\n' +
+                        html +
+                        close_delim;
+
+                      // 5. POST to Drive API
+                      const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${accessToken}`,
+                          'Content-Type': `multipart/related; boundary=${boundary}`
+                        },
+                        body: multipartRequestBody
+                      });
+
+                      if (!response.ok) {
+                        throw new Error(`Google Drive API error: ${response.status}`);
+                      }
+
+                      const fileData = await response.json();
+                      
+                      // 6. Navigate to the new Google Doc
+                      window.open(`https://docs.google.com/document/d/${fileData.id}/edit`, '_blank');
+                    } catch (err) {
+                      console.error("Failed to export to Google Docs", err);
+                      // Don't show an error if they just closed the auth popup
+                      if (err.code !== 'auth/popup-closed-by-user') {
+                         alert("Failed to export to Google Docs. Please ensure you allow popups and approve Google Drive permissions.");
+                      }
+                    } finally {
+                      setIsExportingDocs(false);
+                    }
+                  }}
+                >
+                  <FileText size={14} /> {isExportingDocs ? "Exporting..." : "Export to Google Docs"}
+                </button>
                 <button
                   className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => {
