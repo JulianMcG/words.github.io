@@ -42,7 +42,7 @@ import {
   LogOut,
   Copy
 } from "lucide-react";
-import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
+import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
 
 const EMOJIS = [
   "📄",
@@ -616,6 +616,7 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [showSyncSuggestion, setShowSyncSuggestion] = useState(false);
   const skipSyncRef = useRef(false);
+  const pendingLocalSaveRef = useRef(false);
 
   // We don't want to use state for the backups, otherwise they re-render when they shouldn't.
   // We'll use refs, and initialize them from localStorage if they exist.
@@ -932,6 +933,9 @@ export default function App() {
 
     // Subscribe to changes from the cloud.
     const unsubscribe = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
+      // Ignore cloud snapshots if we have local pending changes that haven't been saved/acknowledged yet
+      if (pendingLocalSaveRef.current) return;
+
       if (docSnap.exists()) {
         const data = docSnap.data();
         
@@ -1005,6 +1009,8 @@ export default function App() {
   // Sync to Firebase whenever local docs/groups change
   useEffect(() => {
     if (!user || skipSyncRef.current) return;
+    
+    pendingLocalSaveRef.current = true;
 
     const syncData = async () => {
       try {
@@ -1017,6 +1023,8 @@ export default function App() {
         });
       } catch (e) {
         console.error("Error syncing to cloud:", e);
+      } finally {
+        pendingLocalSaveRef.current = false;
       }
     };
 
