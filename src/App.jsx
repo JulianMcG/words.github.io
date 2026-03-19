@@ -496,40 +496,60 @@ const COMMANDS = [
 
 const fetchLinkPreviewData = async (url) => {
   try {
-    const response = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(url)}`);
-    const html = await response.text();
-
-    // Parse the HTML
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
-
-    // Extract standard and Open Graph tags
-    let title = doc.querySelector('meta[property="og:title"]')?.content;
-    if (!title) title = doc.querySelector('meta[name="twitter:title"]')?.content;
-    if (!title) title = doc.title;
-    if (!title) title = url;
-
-    let image = doc.querySelector('meta[property="og:image"]')?.content;
-    if (!image) image = doc.querySelector('meta[name="twitter:image"]')?.content;
-    if (!image) image = '';
-
-    let description = doc.querySelector('meta[property="og:description"]')?.content;
-    if (!description) description = doc.querySelector('meta[name="twitter:description"]')?.content;
-    if (!description) description = doc.querySelector('meta[name="description"]')?.content;
-    if (!description) description = '';
-
-    let domain = '';
-    let displayUrl = url;
-    try {
-      const urlObj = new URL(url);
-      domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
-      displayUrl = `${urlObj.protocol}//${domain}${urlObj.pathname}${urlObj.search}`;
-    } catch (e) { }
-
-    return { title, image, description, domain, url: displayUrl };
+    const response = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`);
+    const json = await response.json();
+    
+    if (json.status === 'success' && json.data) {
+      const { title, description, image, url: actualUrl, publisher } = json.data;
+      
+      let domain = publisher || '';
+      let displayUrl = actualUrl || url;
+      
+      if (!domain) {
+        try {
+          const urlObj = new URL(displayUrl);
+          domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
+        } catch (e) {}
+      }
+      
+      return {
+        title: title || displayUrl,
+        image: image?.url || '',
+        description: description || '',
+        domain: domain || new URL(displayUrl).hostname.replace(/^www\./, ''),
+        url: displayUrl
+      };
+    }
+    throw new Error('Microlink API did not return success status');
   } catch (error) {
-    console.error("Link preview fetch failed:", error);
-    return null;
+    console.error("Primary link preview fetch failed, trying fallback:", error);
+    try {
+      const fallbackResponse = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
+      const fallbackData = await fallbackResponse.json();
+      const html = fallbackData.contents;
+      
+      if (!html) return null;
+      
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+
+      let title = doc.querySelector('meta[property="og:title"]')?.content || doc.querySelector('meta[name="twitter:title"]')?.content || doc.title || url;
+      let image = doc.querySelector('meta[property="og:image"]')?.content || doc.querySelector('meta[name="twitter:image"]')?.content || '';
+      let description = doc.querySelector('meta[property="og:description"]')?.content || doc.querySelector('meta[name="twitter:description"]')?.content || doc.querySelector('meta[name="description"]')?.content || '';
+
+      let domain = '';
+      let displayUrl = url;
+      try {
+        const urlObj = new URL(url);
+        domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
+        displayUrl = `${urlObj.protocol}//${domain}${urlObj.pathname}${urlObj.search}`;
+      } catch (e) {}
+
+      return { title, image, description, domain, url: displayUrl };
+    } catch (fallbackError) {
+      console.error("Fallback link preview fetch failed:", fallbackError);
+      return null;
+    }
   }
 };
 
