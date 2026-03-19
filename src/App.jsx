@@ -2550,7 +2550,7 @@ export default function App() {
                 width: 16px;
                 height: 16px;
                 border: 1.5px solid var(--color-icon-muted);
-                border-radius: 6px;
+                border-radius: calc(4px + var(--radius-bonus));
                 cursor: pointer;
                 background-color: white;
                 transition: all 0.2s ease;
@@ -2916,8 +2916,8 @@ export default function App() {
               <div className="px-3 py-2 space-y-3">
                 {[1, 2, 3, 4, 5].map(i => (
                   <div key={i} className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded-[4px] bg-[var(--color-bg-hover)] animate-pulse" />
-                    <div className="flex-1 h-3 rounded-[4px] bg-[var(--color-bg-hover)] animate-pulse opacity-60" />
+                    <div className="w-5 h-5 rounded-[calc(4px+var(--radius-bonus))] bg-[var(--color-bg-hover)] animate-pulse" />
+                    <div className="flex-1 h-3 rounded-[calc(4px+var(--radius-bonus))] bg-[var(--color-bg-hover)] animate-pulse opacity-60" />
                   </div>
                 ))}
               </div>
