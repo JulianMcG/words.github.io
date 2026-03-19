@@ -3867,31 +3867,31 @@ export default function App() {
 
       {/* Sync Suggestion Popup */}
       {showSyncSuggestion && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[90] animate-slide-in-bottom">
-          <div className="flex justify-between items-start mb-2">
-            <h3 className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-              <Cloud size={16} className="text-[var(--color-text-primary)]" /> Back up your data
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[90] animate-slide-in-right">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="font-medium text-sm text-[var(--color-text-primary)] flex items-center gap-2">
+              <Cloud size={16} className="text-[var(--color-text-faint)]" /> Back up your data
             </h3>
             <button
               onClick={() => {
                 setShowSyncSuggestion(false);
                 localStorage.setItem('words_dismissed_sync', 'true');
               }}
-              className="text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] p-1 rounded-md"
+              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors"
             >
               <X size={14} />
             </button>
           </div>
-          <p className="text-sm text-[var(--color-text-muted)] mb-4 leading-relaxed">
+          <p className="text-xs text-[var(--color-text-muted)] mb-4 leading-relaxed">
             You've created a few documents! Consider enabling Cloud Sync so you don't lose your work.
           </p>
-          <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
             <button
               onClick={() => {
                 setShowSyncSuggestion(false);
                 setAuthModal('login');
               }}
-              className="w-full py-2 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] rounded-lg text-sm font-medium transition-opacity hover:opacity-90"
+              className="flex-1 py-1.5 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] rounded-md text-xs font-medium transition-opacity hover:opacity-90"
             >
               Enable Sync
             </button>
@@ -3900,9 +3900,9 @@ export default function App() {
                 setShowSyncSuggestion(false);
                 localStorage.setItem('words_dismissed_sync', 'true');
               }}
-              className="w-full py-2 bg-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg text-sm font-medium transition-colors"
+              className="flex-1 py-1.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-md text-xs font-medium transition-colors"
             >
-              Maybe later
+              Later
             </button>
           </div>
         </div>
@@ -3910,27 +3910,27 @@ export default function App() {
 
       {/* Custom Share UI Popup */}
       {sharePopupInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[100] animate-slide-in-right">
-          <div className="flex justify-between items-start mb-3">
-            <h3 className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-              <Share size={16} className="text-[var(--color-text-primary)]" /> Document Shared
-            </h3>
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[100] animate-slide-in-right flex flex-col gap-3">
+          <div className="flex justify-between items-start">
+            <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
+              <div className="bg-[var(--color-bg-secondary)] p-1.5 rounded-md border border-[var(--color-border-primary)] shadow-sm">
+                <Share size={14} className="text-[var(--color-text-primary)]" />
+              </div>
+              Link Copied
+            </div>
             <button 
               onClick={() => setSharePopupInfo(null)} 
-              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors mt-1"
             >
-              <X size={16} />
+              <X size={14} />
             </button>
           </div>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1 mb-4">
-            A sharable link was generated. Anyone with this link will receive a copy of this document.
-          </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mt-1">
             <input 
               type="text" 
               readOnly 
               value={sharePopupInfo.url} 
-              className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none"
+              className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] outline-none selection:bg-[var(--color-border-primary)]"
               onClick={(e) => {
                 e.target.select();
                 navigator.clipboard.writeText(sharePopupInfo.url);
@@ -3940,10 +3940,10 @@ export default function App() {
               onClick={async () => {
                 await navigator.clipboard.writeText(sharePopupInfo.url);
               }}
-              className="flex-shrink-0 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] p-2 rounded-md hover:opacity-90 transition-opacity"
+              className="flex-shrink-0 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-primary)] p-1.5 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors"
               title="Copy link"
             >
-              <Copy size={16} />
+              <Copy size={14} />
             </button>
           </div>
         </div>
