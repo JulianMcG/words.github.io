@@ -2549,7 +2549,7 @@ export default function App() {
                 top: 0.35em;
                 width: 16px;
                 height: 16px;
-                border: 1.5px solid var(--color-icon-muted);
+                box-shadow: inset 0 0 0 1.5px var(--color-icon-muted);
                 border-radius: calc(4px + var(--radius-bonus));
                 cursor: pointer;
                 background-color: white;
@@ -2558,7 +2558,7 @@ export default function App() {
 
               .editor-content ul.checklist>li.checked::before {
                 background-color: var(--color-accent);
-                border-color: var(--color-accent);
+                box-shadow: inset 0 0 0 1.5px var(--color-accent);
                 background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
                 background-size: 12px 12px;
                 background-position: center;
