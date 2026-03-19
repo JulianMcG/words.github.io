@@ -2651,8 +2651,7 @@ export default function App() {
                 background: var(--color-bg-secondary, #fff);
                 color: var(--color-text-muted, #888);
                 border-radius: 50%;
-                corner-shape: round !important;
-                -webkit-corner-shape: round !important;
+                corner-shape: round;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -2927,8 +2926,8 @@ export default function App() {
               <>
                 {/* Pinned Tabs (Icons Only) */}
                 {pinnedDocs.length > 0 && (
-                  <div className="mb-4 px-3">
-                    <div className="flex flex-wrap gap-2 p-3 -m-3">
+                  <div className="mb-4">
+                    <div className="flex flex-wrap gap-1">
                       {pinnedDocs.map((doc) => {
                         const isActive = activeDocId === doc.id;
                         const isSelected = selectedDocIds.includes(doc.id);
@@ -2962,7 +2961,6 @@ export default function App() {
                             <button
                               onClick={(e) => togglePinDoc(e, doc.id)}
                               className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
-                              style={{ cornerShape: 'round', WebkitCornerShape: 'round' }}
                               title="Unpin"
                             >
                               <PinOff size={10} />
@@ -3047,7 +3045,7 @@ export default function App() {
                               onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
                             >
                               <button 
-                                className="transition-colors hover:opacity-80"
+                                className="hover:opacity-80 transition-opacity"
                                 style={{ color: group.color || 'var(--color-icon-muted)' }}
                               >
                                 {group.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
