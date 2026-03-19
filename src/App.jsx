@@ -619,6 +619,20 @@ export default function App() {
   const skipSyncRef = useRef(false);
   const pendingLocalSaveRef = useRef(false);
 
+  useEffect(() => {
+    if (sharePopupInfo && !sharePopupInfo.isClosing) {
+      const timer = setTimeout(() => {
+        setSharePopupInfo(prev => prev ? { ...prev, isClosing: true } : null);
+      }, 4000); // 4 seconds
+      return () => clearTimeout(timer);
+    } else if (sharePopupInfo?.isClosing) {
+      const timer = setTimeout(() => {
+        setSharePopupInfo(null);
+      }, 300); // wait for 300ms exit transition
+      return () => clearTimeout(timer);
+    }
+  }, [sharePopupInfo]);
+
   // We don't want to use state for the backups, otherwise they re-render when they shouldn't.
   // We'll use refs, and initialize them from localStorage if they exist.
   const localBackupDocsRef = useRef(() => {
@@ -3901,12 +3915,15 @@ export default function App() {
 
       {/* Custom Share UI Popup */}
       {sharePopupInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[100] animate-in slide-in-from-bottom-5">
+        <div className={`fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[100] transition-all duration-300 ${sharePopupInfo.isClosing ? 'translate-y-8 opacity-0' : 'translate-y-0 opacity-100 animate-in slide-in-from-bottom-5 fade-in'}`}>
           <div className="flex justify-between items-start mb-3">
             <h3 className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
               <Share size={16} className="text-[var(--color-text-primary)]" /> Document Shared
             </h3>
-            <button onClick={() => setSharePopupInfo(null)} className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors">
+            <button 
+              onClick={() => setSharePopupInfo(prev => prev ? { ...prev, isClosing: true } : null)} 
+              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+            >
               <X size={16} />
             </button>
           </div>
