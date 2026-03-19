@@ -615,6 +615,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [showSyncSuggestion, setShowSyncSuggestion] = useState(false);
+  const [sharePopupInfo, setSharePopupInfo] = useState(null);
   const skipSyncRef = useRef(false);
   const pendingLocalSaveRef = useRef(false);
 
@@ -821,8 +822,6 @@ export default function App() {
                    return updated;
                 });
                 setActiveDocId(newDocId);
-                
-                alert("Successfully imported shared document!");
              } else {
                 alert("Shared document not found or access denied.");
              }
@@ -1516,7 +1515,7 @@ export default function App() {
       }
       const shareUrl = `${window.location.origin}${window.location.pathname}?share=${docId}`;
       await navigator.clipboard.writeText(shareUrl);
-      alert("Share link copied to clipboard! Anyone with this link will receive a copy of this document.");
+      setSharePopupInfo({ url: shareUrl });
     } catch (e) {
       console.error(e);
       alert("Failed to share document. " + e.message);
@@ -3899,6 +3898,45 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Custom Share UI Popup */}
+      {sharePopupInfo && (
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-5 w-80 z-[100] animate-in slide-in-from-bottom-5">
+          <div className="flex justify-between items-start mb-3">
+            <h3 className="font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+              <Share size={16} className="text-[var(--color-text-primary)]" /> Document Shared
+            </h3>
+            <button onClick={() => setSharePopupInfo(null)} className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1 mb-4">
+            A sharable link was generated. Anyone with this link will receive a copy of this document.
+          </p>
+          <div className="flex items-center gap-2">
+            <input 
+              type="text" 
+              readOnly 
+              value={sharePopupInfo.url} 
+              className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none"
+              onClick={(e) => {
+                e.target.select();
+                navigator.clipboard.writeText(sharePopupInfo.url);
+              }}
+            />
+            <button 
+              onClick={async () => {
+                await navigator.clipboard.writeText(sharePopupInfo.url);
+              }}
+              className="flex-shrink-0 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] p-2 rounded-md hover:opacity-90 transition-opacity"
+              title="Copy link"
+            >
+              <Copy size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
