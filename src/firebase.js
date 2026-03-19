@@ -21,18 +21,10 @@ googleProvider.setCustomParameters({
   prompt: 'select_account'
 });
 
-const driveProvider = new GoogleAuthProvider();
-driveProvider.addScope('https://www.googleapis.com/auth/drive.file');
-driveProvider.setCustomParameters({
-  prompt: 'select_account'
-});
-
 export {
   auth,
   db,
-  GoogleAuthProvider,
   googleProvider,
-  driveProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
