@@ -2927,11 +2927,8 @@ export default function App() {
               <>
                 {/* Pinned Tabs (Icons Only) */}
                 {pinnedDocs.length > 0 && (
-                  <div className="mb-4">
-                    <div className="text-xs font-medium text-[var(--color-text-faint)] uppercase tracking-wider mb-2 px-3 relative z-10 pointer-events-none">
-                      Pinned
-                    </div>
-                    <div className="flex flex-wrap gap-2 px-3 pt-3 pb-2 -mt-3 -mb-2">
+                  <div className="mb-4 px-3">
+                    <div className="flex flex-wrap gap-2 p-3 -m-3">
                       {pinnedDocs.map((doc) => {
                         const isActive = activeDocId === doc.id;
                         const isSelected = selectedDocIds.includes(doc.id);
