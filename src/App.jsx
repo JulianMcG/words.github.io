@@ -2927,8 +2927,11 @@ export default function App() {
               <>
                 {/* Pinned Tabs (Icons Only) */}
                 {pinnedDocs.length > 0 && (
-                  <div className="mb-4 px-3">
-                    <div className="flex flex-wrap gap-1 p-2 -m-2">
+                  <div className="mb-4">
+                    <div className="text-xs font-medium text-[var(--color-text-faint)] uppercase tracking-wider mb-2 px-3 relative z-10 pointer-events-none">
+                      Pinned
+                    </div>
+                    <div className="flex flex-wrap gap-2 px-3 pt-3 pb-2 -mt-3 -mb-2">
                       {pinnedDocs.map((doc) => {
                         const isActive = activeDocId === doc.id;
                         const isSelected = selectedDocIds.includes(doc.id);
@@ -3046,7 +3049,10 @@ export default function App() {
                               className="flex items-center gap-1.5 flex-1 cursor-pointer overflow-hidden"
                               onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
                             >
-                              <button className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)]">
+                              <button 
+                                className="transition-colors hover:opacity-80"
+                                style={{ color: group.color || 'var(--color-icon-muted)' }}
+                              >
                                 {group.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                               </button>
                               <div
