@@ -39,10 +39,9 @@ import {
   Unlink,
   Cloud,
   CloudOff,
-  LogOut,
-  Calendar
+  LogOut
 } from "lucide-react";
-import { auth, db, googleProvider, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
+import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot } from "./firebase";
 
 const EMOJIS = [
   "📄",
@@ -492,13 +491,6 @@ const COMMANDS = [
   </div>
 </div>
 <p><br></p>`,
-  },
-  {
-    id: "calendar",
-    title: "Calendar Sync",
-    description: "Sync events from Google Calendar.",
-    icon: Calendar,
-    type: "calendar",
   },
 ];
 
@@ -967,92 +959,10 @@ export default function App() {
     return () => clearTimeout(timeout);
   }, [docs, groups, activeDocId, lockPasscode, user]);
 
-  useEffect(() => {
-    if (!user || !editorRef.current) return;
-    const token = localStorage.getItem('google_access_token');
-    if (!token) return;
-
-    let isMounted = true;
-    
-    // Assign global dismiss handler
-    window.dismissGcalEvent = (id) => {
-      const dismissed = JSON.parse(localStorage.getItem('words_dismissed_gcal_events') || '[]');
-      if (!dismissed.includes(id)) {
-        dismissed.push(id);
-        localStorage.setItem('words_dismissed_gcal_events', JSON.stringify(dismissed));
-        fetchEvents(); // update immediately
-      }
-    };
-
-    const fetchEvents = async () => {
-      if (!editorRef.current) return;
-      const gcalBlocks = editorRef.current.querySelectorAll('.gcal-block');
-      if (gcalBlocks.length === 0) return;
-
-      try {
-        const now = new Date().toISOString();
-        const maxDate = new Date();
-        maxDate.setDate(maxDate.getDate() + 14); // 2 weeks
-        const maxTime = maxDate.toISOString();
-        
-        const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${now}&timeMax=${maxTime}&orderBy=startTime&singleEvents=true`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        if (res.status === 401) {
-           console.warn("Google Calendar token expired");
-           return;
-        }
-        
-        const data = await res.json();
-        const events = data.items || [];
-        const dismissed = JSON.parse(localStorage.getItem('words_dismissed_gcal_events') || '[]');
-        
-        const visibleEvents = events.filter(e => !dismissed.includes(e.id));
-        
-        gcalBlocks.forEach(block => {
-          let html = '<div class="gcal-header" style="font-weight: bold; margin-bottom: 0.5em; display:flex; align-items:center; gap:0.5em;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg> Upcoming Tasks</div>';
-          
-          if (visibleEvents.length === 0) {
-            html += '<div style="color:var(--text-secondary);font-size:0.9em;padding:0.5em 0;">No upcoming tasks.</div>';
-          } else {
-            html += '<ul class="checklist gcal-checklist" style="margin:0; padding:0; list-style:none;">';
-            visibleEvents.forEach(e => {
-              html += `<li class="gcal-item" data-event-id="${e.id}" style="margin-bottom:0.8em; position:relative; min-height: 24px; display:flex; flex-direction:column; justify-content:center;">
-                <span class="checklist-text">${e.summary || 'Busy'}</span>
-                <div style="font-size:0.75em; color:var(--text-secondary); margin-top:2px;">${new Date(e.start.dateTime || e.start.date).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</div>
-              </li>`;
-            });
-            html += '</ul>';
-          }
-          
-          if (block.innerHTML !== html) {
-            block.innerHTML = html;
-            block.removeAttribute('data-loading');
-          }
-        });
-      } catch(e) {
-        console.error(e);
-      }
-    };
-    
-    fetchEvents();
-    const iv = setInterval(fetchEvents, 60000); // refresh every minute
-
-    return () => {
-      isMounted = false;
-      clearInterval(iv);
-    };
-  }, [user, activeDocId]);
-
   const handleGoogleLogin = (e) => {
     e.preventDefault();
     signInWithPopup(auth, googleProvider)
-      .then((result) => {
-        const credential = GoogleAuthProvider.credentialFromResult(result);
-        if (credential && credential.accessToken) {
-          localStorage.setItem('google_access_token', credential.accessToken);
-        }
+      .then(() => {
         setAuthError('');
       })
       .catch((error) => {
@@ -1816,14 +1726,6 @@ export default function App() {
           }
         }
       }, 10);
-    } else if (command.type === "calendar") {
-      const token = localStorage.getItem('google_access_token');
-      if (!token) {
-        alert("Please sign in with Google to use Calendar Sync.");
-      } else {
-        const placeholderHtml = `<div class="gcal-block" contenteditable="false" data-loading="true" style="margin: 1.5em 0; padding: 1.5em; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary);">Loading Google Calendar events...</div><p><br></p>`;
-        document.execCommand("insertHTML", false, placeholderHtml);
-      }
     }
 
     setSlashState((prev) => ({ ...prev, isOpen: false, query: "" }));
@@ -1944,12 +1846,6 @@ export default function App() {
         const rect = e.target.getBoundingClientRect();
         if (e.clientX >= rect.left && e.clientX <= rect.left + 24) {
           e.target.classList.toggle("checked");
-          if (ul.classList.contains("gcal-checklist")) {
-            const eventId = e.target.getAttribute("data-event-id");
-            if (eventId && window.dismissGcalEvent) {
-              window.dismissGcalEvent(eventId);
-            }
-          }
           syncContentToState();
           e.preventDefault();
           return;
