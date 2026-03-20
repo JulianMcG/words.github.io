@@ -2720,10 +2720,28 @@ export default function App() {
               .editor-content ul.checklist>li.checked::before {
                 background-color: var(--color-accent);
                 box-shadow: inset 0 0 0 1.5px var(--color-accent);
-                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
-                background-size: 12px 12px;
-                background-position: center;
-                background-repeat: no-repeat;
+              }
+
+              .editor-content ul.checklist>li.checked::after {
+                content: '';
+                position: absolute;
+                left: calc(0.1em + 5.5px);
+                top: calc(0.35em + 2.5px);
+                width: 5px;
+                height: 9px;
+                border: solid white;
+                border-width: 0 2px 2px 0;
+                transform: rotate(45deg);
+                animation: wordsDrawCheck 0.2s ease-out forwards;
+              }
+
+              @keyframes wordsDrawCheck {
+                0% {
+                  clip-path: circle(0% at 0% 100%);
+                }
+                100% {
+                  clip-path: circle(150% at 0% 100%);
+                }
               }
 
               .editor-content ul.checklist>li.checked {
@@ -3921,10 +3939,7 @@ export default function App() {
         <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[100] animate-slide-in-right flex flex-col gap-3">
           <div className="flex justify-between items-start">
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
-              <div className="bg-[var(--color-bg-secondary)] p-1.5 rounded-md border border-[var(--color-border-primary)] shadow-sm">
-                <Share size={14} className="text-[var(--color-text-primary)]" />
-              </div>
-              Link Copied
+              <Share size={16} className="text-[var(--color-text-faint)]" /> Link Copied
             </div>
             <button 
               onClick={() => setSharePopupInfo(null)} 
