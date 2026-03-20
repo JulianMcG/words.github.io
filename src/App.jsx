@@ -616,6 +616,8 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [showSyncSuggestion, setShowSyncSuggestion] = useState(false);
   const [sharePopupInfo, setSharePopupInfo] = useState(null);
+  const [pendingShareId, setPendingShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
+  const [isCloudDocsLoaded, setIsCloudDocsLoaded] = useState(false);
   const skipSyncRef = useRef(false);
   const pendingLocalSaveRef = useRef(false);
 
@@ -805,50 +807,47 @@ export default function App() {
 
   // Handle Shared Document Links
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const shareId = params.get('share');
-    if (shareId) {
-       const cloneSharedDoc = async () => {
-          try {
-             const sharedSnap = await getDoc(doc(db, "shared_documents", shareId));
-             if (sharedSnap.exists()) {
-                const data = sharedSnap.data();
-                const newDocId = crypto.randomUUID();
-                const newDoc = {
-                   id: newDocId,
-                   title: (data.title || "Untitled") + " (Shared Copy)",
-                   content: data.content,
-                   isPinned: false,
-                   emoji: data.emoji || null,
-                   hasCustomEmoji: data.hasCustomEmoji || false,
-                   groupId: null,
-                   isLocked: false 
-                };
-                
-                setDocs(prev => {
-                   const updated = [newDoc, ...prev];
-                   docsRef.current = updated;
-                   return updated;
-                });
-                setActiveDocId(newDocId);
-             } else {
-                alert("Shared document not found or access denied.");
-             }
-          } catch(e) {
-             console.error(e);
-             alert("Error loading shared document: " + e.message);
-          }
-          const newUrl = window.location.origin + window.location.pathname;
-          window.history.replaceState({}, document.title, newUrl);
-       };
-       cloneSharedDoc();
-    }
-  }, []);
+    if (!pendingShareId || isAuthLoading || (!isCloudDocsLoaded && user)) return;
+
+    const cloneSharedDoc = async () => {
+      try {
+        const sharedSnap = await getDoc(doc(db, "shared_documents", pendingShareId));
+        if (sharedSnap.exists()) {
+          const data = sharedSnap.data();
+          const newDocId = crypto.randomUUID();
+          const newDoc = {
+             id: newDocId,
+             title: (data.title || "Untitled") + " (Shared Copy)",
+             content: data.content,
+             isPinned: false,
+             emoji: data.emoji || null,
+             hasCustomEmoji: data.hasCustomEmoji || false,
+             groupId: null,
+             isLocked: false 
+          };
+          
+          setDocs(prev => {
+             const updated = [newDoc, ...prev];
+             docsRef.current = updated;
+             return updated;
+          });
+          setActiveDocId(newDocId);
+        }
+      } catch(e) {
+        console.error("Failed to load or parse shared document.", e);
+      }
+      const newUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+      setPendingShareId(null);
+    };
+    cloneSharedDoc();
+  }, [pendingShareId, isAuthLoading, isCloudDocsLoaded, user]);
 
   // Firebase Auth Listener - Handles Auth State Transitions (Login/Logout)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setIsAuthLoading(false);
+      if (!currentUser) setIsCloudDocsLoaded(true);
       if (currentUser && !user) {
         // Logging in. 
         // 0. Prevent local sync to cloud until initialization fetch completes.
@@ -1009,6 +1008,7 @@ export default function App() {
           skipSyncRef.current = false;
         });
       }
+      setIsCloudDocsLoaded(true);
     });
 
     return () => unsubscribe();
