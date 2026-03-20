@@ -985,7 +985,10 @@ export default function App() {
 
           setTimeout(() => {
             skipSyncRef.current = false;
+            setIsCloudDocsLoaded(true);
           }, 100);
+        } else {
+          setIsCloudDocsLoaded(true);
         }
       } else {
         // New user (document does not exist in Firestore).
@@ -1006,9 +1009,9 @@ export default function App() {
           lastUpdated: new Date().toISOString()
         }).then(() => {
           skipSyncRef.current = false;
+          setIsCloudDocsLoaded(true);
         });
       }
-      setIsCloudDocsLoaded(true);
     });
 
     return () => unsubscribe();
