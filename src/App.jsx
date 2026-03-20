@@ -3233,10 +3233,10 @@ export default function App() {
                               onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
                             >
                               <button 
-                                className="hover:opacity-80 transition-opacity"
+                                className="hover:opacity-80 transition-opacity flex items-center justify-center w-4 h-4"
                                 style={{ color: group.color || 'var(--color-icon-muted)' }}
                               >
-                                {group.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                                <ChevronRight size={14} className={`transition-transform duration-200 ${!group.isCollapsed ? 'rotate-90' : ''}`} />
                               </button>
                               <div
                                 className="flex-shrink-0 cursor-pointer transition-transform hover:scale-110"
@@ -3322,18 +3322,21 @@ export default function App() {
                           </div>
 
                           {/* Docs mapping inside this group */}
-                          {!group.isCollapsed && groupDocs.length > 0 && (
-                            <div className="pl-4 pr-1 mt-0.5 space-y-[1px]">
-                              {groupDocs.map(renderDocItem)}
+                          <div 
+                            className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${group.isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
+                          >
+                            <div className="overflow-hidden">
+                              <div className="pl-4 pr-1 pt-0.5 pb-1 space-y-[1px]">
+                                {groupDocs.length > 0 ? (
+                                  groupDocs.map(renderDocItem)
+                                ) : (
+                                  <div className="pl-4 py-1.5 text-[12px] text-[var(--color-text-faint)] italic select-none">
+                                    Empty
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          )}
-
-                          {/* Empty state for group */}
-                          {!group.isCollapsed && groupDocs.length === 0 && (
-                            <div className="pl-8 py-2 text-[12px] text-[var(--color-text-faint)] italic select-none">
-                              Empty
-                            </div>
-                          )}
+                          </div>
                         </div>
                       );
                     })}
