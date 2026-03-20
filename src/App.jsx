@@ -2722,7 +2722,7 @@ export default function App() {
                 box-shadow: inset 0 0 0 1.5px var(--color-accent);
               }
 
-              .editor-content ul.checklist>li.checked::after {
+              .editor-content ul.checklist>li::after {
                 content: '';
                 position: absolute;
                 left: calc(0.1em + 5.5px);
@@ -2732,16 +2732,14 @@ export default function App() {
                 border: solid white;
                 border-width: 0 2px 2px 0;
                 transform: rotate(45deg);
-                animation: wordsDrawCheck 0.2s ease-out forwards;
+                clip-path: circle(0% at 0% 100%);
+                opacity: 0;
+                transition: clip-path 0.2s ease-out, opacity 0.2s ease-out;
               }
 
-              @keyframes wordsDrawCheck {
-                0% {
-                  clip-path: circle(0% at 0% 100%);
-                }
-                100% {
-                  clip-path: circle(150% at 0% 100%);
-                }
+              .editor-content ul.checklist>li.checked::after {
+                clip-path: circle(150% at 0% 100%);
+                opacity: 1;
               }
 
               .editor-content ul.checklist>li.checked {
