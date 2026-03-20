@@ -923,7 +923,12 @@ export default function App() {
 
   // Sync Suggestion Logic
   useEffect(() => {
-    if (user) return; // Already logged in
+    if (isAuthLoading) return; // Wait for initial auth response
+
+    if (user) {
+      setShowSyncSuggestion(false);
+      return;
+    }
 
     // Suggest if they have more than 3 documents
     if (docs.length >= 4) {
@@ -932,7 +937,7 @@ export default function App() {
         setShowSyncSuggestion(true);
       }
     }
-  }, [docs, user]);
+  }, [docs, user, isAuthLoading]);
 
   // Two-way Sync with Firestore
   useEffect(() => {
