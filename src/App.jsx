@@ -602,6 +602,7 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState(null); // { docId, x, y }
   const [groupMenuOpen, setGroupMenuOpen] = useState(null);
   const [editingGroupId, setEditingGroupId] = useState(null);
+  const [animatingDocId, setAnimatingDocId] = useState(null);
   const [lockPasscode, setLockPasscode] = useState(() => localStorage.getItem('words_lock_passcode') || null);
   const [lockModal, setLockModal] = useState(null); // { mode: 'create' | 'unlock', docId }
   const [passcodeInput, setPasscodeInput] = useState('');
@@ -1388,6 +1389,11 @@ export default function App() {
     docsRef.current = newDocs;
     setDocs(newDocs);
 
+    setAnimatingDocId(newId);
+    setTimeout(() => {
+      setAnimatingDocId((prev) => (prev === newId ? null : prev));
+    }, 1000);
+
     prevActiveDocIdRef.current = newId;
     setActiveDocId(newId);
     setSelectedDocIds([newId]);
@@ -1513,6 +1519,11 @@ export default function App() {
       docsRef.current = updated;
       return updated;
     });
+
+    setAnimatingDocId(newDocId);
+    setTimeout(() => {
+      setAnimatingDocId((prev) => (prev === newDocId ? null : prev));
+    }, 1000);
 
     setActiveDocId(newDocId);
     setContextMenu(null);
@@ -2567,7 +2578,7 @@ export default function App() {
         className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${isSelected
           ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
           : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-          }`}
+          } ${animatingDocId === doc.id ? "animate-in fade-in slide-in-from-left-4 duration-500 bg-[var(--color-bg-hover-strong)]" : ""}`}
       >
         {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
           <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
