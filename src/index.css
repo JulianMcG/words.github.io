@@ -1,5 +1,5 @@
 @import "tailwindcss";
-
+@plugin "tailwindcss-animate";
 @theme {
   --color-bg-primary: #ffffff;
   --color-bg-secondary: #f7f7f5;
@@ -112,6 +112,23 @@ body {
 
   .animate-slide-in-bottom {
     animation: slide-in-bottom 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes tasteful-pop {
+    0% {
+      transform: scale(0.5);
+      filter: blur(4px);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(1);
+      filter: blur(0);
+      opacity: 1;
+    }
+  }
+
+  .animate-tasteful-pop {
+    animation: tasteful-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards !important;
   }
 }
 
