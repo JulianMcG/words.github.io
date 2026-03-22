@@ -43,6 +43,8 @@ import {
   Copy
 } from "lucide-react";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
+import { motion, AnimatePresence } from "framer-motion";
+import GradualBlur from "./components/GradualBlur";
 
 const EMOJIS = [
   "📄",
@@ -555,8 +557,12 @@ const fetchLinkPreviewData = async (url) => {
 };
 
 export default function App() {
+  const sidebarScrollRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
+  const [isSidebarScrolled, setIsSidebarScrolled] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [animatingEmojiDocId, setAnimatingEmojiDocId] = useState(null);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [docs, setDocs] = useState(() => {
     const saved = localStorage.getItem("words_docs");
@@ -1187,7 +1193,14 @@ export default function App() {
 
           if (!d.hasCustomEmoji) {
             const autoEmoji = getEmojiForTitle(newTitle);
-            if (autoEmoji) nextEmoji = autoEmoji;
+            if (autoEmoji && autoEmoji !== d.emoji) {
+              nextEmoji = autoEmoji;
+              
+              setAnimatingEmojiDocId(d.id);
+              setTimeout(() => {
+                setAnimatingEmojiDocId(prev => prev === d.id ? null : prev);
+              }, 200);
+            }
           }
 
           return { ...d, emoji: nextEmoji };
@@ -1401,6 +1414,12 @@ export default function App() {
     // Load the new doc into the editor directly
     if (titleRef.current) titleRef.current.innerText = "";
     if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
+
+    if (sidebarScrollRef.current && !targetGroupId) {
+      setTimeout(() => {
+        sidebarScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 10);
+    }
   };
 
   const createGroup = () => {
@@ -2566,72 +2585,84 @@ export default function App() {
     const isSelected = selectedDocIds.includes(doc.id);
     const isActive = activeDocId === doc.id;
     return (
-      <div
+      <motion.div
+        layout
+        initial={{ opacity: 0, height: 0, scale: 0.95, filter: 'blur(4px)', marginBottom: 0 }}
+        animate={{ opacity: 1, height: "auto", scale: 1, filter: 'blur(0px)', marginBottom: 1 }}
+        exit={{ opacity: 0, height: 0, scale: 0.95, filter: 'blur(2px)', marginBottom: 0 }}
+        transition={{ type: "spring", stiffness: 450, damping: 35, mass: 1 }}
+        style={{ overflow: "hidden", transformOrigin: "top" }}
         key={doc.id}
-        draggable
-        onDragStart={(e) => handleDragStart(e, 'doc', doc.id)}
-        onDragEnd={handleDragEnd}
-        onDragOver={(e) => handleSidebarDragOver(e, doc.id, 'doc')}
-        onDragLeave={handleDragLeave}
-        onDrop={(e) => handleDropOnDoc(e, doc.id)}
-        onClick={(e) => handleDocClick(e, doc.id)}
-        className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${isSelected
-          ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
-          : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-          } ${animatingDocId === doc.id ? "animate-in fade-in slide-in-from-left-4 duration-500 bg-[var(--color-bg-hover-strong)]" : ""}`}
       >
-        {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
-          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
-        )}
         <div
-          ref={(el) => {
-            if (el) {
-              const isOverflowing = el.scrollWidth > el.clientWidth;
-              if (isOverflowing) {
-                el.classList.add('sidebar-doc-text');
-              } else {
-                el.classList.remove('sidebar-doc-text');
-              }
-            }
-          }}
-          className="flex items-center gap-2.5 flex-1 min-w-0 overflow-hidden"
+          draggable
+          onDragStart={(e) => handleDragStart(e, 'doc', doc.id)}
+          onDragEnd={handleDragEnd}
+          onDragOver={(e) => handleSidebarDragOver(e, doc.id, 'doc')}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => handleDropOnDoc(e, doc.id)}
+          onClick={(e) => handleDocClick(e, doc.id)}
+          className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${isSelected
+            ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
+            : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+            }`}
         >
-          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
-            {doc.isLocked ? (
-              <Lock
-                size={16}
-                className="text-[var(--color-icon-muted)]"
-              />
-            ) : doc.emoji ? (
-              <span className="animate-in zoom-in spin-in-12 duration-300">
-                {doc.emoji}
-              </span>
-            ) : (
-              <FileText
-                size={16}
-                className={
-                  isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"
+          {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+          )}
+          <div
+            ref={(el) => {
+              if (el) {
+                const isOverflowing = el.scrollWidth > el.clientWidth;
+                if (isOverflowing) {
+                  el.classList.add('sidebar-doc-text');
+                } else {
+                  el.classList.remove('sidebar-doc-text');
                 }
-              />
-            )}
-          </div>
-          <span className="text-[14px] select-none whitespace-nowrap">
-            {doc.title || "Untitled"}
-          </span>
-        </div>
-        <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-          <button
-            onClick={(e) => handleContextMenu(e, doc.id)}
-            className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
-            title="More options"
+              }
+            }}
+            className="flex items-center gap-2.5 flex-1 min-w-0 overflow-hidden"
           >
-            <MoreHorizontal size={14} />
-          </button>
+            <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+              {doc.isLocked ? (
+                <Lock
+                  size={16}
+                  className="text-[var(--color-icon-muted)]"
+                />
+              ) : doc.emoji ? (
+                <span
+                  key={animatingEmojiDocId === doc.id ? `anim-${doc.emoji}` : doc.emoji}
+                  className={`${animatingEmojiDocId === doc.id ? 'animate-tasteful-pop' : ''} inline-block leading-none`}
+                >
+                  {doc.emoji}
+                </span>
+              ) : (
+                <FileText
+                  size={16}
+                  className={
+                    isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"
+                  }
+                />
+              )}
+            </div>
+            <span className="text-[14px] select-none whitespace-nowrap">
+              {doc.title || "Untitled"}
+            </span>
+          </div>
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+            <button
+              onClick={(e) => handleContextMenu(e, doc.id)}
+              className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
+              title="More options"
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          </div>
+          {dragTarget?.id === doc.id && dragTarget?.position === 'after' && (
+            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+          )}
         </div>
-        {dragTarget?.id === doc.id && dragTarget?.position === 'after' && (
-          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
-        )}
-      </div>
+      </motion.div>
     )
   };
 
@@ -3102,7 +3133,9 @@ export default function App() {
             </button>
           </div>
           <div
+            ref={sidebarScrollRef}
             className="flex-1 overflow-y-auto no-scrollbar pb-6 mt-2 flex flex-col h-full px-2"
+            onScroll={(e) => setIsSidebarScrolled(e.currentTarget.scrollTop > 5)}
             onDragOver={handleSidebarDragOver}
             onDrop={handleDropOnSidebarRoot}
             onDoubleClick={(e) => {
@@ -3123,57 +3156,63 @@ export default function App() {
               </div>
             ) : (
               <>
-                {/* Pinned Tabs (Icons Only) */}
-                {pinnedDocs.length > 0 && (
-                  <div className="mb-4">
-                    <div className="flex flex-wrap gap-1">
-                      {pinnedDocs.map((doc) => {
-                        const isActive = activeDocId === doc.id;
-                        const isSelected = selectedDocIds.includes(doc.id);
-                        return (
-                          <div
-                            key={doc.id}
-                            data-sidebar-item
-                            onClick={(e) => handleDocClick(e, doc.id)}
-                            className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${isSelected || isActive
-                              ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
-                              : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
-                              }`}
-                            title={doc.title || "Untitled"}
-                          >
-                            <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
-                              {doc.emoji ? (
-                                <span className="animate-in zoom-in spin-in-12 duration-300">
-                                  {doc.emoji}
-                                </span>
-                              ) : (
-                                <FileText
-                                  size={20}
-                                  className={
-                                    isSelected || isActive
-                                      ? "text-[var(--color-text-muted)]"
-                                      : "text-[var(--color-icon-muted)]"
-                                  }
-                                />
-                              )}
-                            </div>
-                            <button
-                              onClick={(e) => togglePinDoc(e, doc.id)}
-                              className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
-                              title="Unpin"
-                            >
-                              <PinOff size={10} />
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
+                {/* Sticky Header Zone */}
+                <div className="sticky top-0 z-20 bg-[var(--color-bg-secondary)] pb-2 pt-2 -mt-2">
+                  <div className={`absolute top-full left-0 right-0 h-8 pointer-events-none transition-opacity duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isSidebarScrolled ? 'opacity-100' : 'opacity-0'}`}>
+                    <GradualBlur position="top" height="100%" strength={0.35} divCount={4} zIndex={0} />
+                    <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-bg-secondary)] to-transparent z-10" />
                   </div>
-                )}
+                  
+                  {/* Pinned Tabs (Icons Only) */}
+                  {pinnedDocs.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex flex-wrap gap-1">
+                        {pinnedDocs.map((doc) => {
+                          const isActive = activeDocId === doc.id;
+                          const isSelected = selectedDocIds.includes(doc.id);
+                          return (
+                            <div
+                              key={doc.id}
+                              data-sidebar-item
+                              onClick={(e) => handleDocClick(e, doc.id)}
+                              className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${isSelected || isActive
+                                ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
+                                : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
+                                }`}
+                              title={doc.title || "Untitled"}
+                            >
+                              <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
+                                {doc.emoji ? (
+                                  <span className="animate-in zoom-in spin-in-12 duration-300">
+                                    {doc.emoji}
+                                  </span>
+                                ) : (
+                                  <FileText
+                                    size={20}
+                                    className={
+                                      isSelected || isActive
+                                        ? "text-[var(--color-text-muted)]"
+                                        : "text-[var(--color-icon-muted)]"
+                                    }
+                                  />
+                                )}
+                              </div>
+                              <button
+                                onClick={(e) => togglePinDoc(e, doc.id)}
+                                className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
+                                title="Unpin"
+                              >
+                                <PinOff size={10} />
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-                {/* New Document Button or Create Group Button */}
-                <div className="flex-1 flex flex-col">
-                  <div className="space-y-[1px] mb-2">
+                  {/* New Document Button or Create Group Button */}
+                  <div className="space-y-[1px]">
                     {selectedDocIds.length > 1 ? (
                       <div
                         data-sidebar-item
@@ -3206,6 +3245,9 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                </div>
+
+                <div className="flex-1 flex flex-col relative z-0 mt-2">
                   {/* Document Groups */}
                   <div className="space-y-[2px] mb-2">
                     {groups.map((group) => {
@@ -3337,14 +3379,16 @@ export default function App() {
                             className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${group.isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
                           >
                             <div className="overflow-hidden">
-                              <div className="pl-4 pr-1 pt-0.5 pb-1 space-y-[1px]">
-                                {groupDocs.length > 0 ? (
-                                  groupDocs.map(renderDocItem)
-                                ) : (
-                                  <div className="pl-4 py-1.5 text-[12px] text-[var(--color-text-faint)] italic select-none">
-                                    Empty
-                                  </div>
-                                )}
+                              <div className="pl-4 pr-1 pt-0.5 pb-1">
+                                <AnimatePresence initial={false}>
+                                  {groupDocs.length > 0 ? (
+                                    groupDocs.map(renderDocItem)
+                                  ) : (
+                                    <div className="pl-4 py-1.5 text-[12px] text-[var(--color-text-faint)] italic select-none">
+                                      Empty
+                                    </div>
+                                  )}
+                                </AnimatePresence>
                               </div>
                             </div>
                           </div>
@@ -3354,14 +3398,22 @@ export default function App() {
                   </div>
 
                   {/* Ungrouped Documents */}
-                  <div className="space-y-[1px]">
-                    {ungroupedDocs.map(renderDocItem)}
+                  <div>
+                    <AnimatePresence initial={false}>
+                      {ungroupedDocs.map(renderDocItem)}
+                    </AnimatePresence>
                   </div>
 
                   <div className="h-24 w-full flex-shrink-0" data-sidebar-empty-zone onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
                 </div>
               </>
             )}
+          </div>
+
+          {/* Bottom styling fade */}
+          <div className="absolute bottom-0 left-0 right-0 h-24 pointer-events-none z-30">
+            <GradualBlur position="bottom" height="100%" strength={0.6} divCount={5} zIndex={0} />
+            <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-secondary)] to-transparent z-10" />
           </div>
 
           {/* Cloud Sync Toggle */}
@@ -3483,8 +3535,8 @@ export default function App() {
                 {" "}
                 {activeDoc.emoji ? (
                   <span
-                    key={activeDoc.emoji}
-                    className="animate-in zoom-in spin-in-12 duration-300 block leading-none print:translate-y-1"
+                    key={animatingEmojiDocId === activeDoc.id ? `anim-${activeDoc.emoji}` : activeDoc.emoji}
+                    className={`${animatingEmojiDocId === activeDoc.id ? 'animate-tasteful-pop' : ''} block leading-none print:translate-y-1`}
                   >
                     {" "}
                     {activeDoc.emoji}
