@@ -3219,7 +3219,7 @@ export default function App() {
                             >
                               <button
                                 onClick={(e) => { e.stopPropagation(); createNewDoc(e, group.id); }}
-                                className="p-1 hover:brightness-150 transition-all rounded"
+                                className="p-1 hover:bg-[var(--color-bg-hover)] transition-colors rounded"
                                 style={{ color: group.color || 'var(--color-text-muted)' }}
                                 title="New doc in folder"
                               >
@@ -3228,7 +3228,7 @@ export default function App() {
                               <div className="relative">
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(groupMenuOpen === group.id ? null : group.id); }}
-                                  className="p-1 hover:brightness-150 transition-all rounded"
+                                  className="p-1 hover:bg-[var(--color-bg-hover)] transition-colors rounded"
                                   style={{ color: group.color || 'var(--color-text-muted)' }}
                                   title="More options"
                                 >
