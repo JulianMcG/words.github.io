@@ -2992,14 +2992,9 @@ export default function App() {
                   </div>
 
                   {/* Pinned Tabs (Icons Only) */}
-                  {(pinnedDocs.length > 0 || draggedItem?.type === 'doc') && (
-                    <div 
-                      className="mb-4"
-                      onDragOver={(e) => handleSidebarDragOver(e, 'pinzone', 'pinzone')}
-                      onDrop={handleDropOnPinZone}
-                      onDragLeave={handleDragLeave}
-                    >
-                      <div className={`flex flex-wrap gap-1 min-h-[44px] p-1 rounded-xl transition-colors ${dragTarget?.type === 'pinzone' ? 'bg-[var(--color-bg-hover)] ring-2 ring-dashed ring-[var(--color-icon-muted)]/30' : ''}`}>
+                  {pinnedDocs.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex flex-wrap gap-1">
                         {pinnedDocs.map((doc) => {
                           const isActive = activeDocId === doc.id;
                           const isSelected = selectedDocIds.includes(doc.id);
@@ -3070,11 +3065,6 @@ export default function App() {
                             </div>
                           )
                         })}
-                        {dragTarget?.type === 'pinzone' && draggedItem?.type === 'doc' && (
-                          <div className="flex-1 min-w-[50px] max-w-[50px] h-[36px] rounded-lg border-2 border-dashed border-[var(--color-icon-muted)]/50 flex items-center justify-center opacity-70 bg-[var(--color-bg-hover)] animate-pulse shadow-inner pointer-events-none">
-                            <Pin size={16} className="text-[var(--color-icon-muted)]" />
-                          </div>
-                        )}
                       </div>
                     </div>
                   )}
