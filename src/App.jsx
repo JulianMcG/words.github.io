@@ -23,6 +23,7 @@ import {
   Table,
   Image as ImageIcon,
   Folder,
+  FolderOpen,
   FolderMinus,
   ChevronRight,
   ChevronDown,
@@ -204,6 +205,31 @@ const fetchLinkPreviewData = async (url) => {
     }
   }
 };
+const AnimatedFolder = ({ isOpen, color, fill }) => {
+  const backStyle = {
+    transform: isOpen ? "skewX(8deg)" : "skewX(0deg)"
+  };
+  const frontStyle = {
+    transform: isOpen ? "scaleY(0.7) skewX(-16deg)" : "scaleY(1) skewX(0deg)"
+  };
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="none" className="overflow-visible">
+      {/* Back tab opaque mask */}
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
+      {/* Back tab color overlay */}
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px] brightness-90" style={backStyle} />
+      {/* Back tab stroke layer */}
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" stroke={color || "currentColor"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
+      
+      {/* Front flap opaque mask */}
+      <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+      {/* Front flap color overlay */}
+      <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+      {/* Front flap stroke layer */}
+      <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" stroke={color || "currentColor"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+    </svg>
+  );
+};
 
 export default function App() {
   const sidebarScrollRef = useRef(null);
@@ -213,8 +239,10 @@ export default function App() {
   const [isSearching, setIsSearching] = useState(false);
   const [animatingEmojiDocId, setAnimatingEmojiDocId] = useState(null);
   const [previewHoverDocId, setPreviewHoverDocId] = useState(null);
+  const [previewHoverGroupId, setPreviewHoverGroupId] = useState(null);
   const hoverTimeoutRef = useRef(null);
   const [previewPos, setPreviewPos] = useState({ top: 0, left: 0 });
+  const [groupPreviewPos, setGroupPreviewPos] = useState({ top: 0, left: 0 });
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [docs, setDocs] = useState(() => {
     const saved = localStorage.getItem("words_docs");
@@ -2302,6 +2330,10 @@ export default function App() {
           onDrop={(e) => handleDropOnDoc(e, doc.id)}
           onClick={(e) => handleDocClick(e, doc.id)}
           onMouseEnter={(e) => {
+            clearTimeout(hoverTimeoutRef.current);
+            setPreviewHoverGroupId(null);
+            if (previewHoverDocId !== doc.id) setPreviewHoverDocId(null);
+            
             if (activeDocId === doc.id || doc.isLocked) return;
             const rect = e.currentTarget.getBoundingClientRect();
             hoverTimeoutRef.current = setTimeout(() => {
@@ -2311,7 +2343,9 @@ export default function App() {
           }}
           onMouseLeave={() => {
             clearTimeout(hoverTimeoutRef.current);
-            setPreviewHoverDocId(null);
+            hoverTimeoutRef.current = setTimeout(() => {
+              setPreviewHoverDocId(null);
+            }, 300);
           }}
           className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${isSelected
             ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
@@ -2901,6 +2935,10 @@ export default function App() {
                               data-sidebar-item
                               onClick={(e) => handleDocClick(e, doc.id)}
                               onMouseEnter={(e) => {
+                                clearTimeout(hoverTimeoutRef.current);
+                                setPreviewHoverGroupId(null);
+                                if (previewHoverDocId !== doc.id) setPreviewHoverDocId(null);
+                                
                                 if (activeDocId === doc.id || doc.isLocked) return;
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 hoverTimeoutRef.current = setTimeout(() => {
@@ -2910,7 +2948,9 @@ export default function App() {
                               }}
                               onMouseLeave={() => {
                                 clearTimeout(hoverTimeoutRef.current);
-                                setPreviewHoverDocId(null);
+                                hoverTimeoutRef.current = setTimeout(() => {
+                                  setPreviewHoverDocId(null);
+                                }, 300);
                               }}
                               className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${isSelected || isActive
                                 ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
@@ -3015,10 +3055,29 @@ export default function App() {
                             <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
                           )}
                           <div
-                            className="group relative flex items-center justify-between px-2 py-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
+                            className="group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
                             style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
                             draggable
                             data-sidebar-item
+                            onMouseEnter={(e) => {
+                              clearTimeout(hoverTimeoutRef.current);
+                              setPreviewHoverDocId(null);
+                              if (previewHoverGroupId !== group.id) setPreviewHoverGroupId(null);
+                              
+                              if (!group.isCollapsed) return;
+                              
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              hoverTimeoutRef.current = setTimeout(() => {
+                                setGroupPreviewPos({ top: rect.top, left: rect.right + 16 });
+                                setPreviewHoverGroupId(group.id);
+                              }, 600);
+                            }}
+                            onMouseLeave={() => {
+                              clearTimeout(hoverTimeoutRef.current);
+                              hoverTimeoutRef.current = setTimeout(() => {
+                                setPreviewHoverGroupId(null);
+                              }, 300);
+                            }}
                             onDragStart={(e) => {
                               // Prevent input from blocking the drag
                               if (e.target.tagName === 'INPUT') {
@@ -3031,17 +3090,15 @@ export default function App() {
                             onDragLeave={handleDragLeave}
                           >
                             <div
-                              className="flex items-center gap-1.5 flex-1 cursor-pointer overflow-hidden"
-                              onClick={() => updateGroup(group.id, { isCollapsed: !group.isCollapsed })}
+                              className="flex items-center gap-2.5 flex-1 cursor-pointer overflow-hidden"
+                              onClick={() => {
+                                updateGroup(group.id, { isCollapsed: !group.isCollapsed });
+                                setPreviewHoverGroupId(null);
+                                setPreviewHoverDocId(null);
+                              }}
                             >
-                              <button 
-                                className="hover:opacity-80 transition-opacity flex items-center justify-center w-4 h-4"
-                                style={{ color: group.color || 'var(--color-icon-muted)' }}
-                              >
-                                <ChevronRight size={14} className={`transition-transform duration-200 ${!group.isCollapsed ? 'rotate-90' : ''}`} />
-                              </button>
                               <div
-                                className="flex-shrink-0 cursor-pointer transition-transform hover:scale-110"
+                                className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5 cursor-pointer transition-transform hover:scale-110"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const FOLDER_COLORS = ['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
@@ -3050,7 +3107,7 @@ export default function App() {
                                 }}
                                 title="Change folder color"
                               >
-                                <Folder size={14} color={group.color} fill={group.color + '40'} />
+                                <AnimatedFolder isOpen={!group.isCollapsed} color={group.color || 'var(--color-icon-muted)'} fill={group.color ? group.color + '40' : 'none'} />
                               </div>
                               {editingGroupId === group.id ? (
                                 <input
@@ -3075,10 +3132,26 @@ export default function App() {
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                            <div 
+                              className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1"
+                              onMouseEnter={() => {
+                                clearTimeout(hoverTimeoutRef.current);
+                                if (previewHoverGroupId !== group.id) {
+                                  setPreviewHoverGroupId(null);
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                const rect = e.currentTarget.closest('.group').getBoundingClientRect();
+                                hoverTimeoutRef.current = setTimeout(() => {
+                                  setGroupPreviewPos({ top: rect.top, left: rect.right + 16 });
+                                  setPreviewHoverGroupId(group.id);
+                                }, 600);
+                              }}
+                            >
                               <button
                                 onClick={(e) => { e.stopPropagation(); createNewDoc(e, group.id); }}
-                                className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
+                                className="p-1 hover:brightness-150 transition-all rounded"
+                                style={{ color: group.color || 'var(--color-text-muted)' }}
                                 title="New doc in folder"
                               >
                                 <Plus size={13} />
@@ -3086,7 +3159,8 @@ export default function App() {
                               <div className="relative">
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(groupMenuOpen === group.id ? null : group.id); }}
-                                  className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
+                                  className="p-1 hover:brightness-150 transition-all rounded"
+                                  style={{ color: group.color || 'var(--color-text-muted)' }}
                                   title="More options"
                                 >
                                   <MoreHorizontal size={13} />
@@ -3562,6 +3636,83 @@ export default function App() {
                   dangerouslySetInnerHTML={{ __html: (previewDoc.content || "No content").replace(/^(<p><br><\/p>|<p>\s*<\/p>)+/gi, '') }} 
                 />
                 <div className="absolute left-0 right-0 bottom-0 h-10 bg-gradient-to-t from-[var(--color-bg-primary)] to-transparent pointer-events-none" />
+              </div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+      {/* Group Hover Preview Popover */}
+      <AnimatePresence>
+        {previewHoverGroupId && (() => {
+          const previewGroup = groups.find(g => g.id === previewHoverGroupId);
+          if (!previewGroup) return null;
+          const groupDocs = docs.filter(d => !d.isPinned && d.groupId === previewGroup.id);
+          
+          return (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              transition={{ type: "spring", stiffness: 450, damping: 30 }}
+              className="fixed z-[100] w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-2 pointer-events-auto before:content-[''] before:absolute before:left-[-7px] before:top-4 before:w-3.5 before:h-3.5 before:bg-[var(--color-bg-primary)] before:border-l before:border-b before:border-[var(--color-border-primary)] before:rotate-45 before:rounded-bl-[3px]"
+              style={{ top: groupPreviewPos.top, left: groupPreviewPos.left, transformOrigin: "-16px 20px" }}
+              onMouseEnter={() => {
+                clearTimeout(hoverTimeoutRef.current);
+                setPreviewHoverDocId(null);
+              }}
+              onMouseLeave={() => {
+                clearTimeout(hoverTimeoutRef.current);
+                hoverTimeoutRef.current = setTimeout(() => setPreviewHoverGroupId(null), 300);
+              }}
+            >
+              <div className="leading-relaxed relative overflow-y-auto overflow-x-hidden flex flex-col gap-[2px] custom-scrollbar pt-1 pb-1" style={{ maxHeight: '320px' }}>
+                
+                {groupDocs.length === 0 ? (
+                  <div className="px-3 py-3 text-[13px] text-[var(--color-text-muted)] italic text-center opacity-70">Folder is empty</div>
+                ) : (
+                  groupDocs.map((doc, idx) => (
+                    <div 
+                      key={doc.id} 
+                      className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] shrink-0"
+                      onClick={(e) => {
+                        handleDocClick(e, doc.id);
+                        setPreviewHoverGroupId(null);
+                        setPreviewHoverDocId(null);
+                      }}
+                      onMouseEnter={(e) => {
+                        e.stopPropagation();
+                        clearTimeout(hoverTimeoutRef.current);
+                        if (doc.isLocked) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        hoverTimeoutRef.current = setTimeout(() => {
+                          setPreviewPos({ top: rect.top, left: rect.right + 16 });
+                          setPreviewHoverDocId(doc.id);
+                        }, 600);
+                      }}
+                      onMouseLeave={() => {
+                        clearTimeout(hoverTimeoutRef.current);
+                        hoverTimeoutRef.current = setTimeout(() => {
+                          setPreviewHoverDocId(null);
+                        }, 300);
+                      }}
+                    >
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0 overflow-hidden">
+                        <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                          {doc.isLocked ? (
+                            <Lock size={16} className="text-[var(--color-icon-muted)]" />
+                          ) : doc.emoji ? (
+                            <span className="inline-block leading-none">{doc.emoji}</span>
+                          ) : (
+                            <FileText size={16} className="text-[var(--color-icon-muted)]" strokeWidth={1.5} />
+                          )}
+                        </div>
+                        <span className="text-[13px] font-medium w-full truncate select-none">
+                          {doc.title || "Untitled"}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </motion.div>
           );
