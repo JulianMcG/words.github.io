@@ -243,6 +243,7 @@ export default function App() {
   const hoverTimeoutRef = useRef(null);
   const [previewPos, setPreviewPos] = useState({ top: 0, left: 0 });
   const [groupPreviewPos, setGroupPreviewPos] = useState({ top: 0, left: 0 });
+  const [sidebarContextMenu, setSidebarContextMenu] = useState({ isOpen: false, x: 0, y: 0 });
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [docs, setDocs] = useState(() => {
     const saved = localStorage.getItem("words_docs");
@@ -2903,6 +2904,11 @@ export default function App() {
               if (e.target.closest('button, input, a, [draggable], [data-sidebar-item]')) return;
               createNewDoc(e);
             }}
+            onContextMenu={(e) => {
+              if (e.target.closest('button, input, a, [data-sidebar-item]')) return;
+              e.preventDefault();
+              setSidebarContextMenu({ isOpen: true, x: e.clientX, y: e.clientY });
+            }}
           >
             {isAuthLoading ? (
               <div className="px-3 py-2 space-y-3">
@@ -3611,6 +3617,46 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Sidebar Context Menu Overlay */}
+      {sidebarContextMenu.isOpen && (
+        <div 
+          className="fixed inset-0 z-[140]" 
+          onClick={() => setSidebarContextMenu({ isOpen: false, x: 0, y: 0 })}
+          onContextMenu={(e) => { e.preventDefault(); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); }}
+        />
+      )}
+      {/* Sidebar Context Menu */}
+      {sidebarContextMenu.isOpen && (
+        <div
+          className="fixed z-[150] w-48 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100"
+          style={{ top: sidebarContextMenu.y, left: sidebarContextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              createNewDoc(e);
+              setSidebarContextMenu({ isOpen: false, x: 0, y: 0 });
+            }}
+          >
+            <FileText size={14} /> New Document
+          </button>
+          
+          <button
+            className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              createGroup();
+              setSidebarContextMenu({ isOpen: false, x: 0, y: 0 });
+            }}
+          >
+            <Folder size={14} /> New Folder
+          </button>
+        </div>
+      )}
+
       {/* Document Hover Preview Popover */}
       <AnimatePresence>
         {previewHoverDocId && (() => {
@@ -3662,7 +3708,10 @@ export default function App() {
               }}
               onMouseLeave={() => {
                 clearTimeout(hoverTimeoutRef.current);
-                hoverTimeoutRef.current = setTimeout(() => setPreviewHoverGroupId(null), 300);
+                hoverTimeoutRef.current = setTimeout(() => {
+                  setPreviewHoverGroupId(null);
+                  setPreviewHoverDocId(null);
+                }, 300);
               }}
             >
               <div className="leading-relaxed relative overflow-y-auto overflow-x-hidden flex flex-col gap-[2px] custom-scrollbar pt-1 pb-1" style={{ maxHeight: '320px' }}>
