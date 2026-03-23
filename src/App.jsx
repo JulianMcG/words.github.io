@@ -219,14 +219,14 @@ const AnimatedFolder = ({ isOpen, color, fill }) => {
       {/* Back tab color overlay */}
       <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px] brightness-90" style={backStyle} />
       {/* Back tab stroke layer */}
-      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" stroke={color || "currentColor"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" stroke={color || "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
       
       {/* Front flap opaque mask */}
       <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
       {/* Front flap color overlay */}
       <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
       {/* Front flap stroke layer */}
-      <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" stroke={color || "currentColor"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+      <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" stroke={color || "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
     </svg>
   );
 };
