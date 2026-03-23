@@ -1390,7 +1390,15 @@ export default function App() {
     e.dataTransfer.dropEffect = "move";
     if (targetType === 'doc' && targetId) {
       const rect = e.currentTarget.getBoundingClientRect();
-      const position = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+      const relativeY = e.clientY - rect.top;
+      let position;
+      if (relativeY < rect.height * 0.25) {
+        position = 'before';
+      } else if (relativeY > rect.height * 0.75) {
+        position = 'after';
+      } else {
+        position = 'inset';
+      }
       setDragTarget({ id: targetId, position, type: 'doc' });
     } else if (targetType === 'group' && targetId) {
       // If dragging a group over another group, show before/after for reordering
@@ -1455,30 +1463,85 @@ export default function App() {
 
     if (draggedItem.type === 'doc') {
       const rect = e.currentTarget.getBoundingClientRect();
-      const position = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+      const relativeY = e.clientY - rect.top;
+      let position;
+      if (relativeY < rect.height * 0.25) {
+        position = 'before';
+      } else if (relativeY > rect.height * 0.75) {
+        position = 'after';
+      } else {
+        position = 'inset';
+      }
 
-      setDocs(prev => {
-        const idsToMove = selectedDocIds.includes(draggedItem.id) ? selectedDocIds : [draggedItem.id];
-        if (idsToMove.includes(targetDocId)) return prev; // Don't drop onto itself
+      const idsToMove = selectedDocIds.includes(draggedItem.id) ? selectedDocIds : [draggedItem.id];
+      if (idsToMove.includes(targetDocId)) return; // Don't drop onto itself
 
-        let newDocs = prev.filter(d => !idsToMove.includes(d.id)); // Remove dragged items
+      if (position === 'inset') {
+        const targetDoc = docsRef.current.find(d => d.id === targetDocId);
+        if (!targetDoc) return;
 
-        const targetIdx = newDocs.findIndex(d => d.id === targetDocId);
-        if (targetIdx === -1) return prev;
+        let targetGroupId = targetDoc.groupId;
+        let isNewGroup = false;
 
-        const targetDoc = newDocs[targetIdx];
-        const targetGroupId = targetDoc.groupId;
+        if (!targetGroupId) {
+          targetGroupId = Math.random().toString(36).substring(2, 9);
+          isNewGroup = true;
+          const newGroup = {
+            id: targetGroupId,
+            name: "New Group",
+            color: "#9ca3af",
+            isCollapsed: false,
+          };
+          setGroups(prev => [newGroup, ...prev]);
+        }
 
-        // Collect the docs to move, updating their groupId to match the target
-        const docsToInsert = prev
-          .filter(d => idsToMove.includes(d.id))
-          .map(d => ({ ...d, groupId: targetGroupId }));
+        setDocs(prev => {
+          let newDocs = [...prev];
+          const docsToMoveIds = [...idsToMove];
+          if (isNewGroup) {
+            docsToMoveIds.push(targetDocId);
+          }
 
-        // Insert at target index
-        newDocs.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, ...docsToInsert);
-        docsRef.current = newDocs;
-        return newDocs;
-      });
+          docsToMoveIds.forEach(id => {
+            const idx = newDocs.findIndex(d => d.id === id);
+            if (idx !== -1) {
+              newDocs[idx] = { ...newDocs[idx], groupId: targetGroupId };
+            }
+          });
+
+          newDocs = newDocs.filter(d => !idsToMove.includes(d.id));
+          const targetIdx = newDocs.findIndex(d => d.id === targetDocId);
+          if (targetIdx !== -1) {
+            const docsToInsert = prev
+              .filter(d => idsToMove.includes(d.id))
+              .map(d => ({ ...d, groupId: targetGroupId }));
+            newDocs.splice(targetIdx + 1, 0, ...docsToInsert);
+          }
+
+          docsRef.current = newDocs;
+          return newDocs;
+        });
+      } else {
+        setDocs(prev => {
+          let newDocs = prev.filter(d => !idsToMove.includes(d.id)); // Remove dragged items
+
+          const targetIdx = newDocs.findIndex(d => d.id === targetDocId);
+          if (targetIdx === -1) return prev;
+
+          const tDoc = newDocs[targetIdx];
+          const targetGroupId = tDoc.groupId;
+
+          // Collect the docs to move, updating their groupId to match the target
+          const docsToInsert = prev
+            .filter(d => idsToMove.includes(d.id))
+            .map(d => ({ ...d, groupId: targetGroupId }));
+
+          // Insert at target index
+          newDocs.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, ...docsToInsert);
+          docsRef.current = newDocs;
+          return newDocs;
+        });
+      }
     } else if (draggedItem.type === 'group') {
       // Group reordering logic if needed
     }
@@ -2351,7 +2414,7 @@ export default function App() {
           className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${isSelected
             ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
             : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-            }`}
+            } ${dragTarget?.id === doc.id && dragTarget?.position === 'inset' ? 'ring-2 ring-[var(--color-accent)] bg-black/[0.03] dark:bg-white/[0.05]' : ''}`}
         >
           {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
