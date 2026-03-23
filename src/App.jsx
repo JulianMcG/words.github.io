@@ -212,6 +212,9 @@ export default function App() {
   const [isSidebarScrolled, setIsSidebarScrolled] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [animatingEmojiDocId, setAnimatingEmojiDocId] = useState(null);
+  const [previewHoverDocId, setPreviewHoverDocId] = useState(null);
+  const hoverTimeoutRef = useRef(null);
+  const [previewPos, setPreviewPos] = useState({ top: 0, left: 0 });
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [docs, setDocs] = useState(() => {
     const saved = localStorage.getItem("words_docs");
@@ -1836,12 +1839,15 @@ export default function App() {
         'background', 'line-height', 'letter-spacing', 'word-spacing',
         'text-indent', 'margin', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right',
         'padding', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right',
+        'text-align', 'float', 'clear', 'display', 'position', 'width', 'height', 'min-width', 'max-width', 'flex', 'grid'
       ];
 
       container.querySelectorAll('*').forEach(el => {
         // Remove class attributes that carry external styling
         el.removeAttribute('class');
         el.removeAttribute('id');
+        el.removeAttribute('align');
+        el.removeAttribute('valign');
 
         if (el.style) {
           stylesToRemove.forEach(prop => el.style.removeProperty(prop));
@@ -1851,11 +1857,13 @@ export default function App() {
           }
         }
 
-        // Remove <font> tags by unwrapping their children
-        if (el.tagName === 'FONT') {
+        // Unwrap layout tags that break formatting
+        if (['FONT', 'CENTER', 'SECTION', 'ARTICLE', 'ASIDE', 'MAIN', 'NAV', 'HEADER', 'FOOTER'].includes(el.tagName)) {
           const parent = el.parentNode;
-          while (el.firstChild) parent.insertBefore(el.firstChild, el);
-          parent.removeChild(el);
+          if (parent) {
+            while (el.firstChild) parent.insertBefore(el.firstChild, el);
+            parent.removeChild(el);
+          }
         }
       });
 
@@ -2073,6 +2081,48 @@ export default function App() {
         return;
       }
 
+      // --- Formatting & Color Shortcuts ---
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+        if (e.key.toLowerCase() === 'b') {
+          e.preventDefault();
+          document.execCommand('bold', false, null);
+          syncContentToState();
+          return;
+        }
+        if (e.key.toLowerCase() === 'i') {
+          e.preventDefault();
+          document.execCommand('italic', false, null);
+          syncContentToState();
+          return;
+        }
+        if (e.key.toLowerCase() === 'u') {
+          e.preventDefault();
+          document.execCommand('underline', false, null);
+          syncContentToState();
+          return;
+        }
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey) {
+        let hColor = null;
+        if (e.key.toLowerCase() === 'h') {
+          hColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#716215' : '#fef08a'; // Yellow
+        } else if (e.key.toLowerCase() === 'r') {
+          hColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#7f1d1d' : '#fecaca'; // Red
+        } else if (e.key.toLowerCase() === 'g') {
+          hColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#14532d' : '#bbf7d0'; // Green
+        } else if (e.key.toLowerCase() === 'e') {
+          hColor = 'transparent'; // Remove highlight
+        }
+
+        if (hColor) {
+          e.preventDefault();
+          document.execCommand('backColor', false, hColor);
+          syncContentToState();
+          return;
+        }
+      }
+
       // --- 3. Markdown Formatting Shortcuts ---
       const selection = window.getSelection();
 
@@ -2251,6 +2301,18 @@ export default function App() {
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDropOnDoc(e, doc.id)}
           onClick={(e) => handleDocClick(e, doc.id)}
+          onMouseEnter={(e) => {
+            if (activeDocId === doc.id || doc.isLocked) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            hoverTimeoutRef.current = setTimeout(() => {
+              setPreviewPos({ top: rect.top, left: rect.right + 16 });
+              setPreviewHoverDocId(doc.id);
+            }, 600);
+          }}
+          onMouseLeave={() => {
+            clearTimeout(hoverTimeoutRef.current);
+            setPreviewHoverDocId(null);
+          }}
           className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${isSelected
             ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
             : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
@@ -2298,7 +2360,21 @@ export default function App() {
               {doc.title || "Untitled"}
             </span>
           </div>
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+          <div 
+            className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+            onMouseEnter={() => {
+              clearTimeout(hoverTimeoutRef.current);
+              setPreviewHoverDocId(null);
+            }}
+            onMouseLeave={(e) => {
+              if (activeDocId === doc.id || doc.isLocked) return;
+              const rect = e.currentTarget.closest('.group').getBoundingClientRect();
+              hoverTimeoutRef.current = setTimeout(() => {
+                setPreviewPos({ top: rect.top, left: rect.right + 16 });
+                setPreviewHoverDocId(doc.id);
+              }, 600);
+            }}
+          >
             <button
               onClick={(e) => handleContextMenu(e, doc.id)}
               className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
@@ -2808,7 +2884,7 @@ export default function App() {
                 {/* Sticky Header Zone */}
                 <div className="sticky top-0 z-20 bg-[var(--color-bg-secondary)] pb-2 pt-2 -mt-2">
                   <div className={`absolute top-full left-0 right-0 h-8 pointer-events-none transition-opacity duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isSidebarScrolled ? 'opacity-100' : 'opacity-0'}`}>
-                    <GradualBlur position="top" height="100%" strength={0.35} divCount={4} zIndex={0} />
+                    <GradualBlur position="top" height="100%" strength={0.15} divCount={4} zIndex={0} />
                     <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-bg-secondary)] to-transparent z-10" />
                   </div>
                   
@@ -2824,6 +2900,18 @@ export default function App() {
                               key={doc.id}
                               data-sidebar-item
                               onClick={(e) => handleDocClick(e, doc.id)}
+                              onMouseEnter={(e) => {
+                                if (activeDocId === doc.id || doc.isLocked) return;
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                hoverTimeoutRef.current = setTimeout(() => {
+                                  setPreviewPos({ top: rect.top, left: 272 });
+                                  setPreviewHoverDocId(doc.id);
+                                }, 600);
+                              }}
+                              onMouseLeave={() => {
+                                clearTimeout(hoverTimeoutRef.current);
+                                setPreviewHoverDocId(null);
+                              }}
                               className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${isSelected || isActive
                                 ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
                                 : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
@@ -2848,6 +2936,18 @@ export default function App() {
                               </div>
                               <button
                                 onClick={(e) => togglePinDoc(e, doc.id)}
+                                onMouseEnter={(e) => {
+                                  clearTimeout(hoverTimeoutRef.current);
+                                  setPreviewHoverDocId(null);
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (activeDocId === doc.id || doc.isLocked) return;
+                                  const rect = e.currentTarget.closest('[data-sidebar-item]').getBoundingClientRect();
+                                  hoverTimeoutRef.current = setTimeout(() => {
+                                    setPreviewPos({ top: rect.top, left: 272 });
+                                    setPreviewHoverDocId(doc.id);
+                                  }, 600);
+                                }}
                                 className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
                                 title="Unpin"
                               >
@@ -3061,7 +3161,7 @@ export default function App() {
 
           {/* Bottom styling fade */}
           <div className="absolute bottom-0 left-0 right-0 h-24 pointer-events-none z-30">
-            <GradualBlur position="bottom" height="100%" strength={0.6} divCount={5} zIndex={0} />
+            <GradualBlur position="bottom" height="100%" strength={0.4} divCount={5} zIndex={0} />
             <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-secondary)] to-transparent z-10" />
           </div>
 
@@ -3069,10 +3169,10 @@ export default function App() {
           <div className="absolute bottom-4 left-4 z-40">
             <button
               onClick={() => user ? setUserMenuOpen(!userMenuOpen) : setAuthModal('login')}
-              className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
+              className="group p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
               title={user ? "Cloud Sync Active" : "Enable Cloud Sync"}
             >
-              {user ? <Cloud size={16} className={userMenuOpen ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"} /> : <CloudOff size={16} className={authModal ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"} />}
+              {user ? <Cloud size={16} className={userMenuOpen ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors"} /> : <CloudOff size={16} className={authModal ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors"} />}
             </button>
 
             {userMenuOpen && user && (
@@ -3272,16 +3372,21 @@ export default function App() {
         </main>
       </div>{" "}
       {/* Floating Formatting Toolbar */}
-      {linkPopoverState.show && (
-        <div
-          className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-3 py-2 flex items-center gap-2 animate-in fade-in zoom-in duration-100"
-          style={{
-            top: `${linkPopoverState.y}px`,
-            left: `${linkPopoverState.x}px`,
-            transform: "translate(-50%, 0)",
-          }}
-          onMouseDown={(e) => e.preventDefault()}
-        >
+      <AnimatePresence>
+        {linkPopoverState.show && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: -4, x: "-50%", filter: 'blur(2px)' }}
+            animate={{ opacity: 1, scale: 1, y: 0, x: "-50%", filter: 'blur(0px)' }}
+            exit={{ opacity: 0, transition: { duration: 0 } }}
+            transition={{ duration: 0.15 }}
+            className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-3 py-2 flex items-center gap-2"
+            style={{
+              top: linkPopoverState.y,
+              left: linkPopoverState.x,
+              transformOrigin: "top center"
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
           {linkPopoverState.url && (() => {
             try {
               const urlObj = new URL(linkPopoverState.url);
@@ -3308,20 +3413,26 @@ export default function App() {
           >
             {linkPopoverState.url}
           </a>
-        </div>
-      )}
-      {toolbarState.show && (
-        <div
-          className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-1 py-1 flex items-center gap-1 animate-in fade-in zoom-in duration-100"
-          style={{
-            top: `${toolbarState.y}px`,
-            left: `${toolbarState.x}px`,
-            transform: "translate(-50%, -100%)",
-          }}
-          onMouseDown={(e) => {
-            if (!e.target.closest('input')) e.preventDefault();
-          }}
-        >
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {toolbarState.show && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: "calc(-100% + 4px)", x: "-50%", filter: 'blur(2px)' }}
+            animate={{ opacity: 1, scale: 1, y: "calc(-100% - 6px)", x: "-50%", filter: 'blur(0px)' }}
+            exit={{ opacity: 0, transition: { duration: 0 } }}
+            transition={{ duration: 0.15 }}
+            className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-1 py-1 flex items-center gap-1"
+            style={{
+              top: toolbarState.y,
+              left: toolbarState.x,
+              transformOrigin: "bottom center"
+            }}
+            onMouseDown={(e) => {
+              if (!e.target.closest('input')) e.preventDefault();
+            }}
+          >
           {toolbarState.showLinkInput ? (
             <div className="flex items-center gap-2 px-2 py-1">
               <input
@@ -3423,8 +3534,39 @@ export default function App() {
               </button>
             </>
           )}
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Document Hover Preview Popover */}
+      <AnimatePresence>
+        {previewHoverDocId && (() => {
+          const previewDoc = docs.find(d => d.id === previewHoverDocId);
+          if (!previewDoc) return null;
+          
+          return (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              transition={{ type: "spring", stiffness: 450, damping: 30 }}
+              className="fixed z-[100] w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-3 pointer-events-none before:content-[''] before:absolute before:left-[-7px] before:top-4 before:w-3.5 before:h-3.5 before:bg-[var(--color-bg-primary)] before:border-l before:border-b before:border-[var(--color-border-primary)] before:rotate-45 before:rounded-bl-[3px]"
+              style={{ top: previewPos.top, left: previewPos.left, transformOrigin: "-16px 20px" }}
+            >
+              <h3 className="font-semibold text-[13px] text-[var(--color-text-primary)] mb-1.5 break-words">
+                {previewDoc.emoji && <span className="mr-1.5">{previewDoc.emoji}</span>}
+                {previewDoc.title || "Untitled"}
+              </h3>
+              <div className="leading-relaxed relative overflow-hidden" style={{ maxHeight: '140px' }}>
+                <div 
+                  className="editor-content !pb-0 scale-[0.6] origin-top-left w-[166.666%] pointer-events-none text-[22px] [&_p]:!text-[22px] [&_li]:!text-[22px] [&_h3]:!text-[22px] [&_blockquote]:!text-[22px] [&_span]:!text-[22px] [&>div]:!text-[22px] [&_a]:!text-[22px] [&>*:first-child]:!mt-0 [&>p:first-child:empty]:!hidden"
+                  dangerouslySetInnerHTML={{ __html: (previewDoc.content || "No content").replace(/^(<p><br><\/p>|<p>\s*<\/p>)+/gi, '') }} 
+                />
+                <div className="absolute left-0 right-0 bottom-0 h-10 bg-gradient-to-t from-[var(--color-bg-primary)] to-transparent pointer-events-none" />
+              </div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
       {/* Unified Slash Command Menu Popover */}
       {slashState.isOpen && filteredCommands.length > 0 && (
         <div
