@@ -151,20 +151,20 @@ const fetchLinkPreviewData = async (url) => {
   try {
     const response = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`);
     const json = await response.json();
-    
+
     if (json.status === 'success' && json.data) {
       const { title, description, image, url: actualUrl, publisher } = json.data;
-      
+
       let domain = publisher || '';
       let displayUrl = actualUrl || url;
-      
+
       if (!domain) {
         try {
           const urlObj = new URL(displayUrl);
           domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
-        } catch (e) {}
+        } catch (e) { }
       }
-      
+
       return {
         title: title || displayUrl,
         image: image?.url || '',
@@ -180,9 +180,9 @@ const fetchLinkPreviewData = async (url) => {
       const fallbackResponse = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
       const fallbackData = await fallbackResponse.json();
       const html = fallbackData.contents;
-      
+
       if (!html) return null;
-      
+
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
 
@@ -196,7 +196,7 @@ const fetchLinkPreviewData = async (url) => {
         const urlObj = new URL(url);
         domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
         displayUrl = `${urlObj.protocol}//${domain}${urlObj.pathname}${urlObj.search}`;
-      } catch (e) {}
+      } catch (e) { }
 
       return { title, image, description, domain, url: displayUrl };
     } catch (fallbackError) {
@@ -220,7 +220,7 @@ const AnimatedFolder = ({ isOpen, color, fill }) => {
       <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px] brightness-90" style={backStyle} />
       {/* Back tab stroke layer */}
       <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" stroke={color || "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
-      
+
       {/* Front flap opaque mask */}
       <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
       {/* Front flap color overlay */}
@@ -504,24 +504,24 @@ export default function App() {
           const data = sharedSnap.data();
           const newDocId = crypto.randomUUID();
           const newDoc = {
-             id: newDocId,
-             title: (data.title || "Untitled") + " (Shared Copy)",
-             content: data.content,
-             isPinned: false,
-             emoji: data.emoji || null,
-             hasCustomEmoji: data.hasCustomEmoji || false,
-             groupId: null,
-             isLocked: false 
+            id: newDocId,
+            title: (data.title || "Untitled") + " (Shared Copy)",
+            content: data.content,
+            isPinned: false,
+            emoji: data.emoji || null,
+            hasCustomEmoji: data.hasCustomEmoji || false,
+            groupId: null,
+            isLocked: false
           };
-          
+
           setDocs(prev => {
-             const updated = [newDoc, ...prev];
-             docsRef.current = updated;
-             return updated;
+            const updated = [newDoc, ...prev];
+            docsRef.current = updated;
+            return updated;
           });
           setActiveDocId(newDocId);
         }
-      } catch(e) {
+      } catch (e) {
         console.error("Failed to load or parse shared document.", e);
       }
       const newUrl = window.location.origin + window.location.pathname;
@@ -638,7 +638,7 @@ export default function App() {
 
       if (docSnap.exists()) {
         const data = docSnap.data();
-        
+
         // As long as there is SOME valid data, proceed with sync
         if (data.docs || data.groups) {
           skipSyncRef.current = true; // prevent the local useEffect from bouncing this right back
@@ -647,7 +647,7 @@ export default function App() {
             docsRef.current = data.docs;
             setDocs(data.docs);
           }
-          
+
           if (data.groups) {
             setGroups(data.groups);
           }
@@ -713,7 +713,7 @@ export default function App() {
   // Sync to Firebase whenever local docs/groups change
   useEffect(() => {
     if (!user || skipSyncRef.current) return;
-    
+
     pendingLocalSaveRef.current = true;
 
     const syncData = async () => {
@@ -876,7 +876,7 @@ export default function App() {
             const autoEmoji = getEmojiForTitle(newTitle);
             if (autoEmoji && autoEmoji !== d.emoji) {
               nextEmoji = autoEmoji;
-              
+
               setAnimatingEmojiDocId(d.id);
               setTimeout(() => {
                 setAnimatingEmojiDocId(prev => prev === d.id ? null : prev);
@@ -1235,11 +1235,11 @@ export default function App() {
 
     try {
       if (user) {
-         await setDoc(doc(db, "shared_documents", docId), {
-            ...docToShare,
-            sharedBy: user.uid,
-            sharedAt: new Date().toISOString()
-         });
+        await setDoc(doc(db, "shared_documents", docId), {
+          ...docToShare,
+          sharedBy: user.uid,
+          sharedAt: new Date().toISOString()
+        });
       }
       const shareUrl = `${window.location.origin}${window.location.pathname}?share=${docId}`;
       await navigator.clipboard.writeText(shareUrl);
@@ -1777,7 +1777,7 @@ export default function App() {
       const visibleTrs = allTrs.filter(tr => tr.style.display !== 'none');
       const startRows = visibleTrs.length;
       const startCols = visibleTrs[0] ? Array.from(visibleTrs[0].querySelectorAll("td")).filter(td => td.style.display !== 'none').length : 1;
-      
+
       const onMouseMove = (moveEvent) => {
         const dx = moveEvent.clientX - startX;
         const dy = moveEvent.clientY - startY;
@@ -1791,16 +1791,16 @@ export default function App() {
         while (currentTrs.length < newRows) {
           const tr = document.createElement("tr");
           for (let i = 0; i < Math.max(newCols, maxCols); i++) {
-             const td = document.createElement("td");
-             td.innerHTML = "<br>";
-             tr.appendChild(td);
+            const td = document.createElement("td");
+            td.innerHTML = "<br>";
+            tr.appendChild(td);
           }
           tbody.appendChild(tr);
           currentTrs.push(tr);
         }
 
         for (let r = 0; r < currentTrs.length; r++) {
-           currentTrs[r].style.display = (r < newRows) ? '' : 'none';
+          currentTrs[r].style.display = (r < newRows) ? '' : 'none';
         }
 
         currentTrs.forEach((tr) => {
@@ -2019,32 +2019,32 @@ export default function App() {
         const range = sel.getRangeAt(0);
         const startEl = range.startContainer.nodeType === 3 ? range.startContainer.parentElement : range.startContainer;
         const endEl = range.endContainer.nodeType === 3 ? range.endContainer.parentElement : range.endContainer;
-        
+
         const tables = editorRef.current?.querySelectorAll('.table-container') || [];
         let deletedAny = false;
-        
+
         tables.forEach(t => {
-           if (sel.containsNode(t, true)) {
-              t.remove();
-              deletedAny = true;
-           }
+          if (sel.containsNode(t, true)) {
+            t.remove();
+            deletedAny = true;
+          }
         });
-        
+
         const startTable = startEl.closest('.table-container');
         const endTable = endEl.closest('.table-container');
-        
+
         if (startTable && startTable === endTable) {
-           const startTd = startEl.closest('td') || startEl.closest('.table-title');
-           const endTd = endEl.closest('td') || endEl.closest('.table-title');
-           if (startTd && endTd && startTd !== endTd) {
-              e.preventDefault();
-              isInternalEdit.current = true;
-              startTable.remove();
-              syncContentToState();
-              return;
-           }
+          const startTd = startEl.closest('td') || startEl.closest('.table-title');
+          const endTd = endEl.closest('td') || endEl.closest('.table-title');
+          if (startTd && endTd && startTd !== endTd) {
+            e.preventDefault();
+            isInternalEdit.current = true;
+            startTable.remove();
+            syncContentToState();
+            return;
+          }
         } else if (deletedAny) {
-           setTimeout(() => syncContentToState(), 10);
+          setTimeout(() => syncContentToState(), 10);
         }
       }
 
@@ -2397,7 +2397,7 @@ export default function App() {
             clearTimeout(hoverTimeoutRef.current);
             setPreviewHoverGroupId(null);
             if (previewHoverDocId !== doc.id) setPreviewHoverDocId(null);
-            
+
             if (activeDocId === doc.id || doc.isLocked) return;
             const rect = e.currentTarget.getBoundingClientRect();
             hoverTimeoutRef.current = setTimeout(() => {
@@ -2458,7 +2458,7 @@ export default function App() {
               {doc.title || "Untitled"}
             </span>
           </div>
-          <div 
+          <div
             className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10"
             onMouseEnter={() => {
               clearTimeout(hoverTimeoutRef.current);
@@ -2990,11 +2990,16 @@ export default function App() {
                     <GradualBlur position="top" height="100%" strength={0.15} divCount={4} zIndex={0} />
                     <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-bg-secondary)] to-transparent z-10" />
                   </div>
-                  
+
                   {/* Pinned Tabs (Icons Only) */}
-                  {pinnedDocs.length > 0 && (
-                    <div className="mb-4">
-                      <div className="flex flex-wrap gap-1">
+                  {(pinnedDocs.length > 0 || draggedItem?.type === 'doc') && (
+                    <div 
+                      className="mb-4"
+                      onDragOver={(e) => handleSidebarDragOver(e, 'pinzone', 'pinzone')}
+                      onDrop={handleDropOnPinZone}
+                      onDragLeave={handleDragLeave}
+                    >
+                      <div className={`flex flex-wrap gap-1 min-h-[44px] p-1 rounded-xl transition-colors ${dragTarget?.type === 'pinzone' ? 'bg-[var(--color-bg-hover)] ring-2 ring-dashed ring-[var(--color-icon-muted)]/30' : ''}`}>
                         {pinnedDocs.map((doc) => {
                           const isActive = activeDocId === doc.id;
                           const isSelected = selectedDocIds.includes(doc.id);
@@ -3007,7 +3012,7 @@ export default function App() {
                                 clearTimeout(hoverTimeoutRef.current);
                                 setPreviewHoverGroupId(null);
                                 if (previewHoverDocId !== doc.id) setPreviewHoverDocId(null);
-                                
+
                                 if (activeDocId === doc.id || doc.isLocked) return;
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 hoverTimeoutRef.current = setTimeout(() => {
@@ -3065,6 +3070,11 @@ export default function App() {
                             </div>
                           )
                         })}
+                        {dragTarget?.type === 'pinzone' && draggedItem?.type === 'doc' && (
+                          <div className="flex-1 min-w-[50px] max-w-[50px] h-[36px] rounded-lg border-2 border-dashed border-[var(--color-icon-muted)]/50 flex items-center justify-center opacity-70 bg-[var(--color-bg-hover)] animate-pulse shadow-inner pointer-events-none">
+                            <Pin size={16} className="text-[var(--color-icon-muted)]" />
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -3132,9 +3142,9 @@ export default function App() {
                               clearTimeout(hoverTimeoutRef.current);
                               setPreviewHoverDocId(null);
                               if (previewHoverGroupId !== group.id) setPreviewHoverGroupId(null);
-                              
+
                               if (!group.isCollapsed) return;
-                              
+
                               const rect = e.currentTarget.getBoundingClientRect();
                               hoverTimeoutRef.current = setTimeout(() => {
                                 setGroupPreviewPos({ top: rect.top, left: rect.right + 16 });
@@ -3201,7 +3211,7 @@ export default function App() {
                                 </span>
                               )}
                             </div>
-                            <div 
+                            <div
                               className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1"
                               onMouseEnter={() => {
                                 clearTimeout(hoverTimeoutRef.current);
@@ -3267,7 +3277,7 @@ export default function App() {
                           </div>
 
                           {/* Docs mapping inside this group */}
-                          <div 
+                          <div
                             className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${group.isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
                           >
                             <div className="overflow-hidden">
@@ -3530,32 +3540,32 @@ export default function App() {
             }}
             onMouseDown={(e) => e.preventDefault()}
           >
-          {linkPopoverState.url && (() => {
-            try {
-              const urlObj = new URL(linkPopoverState.url);
-              return (
-                <img
-                  src={`https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`}
-                  alt=""
-                  className="w-4 h-4 rounded-sm"
-                  onError={(e) => e.target.style.display = 'none'}
-                />
-              );
-            } catch (e) { return null; }
-          })()}
-          <a
-            href={linkPopoverState.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-[var(--color-accent)] hover:underline truncate max-w-[200px]"
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey) return; // Let default new tab behavior happen
-              e.preventDefault();
-              window.open(linkPopoverState.url, "_blank");
-            }}
-          >
-            {linkPopoverState.url}
-          </a>
+            {linkPopoverState.url && (() => {
+              try {
+                const urlObj = new URL(linkPopoverState.url);
+                return (
+                  <img
+                    src={`https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`}
+                    alt=""
+                    className="w-4 h-4 rounded-sm"
+                    onError={(e) => e.target.style.display = 'none'}
+                  />
+                );
+              } catch (e) { return null; }
+            })()}
+            <a
+              href={linkPopoverState.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-[var(--color-accent)] hover:underline truncate max-w-[200px]"
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey) return; // Let default new tab behavior happen
+                e.preventDefault();
+                window.open(linkPopoverState.url, "_blank");
+              }}
+            >
+              {linkPopoverState.url}
+            </a>
           </motion.div>
         )}
       </AnimatePresence>
@@ -3576,114 +3586,114 @@ export default function App() {
               if (!e.target.closest('input')) e.preventDefault();
             }}
           >
-          {toolbarState.showLinkInput ? (
-            <div className="flex items-center gap-2 px-2 py-1">
-              <input
-                autoFocus
-                type="text"
-                value={toolbarState.linkUrl}
-                onChange={(e) => setToolbarState(p => ({ ...p, linkUrl: e.target.value }))}
-                placeholder="Paste or type a link..."
-                className="bg-transparent text-sm text-[var(--color-text-primary)] outline-none min-w-[200px]"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (toolbarState.savedRange) {
-                      const sel = window.getSelection();
-                      sel.removeAllRanges();
-                      sel.addRange(toolbarState.savedRange);
-                      let url = toolbarState.linkUrl;
-                      if (url && !url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
-                      if (url) {
-                        document.execCommand('createLink', false, url);
-                        syncContentToState();
+            {toolbarState.showLinkInput ? (
+              <div className="flex items-center gap-2 px-2 py-1">
+                <input
+                  autoFocus
+                  type="text"
+                  value={toolbarState.linkUrl}
+                  onChange={(e) => setToolbarState(p => ({ ...p, linkUrl: e.target.value }))}
+                  placeholder="Paste or type a link..."
+                  className="bg-transparent text-sm text-[var(--color-text-primary)] outline-none min-w-[200px]"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (toolbarState.savedRange) {
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(toolbarState.savedRange);
+                        let url = toolbarState.linkUrl;
+                        if (url && !url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+                        if (url) {
+                          document.execCommand('createLink', false, url);
+                          syncContentToState();
+                        }
+                        setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
                       }
+                    } else if (e.key === 'Escape') {
                       setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
                     }
-                  } else if (e.key === 'Escape') {
-                    setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
-                  }
-                }}
-              />
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={(e) => formatText(e, "bold")}
-                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-                title="Bold"
-              >
-                <Bold size={15} strokeWidth={2.5} />
-              </button>
-              <button
-                onClick={(e) => formatText(e, "italic")}
-                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-                title="Italic"
-              >
-                <Italic size={15} strokeWidth={2.5} />
-              </button>
-              <button
-                onClick={(e) => formatText(e, "strikeThrough")}
-                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-                title="Strikethrough"
-              >
-                <Strikethrough size={15} strokeWidth={2.5} />
-              </button>
-              {toolbarState.isLinkActive ? (
+                  }}
+                />
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={(e) => formatText(e, "bold")}
+                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  title="Bold"
+                >
+                  <Bold size={15} strokeWidth={2.5} />
+                </button>
+                <button
+                  onClick={(e) => formatText(e, "italic")}
+                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  title="Italic"
+                >
+                  <Italic size={15} strokeWidth={2.5} />
+                </button>
+                <button
+                  onClick={(e) => formatText(e, "strikeThrough")}
+                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  title="Strikethrough"
+                >
+                  <Strikethrough size={15} strokeWidth={2.5} />
+                </button>
+                {toolbarState.isLinkActive ? (
+                  <button
+                    onClick={(e) => {
+                      document.execCommand('unlink', false, null);
+                      syncContentToState();
+                      setToolbarState(p => ({ ...p, show: false, showLinkInput: false, isLinkActive: false }));
+                    }}
+                    className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                    title="Unlink"
+                  >
+                    <Unlink size={15} strokeWidth={2.5} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      setToolbarState(p => ({ ...p, showLinkInput: true }));
+                    }}
+                    className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                    title="Insert Link"
+                  >
+                    <Link size={15} strokeWidth={2.5} />
+                  </button>
+                )}
+                <div className="w-px h-4 bg-gray-200 mx-1"></div>
                 <button
                   onClick={(e) => {
-                    document.execCommand('unlink', false, null);
-                    syncContentToState();
-                    setToolbarState(p => ({ ...p, show: false, showLinkInput: false, isLinkActive: false }));
+                    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    const targetColor = isDark ? '#716215' : '#fef08a';
+                    const currentColor = document.queryCommandValue('backColor');
+
+                    const isHighlighted = currentColor && (
+                      currentColor.replace(/\s+/g, '').toLowerCase() === '#fef08a' ||
+                      currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(254,240,138)' ||
+                      currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(254,240,138,1)' ||
+                      currentColor.replace(/\s+/g, '').toLowerCase() === '#716215' ||
+                      currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(113,98,21)' ||
+                      currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(113,98,21,1)'
+                    );
+
+                    formatText(e, "backColor", isHighlighted ? "transparent" : targetColor);
                   }}
                   className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-                  title="Unlink"
+                  title="Highlight"
                 >
-                  <Unlink size={15} strokeWidth={2.5} />
+                  <Highlighter size={15} strokeWidth={2.5} />
                 </button>
-              ) : (
-                <button
-                  onClick={(e) => {
-                    setToolbarState(p => ({ ...p, showLinkInput: true }));
-                  }}
-                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-                  title="Insert Link"
-                >
-                  <Link size={15} strokeWidth={2.5} />
-                </button>
-              )}
-              <div className="w-px h-4 bg-gray-200 mx-1"></div>
-              <button
-                onClick={(e) => {
-                  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                  const targetColor = isDark ? '#716215' : '#fef08a';
-                  const currentColor = document.queryCommandValue('backColor');
-
-                  const isHighlighted = currentColor && (
-                    currentColor.replace(/\s+/g, '').toLowerCase() === '#fef08a' ||
-                    currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(254,240,138)' ||
-                    currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(254,240,138,1)' ||
-                    currentColor.replace(/\s+/g, '').toLowerCase() === '#716215' ||
-                    currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(113,98,21)' ||
-                    currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(113,98,21,1)'
-                  );
-
-                  formatText(e, "backColor", isHighlighted ? "transparent" : targetColor);
-                }}
-                className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-                title="Highlight"
-              >
-                <Highlighter size={15} strokeWidth={2.5} />
-              </button>
-            </>
-          )}
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
       {/* Sidebar Context Menu Overlay */}
       {sidebarContextMenu.isOpen && (
-        <div 
-          className="fixed inset-0 z-[140]" 
+        <div
+          className="fixed inset-0 z-[140]"
           onClick={() => setSidebarContextMenu({ isOpen: false, x: 0, y: 0 })}
           onContextMenu={(e) => { e.preventDefault(); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); }}
         />
@@ -3706,7 +3716,7 @@ export default function App() {
           >
             <FileText size={14} /> New Document
           </button>
-          
+
           <button
             className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={(e) => {
@@ -3725,7 +3735,7 @@ export default function App() {
         {previewHoverDocId && (() => {
           const previewDoc = docs.find(d => d.id === previewHoverDocId);
           if (!previewDoc) return null;
-          
+
           return (
             <motion.div
               initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
@@ -3740,9 +3750,9 @@ export default function App() {
                 {previewDoc.title || "Untitled"}
               </h3>
               <div className="leading-relaxed relative overflow-hidden" style={{ maxHeight: '140px' }}>
-                <div 
+                <div
                   className="editor-content !pb-0 scale-[0.6] origin-top-left w-[166.666%] pointer-events-none text-[22px] [&_p]:!text-[22px] [&_li]:!text-[22px] [&_h3]:!text-[22px] [&_blockquote]:!text-[22px] [&_span]:!text-[22px] [&>div]:!text-[22px] [&_a]:!text-[22px] [&>*:first-child]:!mt-0 [&>p:first-child:empty]:!hidden"
-                  dangerouslySetInnerHTML={{ __html: (previewDoc.content || "No content").replace(/^(<p><br><\/p>|<p>\s*<\/p>)+/gi, '') }} 
+                  dangerouslySetInnerHTML={{ __html: (previewDoc.content || "No content").replace(/^(<p><br><\/p>|<p>\s*<\/p>)+/gi, '') }}
                 />
                 <div className="absolute left-0 right-0 bottom-0 h-10 bg-gradient-to-t from-[var(--color-bg-primary)] to-transparent pointer-events-none" />
               </div>
@@ -3756,7 +3766,7 @@ export default function App() {
           const previewGroup = groups.find(g => g.id === previewHoverGroupId);
           if (!previewGroup) return null;
           const groupDocs = docs.filter(d => !d.isPinned && d.groupId === previewGroup.id);
-          
+
           return (
             <motion.div
               initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
@@ -3778,13 +3788,13 @@ export default function App() {
               }}
             >
               <div className="leading-relaxed relative overflow-y-auto overflow-x-hidden flex flex-col gap-[2px] custom-scrollbar pt-1 pb-1" style={{ maxHeight: '320px' }}>
-                
+
                 {groupDocs.length === 0 ? (
                   <div className="px-3 py-3 text-[13px] text-[var(--color-text-muted)] italic text-center opacity-70">Folder is empty</div>
                 ) : (
                   groupDocs.map((doc, idx) => (
-                    <div 
-                      key={doc.id} 
+                    <div
+                      key={doc.id}
                       className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] shrink-0"
                       onClick={(e) => {
                         handleDocClick(e, doc.id);
@@ -4059,25 +4069,25 @@ export default function App() {
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
               <Share size={16} className="text-[var(--color-text-faint)]" /> Link Copied
             </div>
-            <button 
-              onClick={() => setSharePopupInfo(null)} 
+            <button
+              onClick={() => setSharePopupInfo(null)}
               className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors mt-1"
             >
               <X size={14} />
             </button>
           </div>
           <div className="flex items-center gap-2 mt-1">
-            <input 
-              type="text" 
-              readOnly 
-              value={sharePopupInfo.url} 
+            <input
+              type="text"
+              readOnly
+              value={sharePopupInfo.url}
               className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] outline-none selection:bg-[var(--color-border-primary)]"
               onClick={(e) => {
                 e.target.select();
                 navigator.clipboard.writeText(sharePopupInfo.url);
               }}
             />
-            <button 
+            <button
               onClick={async () => {
                 await navigator.clipboard.writeText(sharePopupInfo.url);
               }}
