@@ -3219,7 +3219,8 @@ export default function App() {
                             >
                               <button
                                 onClick={(e) => { e.stopPropagation(); createNewDoc(e, group.id); }}
-                                className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors rounded"
+                                className="p-1 opacity-60 hover:opacity-100 transition-opacity rounded"
+                                style={{ color: group.color || 'var(--color-text-muted)' }}
                                 title="New doc in folder"
                               >
                                 <Plus size={13} />
@@ -3227,7 +3228,8 @@ export default function App() {
                               <div className="relative">
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(groupMenuOpen === group.id ? null : group.id); }}
-                                  className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors rounded"
+                                  className="p-1 opacity-60 hover:opacity-100 transition-opacity rounded"
+                                  style={{ color: group.color || 'var(--color-text-muted)' }}
                                   title="More options"
                                 >
                                   <MoreHorizontal size={13} />
