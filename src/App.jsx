@@ -2612,7 +2612,7 @@ export default function App() {
                 content: '';
                 position: absolute;
                 left: 0.1em;
-                top: 0.35em;
+                top: 0.24em;
                 width: 16px;
                 height: 16px;
                 box-shadow: inset 0 0 0 1.5px var(--color-icon-muted);
@@ -2631,7 +2631,7 @@ export default function App() {
                 content: '';
                 position: absolute;
                 left: calc(0.1em + 5.5px);
-                top: calc(0.35em + 2.5px);
+                top: calc(0.24em + 2.5px);
                 width: 5px;
                 height: 9px;
                 border: solid white;
@@ -3506,7 +3506,7 @@ export default function App() {
           <div className={`flex items-start gap-3 group mb-8 print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}>
             <div className={`relative ${!activeDoc.emoji ? 'print:hidden' : ''}`} ref={emojiPickerRef}>
               <button
-                className="w-[48px] h-[48px] mt-0.5 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
+                className="w-[48px] h-[48px] mt-1 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
                 onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
               >
                 {" "}
@@ -3556,7 +3556,7 @@ export default function App() {
             </div>
             <h1
               ref={titleRef}
-              className="flex-1 title-input text-[32px] sm:text-[36px] font-bold leading-tight outline-none w-full break-words tracking-[0.01em] mt-1"
+              className="flex-1 title-input text-[36px] sm:text-[42px] font-bold leading-tight outline-none w-full break-words tracking-tight mt-0"
               contentEditable
               suppressContentEditableWarning
               spellCheck={true}
