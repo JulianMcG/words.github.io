@@ -10,6 +10,7 @@ const EMOJI_DICTIONARY = {
   todo: "📝", task: "✅", tasks: "✅", plan: "📋", checklist: "☑️", goal: "🎯",
   note: "📓", notes: "📓", journal: "📔", diary: "📖", log: "📋",
   idea: "💡", ideas: "💡", brain: "🧠", thought: "💭", draft: "📄",
+  vision: "👁️", strategy: "♟️", roadmap: "🛣️", milestone: "🏁",
   work: "💼", meeting: "🤝", project: "📊", report: "📈",
   presentation: "📽️", office: "🏢", email: "📧", inbox: "📥", folder: "📁",
   schedule: "📅", calendar: "🗓️", deadline: "⏰", productivity: "🚀",
@@ -30,6 +31,7 @@ const EMOJI_DICTIONARY = {
   meat: "🥩", chicken: "🍗", soup: "🍲", noodle: "🍜", rice: "🍚",
   sushi: "🍣", seafood: "🦪", pizza: "🍕", burger: "🍔", fries: "🍟",
   dessert: "🍰", sweet: "🍬", cake: "🎂", cookie: "🍪", chocolate: "🍫",
+  baking: "🧁", ingredients: "🧅", menu: "📜",
 
   // Travel & Geography
   travel: "✈️", trip: "🚗", vacation: "🌴", flight: "🛫", itinerary: "🗺️",
@@ -124,7 +126,37 @@ export const getEmojiForTitle = (title) => {
   if (!title) return null;
   const t = title.toLowerCase();
   
-  // Clean punctuation and get bare words
+  // Phase 1: Check for exact phrase matches (handles spaces and hyphens)
+  const phraseMatches = {
+    'to do': '📝',
+    'to-do': '📝',
+    'to dos': '📝',
+    'to-dos': '📝',
+    'shopping list': '🛒',
+    'grocery list': '🛒',
+    'reading list': '📚',
+    'bucket list': '🪣',
+    'wish list': '✨',
+    'brain dump': '🧠',
+    'meeting notes': '🤝',
+    'game plan': '🎮',
+    'master plan': '👑',
+    'daily log': '🌇',
+    'weekly log': '📅',
+    'monthly log': '🗓️',
+    'yearly log': '📆',
+    'workout log': '🏋️',
+    'diet plan': '🥗',
+    'meal prep': '🍱',
+    'travel plans': '✈️',
+    'packing list': '🧳',
+  };
+
+  for (const [phrase, emoji] of Object.entries(phraseMatches)) {
+    if (t.includes(phrase)) return emoji;
+  }
+
+  // Phase 2: Clean punctuation and get bare words
   const words = t.match(/\b\w+\b/g) || [];
 
   // Iterate backwards to prioritize trailing head nouns
