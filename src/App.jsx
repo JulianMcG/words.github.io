@@ -61,13 +61,6 @@ const COMMANDS = [
     tag: "P",
   },
   {
-    id: "checklist",
-    title: "To-do List",
-    description: "Track tasks with a checklist.",
-    icon: CheckSquare,
-    type: "checklist",
-  },
-  {
     id: "h1",
     title: "Heading 1",
     description: "Big section heading.",
@@ -90,6 +83,13 @@ const COMMANDS = [
     icon: Heading3,
     type: "formatBlock",
     tag: "H3",
+  },
+  {
+    id: "checklist",
+    title: "To-do List",
+    description: "Track tasks with a checklist.",
+    icon: CheckSquare,
+    type: "checklist",
   },
   {
     id: "ul",
@@ -891,6 +891,11 @@ export default function App() {
   };
 
   const syncContentToState = useCallback(() => {
+    if (editorRef.current) {
+      // Enforce checklist inheritance on nested lists created via Tab indentation
+      const nestedUls = editorRef.current.querySelectorAll('ul.checklist ul:not(.checklist)');
+      nestedUls.forEach(ul => ul.classList.add('checklist'));
+    }
     const newContent = editorRef.current?.innerHTML || "<p><br></p>";
     setDocs((prev) => {
       const activeDoc = prev.find((d) => d.id === activeDocId);
@@ -1296,10 +1301,36 @@ export default function App() {
     e.stopPropagation();
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
+    let x = rect.right;
+    let y = rect.top;
+
+    // Prevent off-screen rendering
+    if (y + 250 > window.innerHeight) {
+      y = Math.max(10, window.innerHeight - 260);
+    }
+    
     setContextMenu({
       docId,
-      x: rect.right,
-      y: rect.top,
+      x,
+      y,
+    });
+  };
+
+  const handleGroupMenu = (e, groupId) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (groupMenuOpen?.id === groupId) {
+      setGroupMenuOpen(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    let x = rect.right - 176; // w-44 is 176px
+    let y = Math.min(rect.bottom + 4, window.innerHeight - 100);
+
+    setGroupMenuOpen({
+      id: groupId,
+      x,
+      y,
     });
   };
 
@@ -1368,7 +1399,7 @@ export default function App() {
     // Custom drag ghost
     if (type === 'doc' && selectedDocIds.length > 1) {
       const ghost = document.createElement("div");
-      ghost.className = "bg-blue-500 text-white px-3 py-1 rounded-md text-sm shadow-lg pointer-events-none fixed -top-10";
+      ghost.className = "bg-[#E8572A] text-white px-3 py-1 rounded-md text-sm shadow-lg pointer-events-none fixed -top-10";
       ghost.innerHTML = `Moving ${selectedDocIds.includes(id) ? selectedDocIds.length : 1} documents`;
       document.body.appendChild(ghost);
       e.dataTransfer.setDragImage(ghost, 15, 15);
@@ -2225,8 +2256,9 @@ export default function App() {
             0,
             selection.focusOffset,
           );
+          const cleanText = text.replace(/[\u200B]/g, '').trimStart();
 
-          if (text.endsWith("1.") && e.key === " ") {
+          if (cleanText === "1." && e.key === " ") {
             e.preventDefault();
             const range = selection.getRangeAt(0);
             range.setStart(focusNode, selection.focusOffset - 2);
@@ -2236,7 +2268,7 @@ export default function App() {
             syncContentToState();
             return;
           } else if (
-            (text.endsWith("-") || text.endsWith("*")) &&
+            (cleanText === "-" || cleanText === "*") &&
             e.key === " "
           ) {
             e.preventDefault();
@@ -2247,7 +2279,7 @@ export default function App() {
             document.execCommand("insertUnorderedList", false, null);
             syncContentToState();
             return;
-          } else if (text.endsWith("[]") && e.key === " ") {
+          } else if (cleanText === "[]" && e.key === " ") {
             e.preventDefault();
             const range = selection.getRangeAt(0);
             range.setStart(focusNode, selection.focusOffset - 2);
@@ -2268,7 +2300,7 @@ export default function App() {
             }, 10);
             return;
           } else if (
-            text.endsWith("/table") &&
+            cleanText === "/table" &&
             (e.key === " " || e.key === "Enter")
           ) {
             e.preventDefault();
@@ -2286,7 +2318,14 @@ export default function App() {
 
       if (e.key === "Tab") {
         e.preventDefault();
-        document.execCommand(e.shiftKey ? "outdent" : "indent", false, null);
+        const isList = selection && selection.focusNode && 
+          (selection.focusNode.nodeType === 3 ? selection.focusNode.parentElement : selection.focusNode).closest('li');
+        
+        if (isList) {
+          document.execCommand(e.shiftKey ? "outdent" : "indent", false, null);
+        } else if (!e.shiftKey) {
+          document.execCommand("insertHTML", false, "&nbsp;&nbsp;&nbsp;&nbsp;");
+        }
         syncContentToState();
         return;
       }
@@ -2371,6 +2410,7 @@ export default function App() {
   // A document is considered "ungrouped" if it has no groupId, OR if its groupId doesn't exist in the current groups array.
   const ungroupedDocs = regularDocs.filter((d) => !d.groupId || !groups.some(g => g.id === d.groupId));
   const activeDoc = docs.find((d) => d.id === activeDocId) || docs[0];
+  const docFont = activeDoc?.docFont || 'sans';
 
   const renderDocItem = (doc) => {
     const isSelected = selectedDocIds.includes(doc.id);
@@ -2383,7 +2423,7 @@ export default function App() {
         exit={{ opacity: 0, height: 0, scale: 0.95, filter: 'blur(2px)', marginBottom: 0 }}
         transition={{ type: "spring", stiffness: 450, damping: 35, mass: 1 }}
         style={{ overflow: "hidden", transformOrigin: "top" }}
-        key={doc.id}
+        key={doc._isTemp ? `temp-${doc.id}` : doc.id}
       >
         <div
           draggable
@@ -2417,7 +2457,7 @@ export default function App() {
             } ${dragTarget?.id === doc.id && dragTarget?.position === 'inset' ? 'ring-2 ring-[var(--color-accent)] bg-black/[0.03] dark:bg-white/[0.05]' : ''}`}
         >
           {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
-            <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
           )}
           <div
             ref={(el) => {
@@ -2482,7 +2522,7 @@ export default function App() {
             </button>
           </div>
           {dragTarget?.id === doc.id && dragTarget?.position === 'after' && (
-            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
           )}
         </div>
       </motion.div>
@@ -2490,7 +2530,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans selection:bg-[#2383e233] overflow-hidden relative w-full">
+    <div className="flex h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans selection:bg-[#E8572A33] overflow-hidden relative w-full">
       {/* Dynamic Editor Typography */}
       <style
         dangerouslySetInnerHTML={{
@@ -2848,20 +2888,46 @@ export default function App() {
           onMouseEnter={() => setIsSidebarPeeking(true)}
         />
       )}
-      {/* Share Menu */}
+      {/* Options Menu */}
       <div className="absolute top-4 right-4 z-30 print:hidden">
         <div className="relative">
           <button
             onClick={() => setShareMenuOpen(!shareMenuOpen)}
             className="p-2 text-[var(--color-text-faint)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
-            title="Share"
+            title="Options"
           >
-            <Share size={20} />
+            <MoreHorizontal size={20} />
           </button>
           {shareMenuOpen && (
             <>
               <div className="fixed inset-0 z-[39]" onClick={() => setShareMenuOpen(false)} />
-              <div className="absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-48 animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-56 animate-in fade-in zoom-in-95 duration-100">
+                <div className="px-3 py-2">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <button 
+                      className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
+                      onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'sans' } : d))}
+                    >
+                      <span className={`text-[22px] leading-none mb-1 ${docFont === 'sans' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
+                      <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Default</span>
+                    </button>
+                    <button 
+                      className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
+                      onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'serif' } : d))}
+                    >
+                      <span className={`text-[22px] leading-none mb-1 font-serif ${docFont === 'serif' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`} style={{ fontFamily: '"Gowun Batang", serif' }}>Ag</span>
+                      <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Serif</span>
+                    </button>
+                    <button 
+                      className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
+                      onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'mono' } : d))}
+                    >
+                      <span className={`text-[22px] leading-none mb-1 font-mono ${docFont === 'mono' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
+                      <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Mono</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="h-px bg-[var(--color-border-primary)] my-1" />
                 <button
                   className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => {
@@ -2869,7 +2935,7 @@ export default function App() {
                     handleShareDoc(activeDocId);
                   }}
                 >
-                  <Link size={14} /> Get Shareable Link
+                  <Link size={14} /> Share via link
                 </button>
                 <div className="h-px bg-[var(--color-border-primary)] my-1" />
                 <button
@@ -2879,9 +2945,8 @@ export default function App() {
                     setTimeout(() => window.print(), 100);
                   }}
                 >
-                  <Share size={14} /> Export to PDF
+                  <Share size={14} /> Export
                 </button>
-                <div className="h-px bg-[var(--color-border-primary)] my-1" />
                 <button
                   className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => {
@@ -2933,7 +2998,7 @@ export default function App() {
           {" "}
           {/* Sidebar Header with Image Logo */}
           <div className="px-5 py-5 flex items-center justify-between group text-[var(--color-text-primary)]">
-            <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight select-none">
+            <div className="flex items-center gap-1.5 font-bold text-[19px] tracking-tight select-none" style={{ fontFamily: '"Gowun Batang", serif' }}>
               <div className="w-6 h-6 rounded flex items-center justify-center">
                 <img src="/logolight.png" alt="Words Logo" className="w-full h-full object-contain dark:hidden" />
                 <img src="/logodark.png" alt="Words Logo" className="w-full h-full object-contain hidden dark:block" />
@@ -3118,10 +3183,10 @@ export default function App() {
                           onDrop={(e) => handleDropOnGroup(e, group.id)}
                         >
                           {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'before' && (
-                            <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+                            <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
                           )}
                           {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'after' && (
-                            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 rounded-full z-10 pointer-events-none" />
+                            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
                           )}
                           <div
                             className="group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
@@ -3227,17 +3292,20 @@ export default function App() {
                               </button>
                               <div className="relative">
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(groupMenuOpen === group.id ? null : group.id); }}
+                                  onClick={(e) => handleGroupMenu(e, group.id)}
                                   className="p-1 hover:opacity-70 transition-opacity rounded"
                                   style={{ color: group.color || 'var(--color-icon-muted)' }}
                                   title="More options"
                                 >
                                   <MoreHorizontal size={13} />
                                 </button>
-                                {groupMenuOpen === group.id && (
+                                {groupMenuOpen?.id === group.id && (
                                   <>
                                     <div className="fixed inset-0 z-[59]" onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(null); }} />
-                                    <div className="absolute right-0 top-full mt-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100">
+                                    <div 
+                                      className="fixed bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100"
+                                      style={{ top: groupMenuOpen.y, left: groupMenuOpen.x }}
+                                    >
                                       <button
                                         className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                                         onClick={(e) => {
@@ -3284,6 +3352,23 @@ export default function App() {
                               </div>
                             </div>
                           </div>
+
+                          {/* Active doc quick-view when collapsed */}
+                          <AnimatePresence>
+                            {group.isCollapsed && groupDocs.some(d => d.id === activeDocId) && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ type: "spring", stiffness: 450, damping: 35, mass: 1 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="pl-4 pr-1 pt-0.5 pb-1">
+                                  {renderDocItem({ ...groupDocs.find(d => d.id === activeDocId), _isTemp: true })}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       );
                     })}
@@ -3410,7 +3495,7 @@ export default function App() {
             </div>
           </div>
         )}
-        <main className="w-full max-w-3xl mx-auto px-12 pt-24 pb-32 print:pt-0 print:pb-0 flex-grow bg-[var(--color-bg-primary)]">
+        <main className={`w-full max-w-3xl mx-auto px-12 pt-24 pb-32 print:pt-0 print:pb-0 flex-grow bg-[var(--color-bg-primary)] ${docFont === 'mono' ? 'font-mono' : ''} ${docFont === 'serif' ? 'font-serif theme-font-serif' : ''}`}>
           {/* Print Logo */}
           <div className="hidden print:flex mb-6 items-center gap-2">
             <img src="/faviconlight.png" alt="Logo" className="w-5 h-5 object-contain" />
@@ -3421,7 +3506,7 @@ export default function App() {
           <div className={`flex items-start gap-3 group mb-8 print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}>
             <div className={`relative ${!activeDoc.emoji ? 'print:hidden' : ''}`} ref={emojiPickerRef}>
               <button
-                className="w-12 h-12 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
+                className="w-[48px] h-[48px] mt-0.5 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
                 onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
               >
                 {" "}
@@ -3471,7 +3556,7 @@ export default function App() {
             </div>
             <h1
               ref={titleRef}
-              className="flex-1 title-input text-4xl font-bold outline-none w-full break-words tracking-tight mt-1"
+              className="flex-1 title-input text-[36px] sm:text-[40px] font-semibold leading-tight outline-none w-full break-words tracking-[0.01em] mt-0.5"
               contentEditable
               suppressContentEditableWarning
               spellCheck={true}
