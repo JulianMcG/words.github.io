@@ -2915,7 +2915,7 @@ export default function App() {
                       className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
                       onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'serif' } : d))}
                     >
-                      <span className={`text-[22px] leading-none mb-1 font-serif ${docFont === 'serif' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`} style={{ fontFamily: '"Gowun Batang", serif' }}>Ag</span>
+                      <span className={`text-[22px] leading-none mb-1 font-serif ${docFont === 'serif' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
                       <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Serif</span>
                     </button>
                     <button 
