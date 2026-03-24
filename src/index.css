@@ -12,7 +12,7 @@
   --color-icon-muted: #9a9a97;
   --color-border-primary: #e5e7eb;
   --color-border-hover: #d1d5db;
-  --color-accent: #2383e2;
+  --color-accent: #E8572A;
   --color-highlight: #fef08a;
   --color-shadow-primary: rgba(0, 0, 0, 0.1);
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
@@ -315,4 +315,17 @@ body {
 .link-preview-loading::after {
   content: "Loading preview...";
   margin-left: 8px;
+}
+
+.theme-font-serif .title-input,
+.theme-font-serif .editor-content h1,
+.theme-font-serif .editor-content h2,
+.theme-font-serif .editor-content h3 {
+  font-family: "Gowun Batang", serif !important;
+  font-weight: 700 !important;
+}
+
+.font-serif {
+  font-family: 'Lora', serif !important;
+  font-weight: 500 !important;
 }
