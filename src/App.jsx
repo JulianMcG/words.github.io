@@ -3556,7 +3556,7 @@ export default function App() {
             </div>
             <h1
               ref={titleRef}
-              className="flex-1 title-input text-[36px] sm:text-[40px] font-semibold leading-tight outline-none w-full break-words tracking-[0.01em] mt-0.5"
+              className="flex-1 title-input text-[32px] sm:text-[36px] font-[650] leading-tight outline-none w-full break-words tracking-[0.01em] mt-1"
               contentEditable
               suppressContentEditableWarning
               spellCheck={true}
