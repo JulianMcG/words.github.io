@@ -1337,6 +1337,9 @@ export default function App() {
   const handleDocClick = (e, id) => {
     // Close context menu on any click
     setContextMenu(null);
+    // Dismiss document preview on click
+    clearTimeout(hoverTimeoutRef.current);
+    setPreviewHoverDocId(null);
 
     // Check if the doc is locked
     const doc = docs.find(d => d.id === id);
