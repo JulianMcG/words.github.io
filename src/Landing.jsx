@@ -145,7 +145,7 @@ const StickyHeader = ({ navigate, scrolled }) => {
                   exit={{ opacity: 0, scale: 0.92 }}
                   transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
                   onClick={() => navigate('/app')}
-                  className="group px-5 py-2 text-[13px] font-semibold rounded-[var(--radius-lg)] bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] hover:opacity-90 active:scale-[0.96] transition-all shadow-md flex items-center gap-2"
+                  className="group px-5 py-2 text-[13px] font-semibold rounded-[var(--radius-lg)] bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] hover:opacity-90 active:scale-[0.96] transition-all flex items-center gap-2"
                 >
                   Start writing
                   <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
@@ -262,7 +262,7 @@ const AppPreview = () => {
 
       {/* ── Editor ── exact match: max-w-3xl, px-12, pt-24 */}
       <div className="flex-1 flex flex-col relative min-w-0 bg-[var(--color-bg-primary)] overflow-hidden">
-        <main className="w-full max-w-3xl mx-auto px-8 sm:px-12 pt-16 sm:pt-24 pb-32 flex-grow">
+        <main className="w-full max-w-3xl mx-auto px-8 sm:px-12 pt-8 sm:pt-10 pb-32 flex-grow">
           {/* Emoji + Title — exact: gap-3, text-[36px] sm:text-[42px] */}
           <div className="flex items-start gap-3 mb-8">
             <button className="w-[48px] h-[48px] mt-1 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl">
@@ -365,6 +365,7 @@ const FeatureCard = ({ icon, title, description, index }) => (
 export default function Landing() {
   const navigate = useNavigate();
   const [scrolled, setScrolled] = useState(false);
+  const [hasScrolled, setHasScrolled] = useState(false);
   const [introComplete, setIntroComplete] = useState(false);
 
   // Parallax
@@ -386,7 +387,10 @@ export default function Landing() {
 
   // Scroll listener
   useEffect(() => {
-    const h = () => setScrolled(window.scrollY > 300);
+    const h = () => {
+      setScrolled(window.scrollY > 300);
+      setHasScrolled(window.scrollY > 2);
+    };
     window.addEventListener('scroll', h, { passive: true });
     return () => window.removeEventListener('scroll', h);
   }, []);
@@ -429,11 +433,11 @@ export default function Landing() {
         </motion.div>
       </motion.div>
 
-      {/* Progressive blur — always present, fixed at top */}
-      <div className="fixed top-0 left-0 right-0 z-40 pointer-events-none" style={{ height: '5.5rem' }}>
+      {/* Progressive blur — only when scrolled */}
+      <div className="fixed top-0 left-0 right-0 z-40 pointer-events-none transition-opacity duration-300" style={{ height: '5.5rem', opacity: hasScrolled ? 1 : 0 }}>
         <GradualBlur position="top" height="5.5rem" strength={0.5} divCount={4} curve="ease-out" />
       </div>
-      <div className="fixed top-0 left-0 right-0 h-12 z-40 pointer-events-none" style={{ background: 'linear-gradient(to bottom, var(--color-bg-primary) 25%, transparent 100%)' }} />
+      <div className="fixed top-0 left-0 right-0 h-12 z-40 pointer-events-none transition-opacity duration-300" style={{ background: 'linear-gradient(to bottom, var(--color-bg-primary) 25%, transparent 100%)', opacity: hasScrolled ? 1 : 0 }} />
 
       {/* Header — only after intro is done */}
       <AnimatePresence>
@@ -442,15 +446,7 @@ export default function Landing() {
 
       {/* ─── Hero with typewriter ─── takes full viewport, content centered */}
       <section className="relative px-6 h-[100svh] flex flex-col items-center justify-center">
-        {/* BG gradient — appears after typing */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: introComplete ? 1 : 0 }}
-          transition={{ duration: 1.5 }}
-          className="absolute inset-0 pointer-events-none overflow-hidden"
-        >
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[min(1400px,120vw)] h-[800px] bg-[radial-gradient(ellipse_at_top,rgba(232,87,42,0.06)_0%,transparent_60%)]" />
-        </motion.div>
+
 
         <div className="relative max-w-4xl mx-auto w-full text-center">
           {/* Typewriter headline */}
@@ -513,7 +509,7 @@ export default function Landing() {
           >
             <button
               onClick={() => navigate('/app')}
-              className="group px-8 py-3.5 bg-[var(--color-accent)] text-white rounded-[var(--radius-xl)] font-semibold text-[17px] hover:brightness-110 active:scale-[0.97] transition-all shadow-[0_4px_20px_rgba(232,87,42,0.25)] flex items-center gap-2"
+              className="group px-8 py-3.5 bg-[var(--color-accent)] text-white rounded-[var(--radius-xl)] font-semibold text-[17px] hover:brightness-110 active:scale-[0.97] transition-all flex items-center gap-2"
             >
               Start writing
               <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
@@ -522,8 +518,12 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ─── Product Preview — peeks from bottom of viewport ─── */}
-      <section className="px-6 -mt-[60px] sm:-mt-[80px] pb-24 sm:pb-32 relative z-20" ref={previewRef}>
+      {/* ─── Product Preview — peeks if enough space ─── */}
+      <section
+        className="px-6 pb-24 sm:pb-32 relative z-20"
+        ref={previewRef}
+        style={{ marginTop: 'clamp(-140px, calc(-100svh + 700px), 0px)' }}
+      >
         <motion.div
           initial={{ opacity: 0, y: 80, filter: 'blur(10px)' }}
           animate={introComplete ? { opacity: 1, y: 0, filter: 'blur(0px)' } : {}}
