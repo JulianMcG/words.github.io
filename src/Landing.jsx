@@ -425,7 +425,7 @@ export default function Landing() {
         className="fixed bottom-[-800px] left-1/2 -translate-x-1/2 w-[200vw] h-[1200px] pointer-events-none z-10"
       >
         <motion.div style={{ opacity: glowOpacity }} className="w-full h-full">
-          <div className="w-full h-full bg-[radial-gradient(ellipse_at_center,#E8572A_0%,transparent_70%)] opacity-[0.35]" />
+          <div className="w-full h-full bg-[radial-gradient(ellipse_at_center,#E8572A_0%,transparent_70%)] opacity-[0.35] dark:opacity-[0.25]" />
         </motion.div>
       </motion.div>
 
@@ -440,8 +440,8 @@ export default function Landing() {
         {introComplete && <StickyHeader navigate={navigate} scrolled={scrolled} />}
       </AnimatePresence>
 
-      {/* ─── Hero with typewriter ─── */}
-      <section className="relative px-6 pt-[25vh] sm:pt-[28vh] pb-16">
+      {/* ─── Hero with typewriter ─── takes full viewport, content centered */}
+      <section className="relative px-6 h-[100svh] flex flex-col items-center justify-center">
         {/* BG gradient — appears after typing */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -494,42 +494,36 @@ export default function Landing() {
             )}
           </h1>
 
-          {/* Subtitle + CTA — beautifully staggered after typing */}
-          <AnimatePresence>
-            {introComplete && (
-              <>
-                <motion.p
-                  initial={{ opacity: 0, y: 28, filter: 'blur(10px)' }}
-                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                  transition={{ duration: 0.8, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-                  className="text-[clamp(1rem,2vw,1.2rem)] text-[var(--color-text-muted)] max-w-xl mx-auto leading-relaxed mb-10"
-                >
-                  A distraction-free editor that lives in your browser.<br />
-                  No setup, no friction, just words.
-                </motion.p>
+          {/* Subtitle + CTA — always in layout (prevents jump), animated visible */}
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: introComplete ? 1 : 0, y: introComplete ? 0 : 20, filter: introComplete ? 'blur(0px)' : 'blur(10px)' }}
+            transition={{ duration: 0.8, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+            className="text-[clamp(1rem,2vw,1.2rem)] text-[var(--color-text-muted)] max-w-xl mx-auto leading-relaxed mb-10"
+          >
+            A distraction-free editor that lives in your browser.<br />
+            No setup, no friction, just words.
+          </motion.p>
 
-                <motion.div
-                  initial={{ opacity: 0, y: 24, scale: 0.95, filter: 'blur(8px)' }}
-                  animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-                  transition={{ duration: 0.7, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                  className="flex flex-col items-center gap-4 mb-4"
-                >
-                  <button
-                    onClick={() => navigate('/app')}
-                    className="group px-8 py-3.5 bg-[var(--color-accent)] text-white rounded-[var(--radius-xl)] font-semibold text-[17px] hover:brightness-110 active:scale-[0.97] transition-all shadow-[0_4px_20px_rgba(232,87,42,0.25)] flex items-center gap-2"
-                  >
-                    Start writing
-                    <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
-                  </button>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: introComplete ? 1 : 0, y: introComplete ? 0 : 20, scale: introComplete ? 1 : 0.95, filter: introComplete ? 'blur(0px)' : 'blur(8px)' }}
+            transition={{ duration: 0.7, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            className="flex flex-col items-center gap-4 mb-4"
+          >
+            <button
+              onClick={() => navigate('/app')}
+              className="group px-8 py-3.5 bg-[var(--color-accent)] text-white rounded-[var(--radius-xl)] font-semibold text-[17px] hover:brightness-110 active:scale-[0.97] transition-all shadow-[0_4px_20px_rgba(232,87,42,0.25)] flex items-center gap-2"
+            >
+              Start writing
+              <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+            </button>
+          </motion.div>
         </div>
       </section>
 
-      {/* ─── Product Preview — peeks at bottom of viewport ─── */}
-      <section className="px-6 pt-0 pb-24 sm:pb-32" ref={previewRef}>
+      {/* ─── Product Preview — peeks from bottom of viewport ─── */}
+      <section className="px-6 -mt-[120px] sm:-mt-[140px] pb-24 sm:pb-32 relative z-20" ref={previewRef}>
         <motion.div
           initial={{ opacity: 0, y: 80, filter: 'blur(10px)' }}
           animate={introComplete ? { opacity: 1, y: 0, filter: 'blur(0px)' } : {}}
