@@ -522,7 +522,7 @@ export default function Landing() {
       <section
         className="px-6 pb-24 sm:pb-32 relative z-20"
         ref={previewRef}
-        style={{ marginTop: 'clamp(-140px, calc(-100svh + 700px), 0px)' }}
+        style={{ marginTop: 'clamp(-100px, calc(-100svh + 525px), 0px)' }}
       >
         <motion.div
           initial={{ opacity: 0, y: 80, filter: 'blur(10px)' }}
