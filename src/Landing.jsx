@@ -20,7 +20,8 @@ import {
   Globe,
   Shield,
   Eye,
-  Keyboard
+  Keyboard,
+  Heart
 } from 'lucide-react';
 import GradualBlur from './components/GradualBlur';
 
@@ -662,12 +663,9 @@ export default function Landing() {
 
       {/* ─── Footer ─── */}
       <footer className="px-6 py-10 border-t border-[var(--color-border-primary)]">
-        <div className="max-w-6xl mx-auto flex items-center justify-center gap-2 text-[13px] text-[var(--color-text-faint)]">
-          <div className="w-4 h-4 flex items-center justify-center opacity-40">
-            <img src="/faviconlight.png" alt="" className="w-full h-full object-contain dark:hidden" />
-            <img src="/favicondark.png" alt="" className="w-full h-full object-contain hidden dark:block" />
-          </div>
-          © {new Date().getFullYear()} Words
+        <div className="max-w-6xl mx-auto flex items-center justify-between text-[13px] text-[var(--color-text-faint)]">
+          <span>© {new Date().getFullYear()} Words</span>
+          <span className="flex items-center gap-1">Made with <Heart size={12} className="fill-current" /> by Julian M.</span>
         </div>
       </footer>
     </div>
