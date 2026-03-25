@@ -373,9 +373,9 @@ export default function Landing() {
   const { scrollYProgress } = useScroll({ target: previewRef, offset: ['start end', 'end start'] });
   const previewY = useTransform(scrollYProgress, [0, 1], [20, -20]);
 
-  // Page scroll for orange glow
-  const { scrollY } = useScroll();
-  const glowOpacity = useTransform(scrollY, [0, 400], [1, 0]);
+  // Page scroll for orange glow — visible at top and bottom, hidden in middle
+  const { scrollY, scrollYProgress: pageProgress } = useScroll();
+  const glowOpacity = useTransform(pageProgress, [0, 0.08, 0.15, 0.82, 0.92, 1], [1, 0.3, 0, 0, 0.3, 1]);
 
   // Swap favicon for landing page
   useEffect(() => {
@@ -651,7 +651,7 @@ export default function Landing() {
             </p>
             <button
               onClick={() => navigate('/app')}
-              className="group px-10 py-4 bg-[var(--color-accent)] text-white rounded-[var(--radius-xl)] font-semibold text-lg hover:brightness-110 active:scale-[0.97] transition-all shadow-[0_4px_24px_rgba(232,87,42,0.3)] inline-flex items-center gap-2"
+              className="group px-10 py-4 bg-[var(--color-accent)] text-white rounded-[var(--radius-xl)] font-semibold text-lg hover:brightness-110 active:scale-[0.97] transition-all inline-flex items-center gap-2"
             >
               Open Words
               <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
