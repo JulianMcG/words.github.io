@@ -145,7 +145,7 @@ const StickyHeader = ({ navigate, scrolled }) => {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.92 }}
                   transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                  onClick={() => navigate('/app')}
+                  onClick={() => navigate('/documents')}
                   className="group px-5 py-2 text-[13px] font-semibold rounded-[var(--radius-lg)] bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] hover:opacity-90 active:scale-[0.96] transition-all flex items-center gap-2"
                 >
                   Start writing
@@ -509,7 +509,7 @@ export default function Landing() {
             className="flex flex-col items-center gap-4 mb-4"
           >
             <button
-              onClick={() => navigate('/app')}
+              onClick={() => navigate('/documents')}
               className="group px-8 py-3.5 bg-[var(--color-accent)] text-white rounded-[var(--radius-xl)] font-semibold text-[17px] hover:brightness-110 active:scale-[0.97] transition-all flex items-center gap-2"
             >
               Start writing
@@ -521,7 +521,7 @@ export default function Landing() {
 
       {/* ─── Product Preview — peeks if enough space ─── */}
       <section
-        className="px-6 pb-24 sm:pb-32 relative z-20"
+        className="px-6 pb-4 sm:pb-6 relative z-20"
         ref={previewRef}
         style={{ marginTop: 'clamp(-100px, calc(-100svh + 525px), 0px)' }}
       >
@@ -536,7 +536,7 @@ export default function Landing() {
       </section>
 
       {/* ─── Features ─── */}
-      <section className="px-6 py-24 sm:py-32">
+      <section className="px-6 pt-16 sm:pt-20 pb-24 sm:pb-32">
         <div className="max-w-6xl mx-auto">
           <Reveal>
             <div className="text-center mb-16">
@@ -651,7 +651,7 @@ export default function Landing() {
               Words is free, instant, and works right in your browser. No account needed.
             </p>
             <button
-              onClick={() => navigate('/app')}
+              onClick={() => navigate('/documents')}
               className="group px-10 py-4 bg-[var(--color-accent)] text-white rounded-[var(--radius-xl)] font-semibold text-lg hover:brightness-110 active:scale-[0.97] transition-all inline-flex items-center gap-2"
             >
               Open Words
