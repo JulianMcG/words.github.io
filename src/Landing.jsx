@@ -523,7 +523,7 @@ export default function Landing() {
       </section>
 
       {/* ─── Product Preview — peeks from bottom of viewport ─── */}
-      <section className="px-6 -mt-[120px] sm:-mt-[140px] pb-24 sm:pb-32 relative z-20" ref={previewRef}>
+      <section className="px-6 -mt-[60px] sm:-mt-[80px] pb-24 sm:pb-32 relative z-20" ref={previewRef}>
         <motion.div
           initial={{ opacity: 0, y: 80, filter: 'blur(10px)' }}
           animate={introComplete ? { opacity: 1, y: 0, filter: 'blur(0px)' } : {}}
