@@ -41,7 +41,13 @@ import {
   Cloud,
   CloudOff,
   LogOut,
-  Copy
+  Copy,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  ArrowUpDown,
+  PaintBucket
 } from "lucide-react";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
 import { motion, AnimatePresence } from "framer-motion";
@@ -235,6 +241,8 @@ export default function App() {
   const sidebarScrollRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
+  const [isEditingTopTitle, setIsEditingTopTitle] = useState(false);
+  const [isFormattingExpanded, setIsFormattingExpanded] = useState(false);
   const [isSidebarScrolled, setIsSidebarScrolled] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [animatingEmojiDocId, setAnimatingEmojiDocId] = useState(null);
@@ -1082,6 +1090,9 @@ export default function App() {
       emoji: null,
       hasCustomEmoji: false,
       groupId: targetGroupId,
+      lineSpacing: '1.5',
+      hideTitle: false,
+      textAlign: 'left',
     };
 
     const newDocs = [newDoc, ...docsRef.current];
@@ -2327,7 +2338,7 @@ export default function App() {
         if (isList) {
           document.execCommand(e.shiftKey ? "outdent" : "indent", false, null);
         } else if (!e.shiftKey) {
-          document.execCommand("insertHTML", false, "&nbsp;&nbsp;&nbsp;&nbsp;");
+          document.execCommand("insertHTML", false, "&emsp;&emsp;");
         }
         syncContentToState();
         return;
@@ -2905,32 +2916,106 @@ export default function App() {
             <>
               <div className="fixed inset-0 z-[39]" onClick={() => setShareMenuOpen(false)} />
               <div className="absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-56 animate-in fade-in zoom-in-95 duration-100">
-                <div className="px-3 py-2">
-                  <div className="flex items-center justify-between gap-1.5">
-                    <button 
-                      className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
-                      onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'sans' } : d))}
-                    >
-                      <span className={`text-[22px] leading-none mb-1 ${docFont === 'sans' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
-                      <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Default</span>
-                    </button>
-                    <button 
-                      className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
-                      onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'serif' } : d))}
-                    >
-                      <span className={`text-[22px] leading-none mb-1 font-serif ${docFont === 'serif' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
-                      <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Serif</span>
-                    </button>
-                    <button 
-                      className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
-                      onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'mono' } : d))}
-                    >
-                      <span className={`text-[22px] leading-none mb-1 font-mono ${docFont === 'mono' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
-                      <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Mono</span>
-                    </button>
+                <button
+                  onClick={() => setIsFormattingExpanded(!isFormattingExpanded)}
+                  className="w-full text-left px-3 py-2 flex items-center justify-between gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <PaintBucket size={14} /> Formatting
                   </div>
-                </div>
-                <div className="h-px bg-[var(--color-border-primary)] my-1" />
+                  <ChevronDown size={14} className={`transition-transform duration-200 ${isFormattingExpanded ? 'rotate-180' : ''}`} />
+                </button>
+
+                {isFormattingExpanded && (
+                  <div className="bg-[var(--color-bg-secondary)] border-y border-[var(--color-border-primary)]">
+                    <div className="px-3 py-2">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <button 
+                          className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
+                          onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'sans' } : d))}
+                        >
+                          <span className={`text-[22px] leading-none mb-1 ${docFont === 'sans' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
+                          <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Default</span>
+                        </button>
+                        <button 
+                          className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
+                          onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'serif' } : d))}
+                        >
+                          <span className={`text-[22px] leading-none mb-1 font-serif ${docFont === 'serif' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
+                          <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Serif</span>
+                        </button>
+                        <button 
+                          className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
+                          onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'mono' } : d))}
+                        >
+                          <span className={`text-[22px] leading-none mb-1 font-mono ${docFont === 'mono' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
+                          <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Mono</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="px-3 py-2 space-y-2 border-t border-[var(--color-border-primary)]">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <button 
+                          className={`flex items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] ${activeDoc?.textAlign === 'left' || (!activeDoc?.textAlign) ? 'bg-[var(--color-bg-hover)] text-[#E8572A]' : 'bg-transparent text-[var(--color-text-primary)]'}`}
+                          onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: 'left' } : d))}
+                          title="Align Left"
+                        >
+                          <AlignLeft size={16} />
+                        </button>
+                        <button 
+                          className={`flex items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] ${activeDoc?.textAlign === 'center' ? 'bg-[var(--color-bg-hover)] text-[#E8572A]' : 'bg-transparent text-[var(--color-text-primary)]'}`}
+                          onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: 'center' } : d))}
+                          title="Align Center"
+                        >
+                          <AlignCenter size={16} />
+                        </button>
+                        <button 
+                          className={`flex items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] ${activeDoc?.textAlign === 'right' ? 'bg-[var(--color-bg-hover)] text-[#E8572A]' : 'bg-transparent text-[var(--color-text-primary)]'}`}
+                          onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: 'right' } : d))}
+                          title="Align Right"
+                        >
+                          <AlignRight size={16} />
+                        </button>
+                        <button 
+                          className={`flex items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] ${activeDoc?.textAlign === 'justify' ? 'bg-[var(--color-bg-hover)] text-[#E8572A]' : 'bg-transparent text-[var(--color-text-primary)]'}`}
+                          onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: 'justify' } : d))}
+                          title="Justify"
+                        >
+                          <AlignJustify size={16} />
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between gap-1.5 mt-2">
+                        <button 
+                          className="flex items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent text-[var(--color-text-primary)]"
+                          onClick={() => {
+                            const spacings = ['1.2', '1.5', '2.0'];
+                            const current = activeDoc?.lineSpacing || '1.5';
+                            const next = spacings[(spacings.indexOf(current) + 1) % spacings.length];
+                            setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, lineSpacing: next } : d));
+                          }}
+                          title="Spacing"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <ArrowUpDown size={14} />
+                            <span className="text-[11px] font-medium">{activeDoc?.lineSpacing || '1.5'}</span>
+                          </div>
+                        </button>
+                        <button 
+                          className={`flex items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] ${activeDoc?.hideTitle ? 'bg-[var(--color-bg-hover)] text-[#E8572A]' : 'bg-transparent text-[var(--color-text-primary)]'}`}
+                          onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, hideTitle: !d.hideTitle } : d))}
+                          title="Toggle Title Visibility"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <Heading1 size={14} />
+                            <span className="text-[11px] font-medium">{activeDoc?.hideTitle ? 'Show Title' : 'Hide Title'}</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {!isFormattingExpanded && <div className="h-px bg-[var(--color-border-primary)] my-1" />}
                 <button
                   className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => {
@@ -2966,7 +3051,7 @@ export default function App() {
       </div>
       {/* Hamburger Menu */}
       <div
-        className={`absolute top-4 left-4 z-30 transition-opacity duration-300 ${!isSidebarOpen && !isSidebarPeeking
+        className={`fixed top-4 left-4 z-30 transition-opacity duration-300 flex items-center gap-2 ${!isSidebarOpen && !isSidebarPeeking
           ? "opacity-100"
           : "opacity-0 pointer-events-none"
           }
@@ -2975,7 +3060,7 @@ export default function App() {
       >
         <button
           onClick={() => setIsSidebarOpen(true)}
-          className="p-2 text-[var(--color-text-faint)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
+          className="p-2 text-[var(--color-text-faint)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors flex-shrink-0"
         >
           <Menu size={20} />
         </button>
@@ -3441,6 +3526,60 @@ export default function App() {
           }
         }}
       >
+        {/* Top-Left Layout Header (For Hidden Title and Emoji) */}
+        {activeDoc?.hideTitle && (
+          <div className={`absolute top-4 left-4 z-40 flex items-center gap-1.5 transition-transform duration-300 ${!isSidebarOpen && !isSidebarPeeking ? 'translate-x-10' : ''}`}>
+            {/* Miniature Emoji Picker */}
+            <div className="relative" ref={emojiPickerRef}>
+              <button
+                className="w-8 h-8 flex items-center justify-center hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-xl"
+                onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                title="Add icon"
+              >
+                {activeDoc.emoji ? (
+                  <span className="block leading-none">{activeDoc.emoji}</span>
+                ) : (
+                  <FileText size={16} className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-muted)] transition-colors" />
+                )}
+              </button>
+              {isEmojiPickerOpen && (
+                <div className="absolute top-full left-0 mt-2 p-3 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-xl z-50 w-64 grid grid-cols-6 gap-1 animate-in fade-in zoom-in-95 duration-100">
+                  {EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      className="text-2xl p-2 hover:bg-[var(--color-bg-hover)] rounded-lg flex items-center justify-center transition-colors"
+                      onClick={() => {
+                        setDocs((prev) => prev.map((d) => d.id === activeDocId ? { ...d, emoji, hasCustomEmoji: true } : d));
+                        setIsEmojiPickerOpen(false);
+                      }}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {/* Editable Miniature Title */}
+            <input
+              type="text"
+              readOnly={!isEditingTopTitle}
+              className={`bg-transparent outline-none px-2 py-1 rounded text-[15px] font-semibold text-[var(--color-text-primary)] transition-all min-w-[50px] max-w-[200px] sm:max-w-[400px] truncate ${isEditingTopTitle ? 'border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] cursor-text' : 'border border-transparent hover:bg-[var(--color-bg-hover)] cursor-default'}`}
+              value={activeDoc.title}
+              onDoubleClick={() => setIsEditingTopTitle(true)}
+              onBlur={() => setIsEditingTopTitle(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') setIsEditingTopTitle(false);
+              }}
+              onChange={(e) => {
+                if (!isEditingTopTitle) return;
+                setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, title: e.target.value } : d));
+              }}
+              placeholder="Untitled"
+            />
+          </div>
+        )}
+
         {lockModal && (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-12 z-30 bg-[var(--color-bg-primary)]">
             <div className="w-full max-w-xs flex flex-col items-center">
@@ -3506,78 +3645,84 @@ export default function App() {
           </div>
           {" "}
           {/* Title Field / Header */}
-          <div className={`flex items-start gap-3 group mb-8 print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}>
-            <div className={`relative ${!activeDoc.emoji ? 'print:hidden' : ''}`} ref={emojiPickerRef}>
-              <button
-                className="w-[48px] h-[48px] mt-1 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
-                onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
-              >
-                {" "}
-                {activeDoc.emoji ? (
-                  <span
-                    key={animatingEmojiDocId === activeDoc.id ? `anim-${activeDoc.emoji}` : activeDoc.emoji}
-                    className={`${animatingEmojiDocId === activeDoc.id ? 'animate-tasteful-pop' : ''} block leading-none print:translate-y-1`}
-                  >
-                    {" "}
-                    {activeDoc.emoji}
-                  </span>
-                ) : (
-                  <FileText
-                    size={32}
-                    className="text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-muted)] transition-colors print:hidden"
-                  />
-                )}
-              </button>{" "}
-              {isEmojiPickerOpen && (
-                <div className="absolute top-full left-0 mt-2 p-3 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-xl z-50 w-64 grid grid-cols-6 gap-1 animate-in fade-in zoom-in-95 duration-100">
+          {!activeDoc?.hideTitle && (
+            <div className={`flex items-start gap-3 group mb-8 print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}>
+              <div className={`relative ${!activeDoc.emoji ? 'print:hidden' : ''}`} ref={emojiPickerRef}>
+                <button
+                  className="w-[48px] h-[48px] mt-1 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
+                  onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                >
                   {" "}
-                  {EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      className="text-2xl p-2 hover:bg-[var(--color-bg-hover)] rounded-lg flex items-center justify-center transition-colors"
-                      onClick={() => {
-                        setDocs((prev) =>
-                          prev.map((d) =>
-                            d.id === activeDocId
-                              ? {
-                                ...d,
-                                emoji,
-                                hasCustomEmoji: true,
-                              }
-                              : d,
-                          ),
-                        );
-                        setIsEmojiPickerOpen(false);
-                      }}
+                  {activeDoc.emoji ? (
+                    <span
+                      key={animatingEmojiDocId === activeDoc.id ? `anim-${activeDoc.emoji}` : activeDoc.emoji}
+                      className={`${animatingEmojiDocId === activeDoc.id ? 'animate-tasteful-pop' : ''} block leading-none print:translate-y-1`}
                     >
                       {" "}
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              )}
+                      {activeDoc.emoji}
+                    </span>
+                  ) : (
+                    <FileText
+                      size={32}
+                      className="text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-muted)] transition-colors print:hidden"
+                    />
+                  )}
+                </button>{" "}
+                {isEmojiPickerOpen && (
+                  <div className="absolute top-full left-0 mt-2 p-3 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-xl z-50 w-64 grid grid-cols-6 gap-1 animate-in fade-in zoom-in-95 duration-100">
+                    {" "}
+                    {EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        className="text-2xl p-2 hover:bg-[var(--color-bg-hover)] rounded-lg flex items-center justify-center transition-colors"
+                        onClick={() => {
+                          setDocs((prev) =>
+                            prev.map((d) =>
+                              d.id === activeDocId
+                                ? {
+                                  ...d,
+                                  emoji,
+                                  hasCustomEmoji: true,
+                                }
+                                : d,
+                            ),
+                          );
+                          setIsEmojiPickerOpen(false);
+                        }}
+                      >
+                        {" "}
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <h1
+                ref={titleRef}
+                className="flex-1 title-input text-[36px] sm:text-[42px] font-bold leading-tight outline-none w-full break-words tracking-tight mt-0"
+                contentEditable
+                suppressContentEditableWarning
+                spellCheck={true}
+                autoCapitalize="off"
+                autoCorrect="on"
+                onInput={handleTitleInput}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    editorRef.current.focus();
+                  }
+                }}
+              ></h1>
             </div>
-            <h1
-              ref={titleRef}
-              className="flex-1 title-input text-[36px] sm:text-[42px] font-bold leading-tight outline-none w-full break-words tracking-tight mt-0"
-              contentEditable
-              suppressContentEditableWarning
-              spellCheck={true}
-              autoCapitalize="off"
-              autoCorrect="on"
-              onInput={handleTitleInput}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  editorRef.current.focus();
-                }
-              }}
-            ></h1>
-          </div>{" "}
+          )}
           {/* Body Field */}
           <div
             ref={editorRef}
-            className="editor-content w-full"
+            className={`editor-content w-full ${activeDoc?.textAlign && activeDoc.textAlign !== 'left' ? 'text-' + activeDoc.textAlign : 'text-left'}`}
+            style={{ 
+              '--doc-line-height': activeDoc?.lineSpacing || '1.5',
+              textAlign: activeDoc?.textAlign || 'left'
+            }}
             contentEditable
             suppressContentEditableWarning
             spellCheck={true}
