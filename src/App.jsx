@@ -608,7 +608,7 @@ export default function App() {
         // Instantly force the DOM to match the loaded state for snappiness
         const docToLoad = finalDocs.find(d => d.id === nextId);
         if (docToLoad && editorRef.current && titleRef.current) {
-          titleRef.current.innerText = docToLoad.title;
+          titleRef.current.textContent = docToLoad.title;
           editorRef.current.innerHTML = docToLoad.content;
         }
 
@@ -692,7 +692,7 @@ export default function App() {
               prevActiveDocIdRef.current = nextActiveId;
               const activeDoc = data.docs.find(d => d.id === nextActiveId);
               if (activeDoc && editorRef.current && titleRef.current) {
-                titleRef.current.innerText = activeDoc.title;
+                titleRef.current.textContent = activeDoc.title;
                 editorRef.current.innerHTML = activeDoc.content;
               }
             }
@@ -851,7 +851,7 @@ export default function App() {
           d.id === activeDocId
             ? {
               ...d,
-              title: titleRef.current.innerText || "",
+              title: d.hideTitle ? d.title : (titleRef.current.textContent || d.title || ""),
               content: editorRef.current.innerHTML || "<p><br></p>",
             }
             : d,
@@ -876,8 +876,17 @@ export default function App() {
     };
   }, [activeDocId]);
 
+  // Failsafe: Enforce DOM text integrity against React wiping uncontrolled nodes on CSS/parent re-renders
+  useEffect(() => {
+    const doc = docs.find(d => d.id === activeDocId);
+    if (doc && titleRef.current && titleRef.current.textContent !== doc.title) {
+      if (doc.title === undefined) return;
+      titleRef.current.textContent = doc.title || "";
+    }
+  }, [docs, activeDocId]);
+
   const handleTitleInput = () => {
-    const newTitle = titleRef.current?.innerText || "";
+    const newTitle = titleRef.current?.textContent || "";
 
     // Instantly sync the text typed to the document state
     setDocs((prev) =>
@@ -1126,7 +1135,7 @@ export default function App() {
     setSelectedDocIds([newId]);
 
     // Load the new doc into the editor directly
-    if (titleRef.current) titleRef.current.innerText = "";
+    if (titleRef.current) titleRef.current.textContent = "";
     if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
 
     if (sidebarScrollRef.current && !targetGroupId) {
@@ -1184,7 +1193,7 @@ export default function App() {
           groupId: null,
         };
         setActiveDocId("1");
-        if (titleRef.current) titleRef.current.innerText = "";
+        if (titleRef.current) titleRef.current.textContent = "";
         if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
         docsRef.current = [freshDoc];
         return [freshDoc];
@@ -1263,25 +1272,29 @@ export default function App() {
   };
 
   const handleRenameSubmit = (docId, newTitle) => {
-    setDocs((prev) => prev.map((d) => {
-      if (d.id !== docId) return d;
-      let nextEmoji = d.emoji;
-      if (!d.hasCustomEmoji) {
-        const autoEmoji = getEmojiForTitle(newTitle);
-        if (autoEmoji && autoEmoji !== d.emoji) {
-          nextEmoji = autoEmoji;
-          setAnimatingEmojiDocId(d.id);
-          setTimeout(() => {
-            setAnimatingEmojiDocId(p => p === d.id ? null : p);
-          }, 200);
+    setDocs((prev) => {
+      const updated = prev.map((d) => {
+        if (d.id !== docId) return d;
+        let nextEmoji = d.emoji;
+        if (!d.hasCustomEmoji) {
+          const autoEmoji = getEmojiForTitle(newTitle);
+          if (autoEmoji && autoEmoji !== d.emoji) {
+            nextEmoji = autoEmoji;
+            setAnimatingEmojiDocId(d.id);
+            setTimeout(() => {
+              setAnimatingEmojiDocId(p => p === d.id ? null : p);
+            }, 200);
+          }
         }
-      }
-      return { ...d, title: newTitle, emoji: nextEmoji };
-    }));
+        return { ...d, title: newTitle, emoji: nextEmoji };
+      });
+      docsRef.current = updated;
+      return updated;
+    });
     
     if (docId === activeDocId && titleRef.current) {
-      if (titleRef.current.innerText !== newTitle) {
-        titleRef.current.innerText = newTitle;
+      if (titleRef.current.textContent !== newTitle) {
+        titleRef.current.textContent = newTitle;
       }
     }
     
@@ -1338,7 +1351,7 @@ export default function App() {
           // Load the doc directly
           const doc = docsRef.current.find(d => d.id === lockModal.docId);
           if (doc && editorRef.current && titleRef.current) {
-            titleRef.current.innerText = doc.title;
+            titleRef.current.textContent = doc.title;
             editorRef.current.innerHTML = doc.content;
           }
           if (!isSidebarOpen) setIsSidebarPeeking(false);
@@ -3662,7 +3675,7 @@ export default function App() {
                   // Reload active doc to restore editor content
                   const doc = docsRef.current.find(d => d.id === activeDocId);
                   if (doc && editorRef.current && titleRef.current) {
-                    titleRef.current.innerText = doc.title;
+                    titleRef.current.textContent = doc.title;
                     editorRef.current.innerHTML = doc.content;
                   }
                 }}
