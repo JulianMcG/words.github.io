@@ -2457,6 +2457,12 @@ export default function App() {
       ) {
         setIsEmojiPickerOpen(false);
       }
+      if (!event.target.closest('.words-context-menu')) {
+        setContextMenu(null);
+        setGroupMenuOpen(null);
+        setShareMenuOpen(false);
+        setUserMenuOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -2589,7 +2595,7 @@ export default function App() {
           >
             <button
               onClick={(e) => handleContextMenu(e, doc.id)}
-              className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
+              className="words-context-menu p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
               title="More options"
             >
               <MoreHorizontal size={14} />
@@ -2973,15 +2979,14 @@ export default function App() {
         <div className="relative">
           <button
             onClick={() => setShareMenuOpen(!shareMenuOpen)}
-            className="p-2 text-[var(--color-text-faint)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
+            className="words-context-menu p-2 text-[var(--color-text-faint)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
             title="Options"
           >
             <MoreHorizontal size={20} />
           </button>
           {shareMenuOpen && (
             <>
-              <div className="fixed inset-0 z-[39]" onClick={() => setShareMenuOpen(false)} />
-              <motion.div layout className="absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-56 animate-in fade-in zoom-in-95 duration-100 overflow-hidden">
+              <motion.div layout className="words-context-menu absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-56 animate-in fade-in zoom-in-95 duration-100 overflow-hidden">
                 <div className="px-3 py-2">
                   <div className="flex items-center justify-between gap-1.5">
                     <button 
@@ -3468,7 +3473,7 @@ export default function App() {
                               <div className="relative">
                                 <button
                                   onClick={(e) => handleGroupMenu(e, group.id)}
-                                  className="p-1 hover:opacity-70 transition-opacity rounded"
+                                  className="words-context-menu p-1 hover:opacity-70 transition-opacity rounded"
                                   style={{ color: group.color || 'var(--color-icon-muted)' }}
                                   title="More options"
                                 >
@@ -3476,9 +3481,8 @@ export default function App() {
                                 </button>
                                 {groupMenuOpen?.id === group.id && (
                                   <>
-                                    <div className="fixed inset-0 z-[59]" onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(null); }} />
                                     <div 
-                                      className="fixed bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100"
+                                      className="words-context-menu fixed bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100"
                                       style={{ top: groupMenuOpen.y, left: groupMenuOpen.x }}
                                     >
                                       <button
@@ -3572,7 +3576,7 @@ export default function App() {
           <div className="absolute bottom-4 left-4 z-40">
             <button
               onClick={() => user ? setUserMenuOpen(!userMenuOpen) : setAuthModal('login')}
-              className="group p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
+              className="words-context-menu group p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
               title={user ? "Cloud Sync Active" : "Enable Cloud Sync"}
             >
               {user ? <Cloud size={16} className={userMenuOpen ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors"} /> : <CloudOff size={16} className={authModal ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors"} />}
@@ -3580,8 +3584,7 @@ export default function App() {
 
             {userMenuOpen && user && (
               <>
-                <div className="fixed inset-0 z-[59]" onClick={() => setUserMenuOpen(false)} />
-                <div className="absolute left-0 bottom-full mb-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-2 z-[60] min-w-[180px] animate-in fade-in zoom-in-95 duration-100">
+                <div className="words-context-menu absolute left-0 bottom-full mb-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-2 z-[60] min-w-[180px] animate-in fade-in zoom-in-95 duration-100">
                   <div className="px-3 py-1.5 mb-1 border-b border-[var(--color-border-primary)]">
                     <p className="text-[11px] font-semibold text-[var(--color-text-faint)] uppercase tracking-wider mb-0.5">Signed in as</p>
                     <p className="text-[13px] text-[var(--color-text-primary)] truncate" title={user.email}>{user.email}</p>
@@ -4279,7 +4282,7 @@ export default function App() {
       {/* Context Menu for Documents */}
       {contextMenu && (
         <div
-          className="fixed z-[60] bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg py-1 w-44 animate-in fade-in zoom-in-95 duration-100"
+          className="words-context-menu fixed z-[60] bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg py-1 w-44 animate-in fade-in zoom-in-95 duration-100"
           style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x + 4}px` }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -4321,10 +4324,7 @@ export default function App() {
           </button>
         </div>
       )}
-      {/* Click-away overlay for context menu */}
-      {contextMenu && (
-        <div className="fixed inset-0 z-[59]" onClick={() => setContextMenu(null)} />
-      )}
+
 
       {/* Auth Modal */}
       {authModal && (
