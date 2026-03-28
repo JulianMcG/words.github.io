@@ -41,7 +41,17 @@ import {
   Cloud,
   CloudOff,
   LogOut,
-  Copy
+  Copy,
+  Paintbrush,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  EyeOff,
+  ChevronLeft,
+  ArrowLeft,
+  Maximize2,
+  Minimize2,
+  AlignJustify
 } from "lucide-react";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
 import { motion, AnimatePresence } from "framer-motion";
@@ -245,6 +255,7 @@ export default function App() {
   const [groupPreviewPos, setGroupPreviewPos] = useState({ top: 0, left: 0 });
   const [sidebarContextMenu, setSidebarContextMenu] = useState({ isOpen: false, x: 0, y: 0 });
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [styleAccordionOpen, setStyleAccordionOpen] = useState(false);
   const [docs, setDocs] = useState(() => {
     const saved = localStorage.getItem("words_docs");
     if (saved) {
@@ -264,6 +275,10 @@ export default function App() {
         emoji: null,
         hasCustomEmoji: false,
         groupId: null,
+        textAlign: "left",
+        hideTitle: false,
+        fullWidth: false,
+        lineSpacing: "1.5",
       },
     ];
   });
@@ -287,6 +302,8 @@ export default function App() {
   const [dragTarget, setDragTarget] = useState(null); // { id: string, position: 'before' | 'after' | 'inset', type: 'doc' | 'group' }
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { docId, x, y }
+  const [editingDocId, setEditingDocId] = useState(null);
+  const [editingDocTitle, setEditingDocTitle] = useState('');
   const [groupMenuOpen, setGroupMenuOpen] = useState(null);
   const [editingGroupId, setEditingGroupId] = useState(null);
   const [animatingDocId, setAnimatingDocId] = useState(null);
@@ -345,6 +362,7 @@ export default function App() {
     x: 0,
     y: 0,
     showLinkInput: false,
+    showColorPicker: false,
     linkUrl: "",
     savedRange: null,
   });
@@ -375,7 +393,7 @@ export default function App() {
     if (!editorRef.current || !titleRef.current) return;
     const currentId = prevActiveDocIdRef.current;
     const content = editorRef.current.innerHTML || "<p><br></p>";
-    const title = titleRef.current.innerText || "";
+    const title = titleRef.current.textContent || "";
     // Update ref synchronously so subsequent reads are correct
     docsRef.current = docsRef.current.map((d) =>
       d.id === currentId ? { ...d, content, title } : d
@@ -394,7 +412,7 @@ export default function App() {
     // Load synchronously from docsRef (already updated by flush above)
     const activeDoc = docsRef.current.find((d) => d.id === activeDocId);
     if (activeDoc && editorRef.current && titleRef.current) {
-      titleRef.current.innerText = activeDoc.title;
+      titleRef.current.textContent = activeDoc.title;
       editorRef.current.innerHTML = activeDoc.content;
     }
   }, [activeDocId, flushCurrentDoc]);
@@ -434,6 +452,11 @@ export default function App() {
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
 
+        let activeAlign = 'left';
+        if (document.queryCommandState("justifyCenter")) activeAlign = 'center';
+        else if (document.queryCommandState("justifyRight")) activeAlign = 'right';
+        else if (document.queryCommandState("justifyFull")) activeAlign = 'justify';
+
         let node = selection.focusNode;
         if (node?.nodeType === 3) node = node.parentNode;
         const isLinkActive = !!(node?.closest && node.closest('a'));
@@ -446,6 +469,7 @@ export default function App() {
           showLinkInput: false,
           linkUrl: "",
           isLinkActive,
+          activeAlign,
           savedRange: range,
         }));
       } else {
@@ -566,7 +590,7 @@ export default function App() {
 
         const parsedDocs = savedDocs ? JSON.parse(savedDocs) : [];
         const finalDocs = parsedDocs.length > 0 ? parsedDocs : [
-          { id: "1", title: "", content: "<p><br></p>", isPinned: false, emoji: null, hasCustomEmoji: false, groupId: null }
+          { id: "1", title: "", content: "<p><br></p>", isPinned: false, emoji: null, hasCustomEmoji: false, groupId: null, textAlign: "left", hideTitle: false, fullWidth: false, lineSpacing: "1.5" }
         ];
 
         const parsedGroups = savedGroups ? JSON.parse(savedGroups) : [];
@@ -1082,6 +1106,10 @@ export default function App() {
       emoji: null,
       hasCustomEmoji: false,
       groupId: targetGroupId,
+      textAlign: "left",
+      hideTitle: false,
+      fullWidth: false,
+      lineSpacing: "1.5",
     };
 
     const newDocs = [newDoc, ...docsRef.current];
@@ -1232,6 +1260,32 @@ export default function App() {
 
     setActiveDocId(newDocId);
     setContextMenu(null);
+  };
+
+  const handleRenameSubmit = (docId, newTitle) => {
+    setDocs((prev) => prev.map((d) => {
+      if (d.id !== docId) return d;
+      let nextEmoji = d.emoji;
+      if (!d.hasCustomEmoji) {
+        const autoEmoji = getEmojiForTitle(newTitle);
+        if (autoEmoji && autoEmoji !== d.emoji) {
+          nextEmoji = autoEmoji;
+          setAnimatingEmojiDocId(d.id);
+          setTimeout(() => {
+            setAnimatingEmojiDocId(p => p === d.id ? null : p);
+          }, 200);
+        }
+      }
+      return { ...d, title: newTitle, emoji: nextEmoji };
+    }));
+    
+    if (docId === activeDocId && titleRef.current) {
+      if (titleRef.current.innerText !== newTitle) {
+        titleRef.current.innerText = newTitle;
+      }
+    }
+    
+    setEditingDocId(null);
   };
 
   const handleShareDoc = async (docId) => {
@@ -2327,7 +2381,7 @@ export default function App() {
         if (isList) {
           document.execCommand(e.shiftKey ? "outdent" : "indent", false, null);
         } else if (!e.shiftKey) {
-          document.execCommand("insertHTML", false, "&nbsp;&nbsp;&nbsp;&nbsp;");
+          document.execCommand("insertHTML", false, "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;");
         }
         syncContentToState();
         return;
@@ -2497,9 +2551,26 @@ export default function App() {
                 />
               )}
             </div>
-            <span className="text-[14px] select-none whitespace-nowrap">
-              {doc.title || "Untitled"}
-            </span>
+            {editingDocId === doc.id ? (
+              <input
+                autoFocus
+                type="text"
+                value={editingDocTitle}
+                onChange={(e) => setEditingDocTitle(e.target.value)}
+                onBlur={() => handleRenameSubmit(doc.id, editingDocTitle)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleRenameSubmit(doc.id, editingDocTitle);
+                  if (e.key === 'Escape') { setEditingDocId(null); setEditingDocTitle(''); }
+                }}
+                className="bg-transparent text-[14px] text-[var(--color-text-primary)] outline-none w-full min-w-0"
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="text-[14px] select-none whitespace-nowrap">
+                {doc.title || "Untitled"}
+              </span>
+            )}
           </div>
           <div
             className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10"
@@ -2540,9 +2611,9 @@ export default function App() {
           __html: ` .editor-content { outline: none; padding-bottom: 30vh; color:
               var(--color-text-primary); } .editor-content::after { content: "" ; display: table; clear: both; } .editor-content>
               * {
-                margin-top: 2px;
-                margin-bottom: 2px;
-                line-height: 1.5;
+                margin-top: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
+                margin-bottom: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
+                line-height: inherit;
               }
 
               .editor-content h1,
@@ -2583,15 +2654,21 @@ export default function App() {
                 margin-bottom: 4px;
               }
 
+              .editor-content > * {
+                transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+              }
+
               .editor-content ul {
                 list-style-type: disc;
-                padding-left: 1.5em;
+                list-style-position: inside;
+                padding-left: 0;
                 margin-top: 0.5em;
                 margin-bottom: 0.5em;
               }
 
               .editor-content ul ul {
                 list-style-type: circle;
+                padding-left: 1.5em;
                 margin-top: 0.25em;
                 margin-bottom: 0.25em;
               }
@@ -2904,7 +2981,7 @@ export default function App() {
           {shareMenuOpen && (
             <>
               <div className="fixed inset-0 z-[39]" onClick={() => setShareMenuOpen(false)} />
-              <div className="absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-56 animate-in fade-in zoom-in-95 duration-100">
+              <motion.div layout className="absolute right-0 top-full mt-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[40] w-56 animate-in fade-in zoom-in-95 duration-100 overflow-hidden">
                 <div className="px-3 py-2">
                   <div className="flex items-center justify-between gap-1.5">
                     <button 
@@ -2930,6 +3007,101 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+                <div className="h-px bg-[var(--color-border-primary)] my-1" />
+                <button
+                  className="w-full text-left px-3 py-2 flex items-center justify-between text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => setStyleAccordionOpen(!styleAccordionOpen)}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Paintbrush size={14} /> Style
+                  </div>
+                  <ChevronDown size={14} className={`transition-transform duration-200 text-[var(--color-text-muted)] ${styleAccordionOpen ? 'rotate-180' : ''}`} />
+                </button>
+                <AnimatePresence>
+                  {styleAccordionOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="pt-2 pb-1 flex flex-col gap-3 px-3">
+                        {/* Text Alignment */}
+                        <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md p-1 items-center justify-between">
+                          {['left', 'center', 'right', 'justify'].map((align) => {
+                            const active = activeDoc?.textAlign === align || (!activeDoc?.textAlign && align === 'left');
+                            return (
+                              <button
+                                key={align}
+                                onClick={() => {
+                                  setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: align } : d));
+                                  if (editorRef.current) {
+                                    editorRef.current.querySelectorAll('*').forEach(el => {
+                                      if (el.style) el.style.textAlign = '';
+                                      if (el.hasAttribute('align')) el.removeAttribute('align');
+                                    });
+                                    syncContentToState();
+                                  }
+                                }}
+                                className={`flex-1 flex justify-center py-1.5 rounded-sm transition-colors ${active ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'} hover:bg-[var(--color-bg-hover)]`}
+                              >
+                                {align === 'left' && <AlignLeft size={16} />}
+                                {align === 'center' && <AlignCenter size={16} />}
+                                {align === 'right' && <AlignRight size={16} />}
+                                {align === 'justify' && <AlignJustify size={16} />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {/* Line Spacing UI */}
+                        <div className="flex flex-col border border-[var(--color-border-primary)] rounded-md overflow-hidden bg-[var(--color-bg-secondary)]">
+                          {['1.0', '1.5', '2.0'].map((space, idx) => {
+                            const lbl = space === '1.0' ? 'Compact' : space === '1.5' ? 'Standard' : 'Spacious';
+                            const active = activeDoc?.lineSpacing === space || (!activeDoc?.lineSpacing && space === '1.5');
+                            return (
+                              <button
+                                key={space}
+                                onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, lineSpacing: space } : d))}
+                                className={`text-[12px] py-1.5 px-3 text-left hover:bg-[var(--color-bg-hover)] transition-colors ${active ? 'bg-[var(--color-bg-primary)] text-[#E8572A] font-medium' : 'text-[var(--color-text-muted)]'} ${idx > 0 ? 'border-t border-[var(--color-border-primary)]' : ''}`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="flex flex-col opacity-70" style={{ gap: space === '1.0' ? '1px' : space === '1.5' ? '2px' : '4px' }}>
+                                    <div className="w-3 h-0.5 bg-current rounded-full" />
+                                    <div className="w-3 h-0.5 bg-current rounded-full" />
+                                    <div className="w-2 h-0.5 bg-current rounded-full" />
+                                  </div>
+                                  {lbl}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      
+                      {/* Sub Divider */}
+                      <div className="h-px bg-[var(--color-border-primary)] mx-3 my-1" />
+
+                      {/* Hide Title - Standard Styled */}
+                      <button
+                        className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, hideTitle: !d.hideTitle } : d))}
+                      >
+                        <EyeOff size={14} className={activeDoc?.hideTitle ? "text-[#E8572A]" : "text-[var(--color-text-muted)]"} />
+                        <span className={activeDoc?.hideTitle ? "text-[#E8572A]" : ""}>Hide title</span>
+                      </button>
+
+                      {/* Full Width Layout - Standard Styled */}
+                      <button
+                        className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, fullWidth: !d.fullWidth } : d))}
+                      >
+                        {activeDoc?.fullWidth ? <Minimize2 size={14} className="text-[#E8572A]" /> : <Maximize2 size={14} className="text-[var(--color-text-muted)]" />}
+                        <span className={activeDoc?.fullWidth ? "text-[#E8572A]" : ""}>Full width page</span>
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <div className="h-px bg-[var(--color-border-primary)] my-1" />
                 <button
                   className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
@@ -2959,7 +3131,7 @@ export default function App() {
                 >
                   <Printer size={14} /> Print
                 </button>
-              </div>
+              </motion.div>
             </>
           )}
         </div>
@@ -3498,7 +3670,7 @@ export default function App() {
             </div>
           </div>
         )}
-        <main className={`w-full max-w-3xl mx-auto px-12 pt-24 pb-32 print:pt-0 print:pb-0 flex-grow bg-[var(--color-bg-primary)] ${docFont === 'mono' ? 'font-mono' : ''} ${docFont === 'serif' ? 'font-serif theme-font-serif' : ''}`}>
+        <main className={`w-full ${activeDoc?.fullWidth ? 'max-w-[1200px] px-8 sm:px-16' : 'max-w-3xl px-12'} mx-auto pt-24 pb-32 print:pt-0 print:pb-0 flex-grow bg-[var(--color-bg-primary)] ${docFont === 'mono' ? 'font-mono' : ''} ${docFont === 'serif' ? 'font-serif theme-font-serif' : ''}`}>
           {/* Print Logo */}
           <div className="hidden print:flex mb-6 items-center gap-2">
             <img src="/faviconlight.png" alt="Logo" className="w-5 h-5 object-contain" />
@@ -3506,7 +3678,7 @@ export default function App() {
           </div>
           {" "}
           {/* Title Field / Header */}
-          <div className={`flex items-start gap-3 group mb-8 print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}>
+          <div className={`flex items-start gap-3 group print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`} style={{ display: activeDoc.hideTitle ? 'none' : 'flex', marginBottom: '2rem' }}>
             <div className={`relative ${!activeDoc.emoji ? 'print:hidden' : ''}`} ref={emojiPickerRef}>
               <button
                 className="w-[48px] h-[48px] mt-1 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
@@ -3560,6 +3732,7 @@ export default function App() {
             <h1
               ref={titleRef}
               className="flex-1 title-input text-[36px] sm:text-[42px] font-bold leading-tight outline-none w-full break-words tracking-tight mt-0"
+              style={{ textAlign: activeDoc.textAlign || "left" }}
               contentEditable
               suppressContentEditableWarning
               spellCheck={true}
@@ -3577,7 +3750,10 @@ export default function App() {
           {/* Body Field */}
           <div
             ref={editorRef}
-            className="editor-content w-full"
+            className={`editor-content w-full ${activeDoc.lineSpacing === '1.0' ? 'leading-none' : activeDoc.lineSpacing === '2.0' ? 'leading-loose' : 'leading-relaxed'}`}
+            style={{ 
+              textAlign: activeDoc.textAlign || "left"
+            }}
             contentEditable
             suppressContentEditableWarning
             spellCheck={true}
@@ -3650,13 +3826,13 @@ export default function App() {
       <AnimatePresence>
         {toolbarState.show && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: "calc(-100% + 4px)", x: "-50%", filter: 'blur(2px)' }}
-            animate={{ opacity: 1, scale: 1, y: "calc(-100% - 6px)", x: "-50%", filter: 'blur(0px)' }}
+            initial={{ opacity: 0, scale: 0.95, y: 4, x: "-50%", filter: 'blur(2px)' }}
+            animate={{ opacity: 1, scale: 1, y: 0, x: "-50%", filter: 'blur(0px)' }}
             exit={{ opacity: 0, transition: { duration: 0 } }}
             transition={{ duration: 0.15 }}
-            className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-1 py-1 flex items-center gap-1"
+            className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-1 py-1 flex items-center gap-0.5"
             style={{
-              top: toolbarState.y,
+              top: toolbarState.y - 44,
               left: toolbarState.x,
               transformOrigin: "bottom center"
             }}
@@ -3665,7 +3841,17 @@ export default function App() {
             }}
           >
             {toolbarState.showLinkInput ? (
-              <div className="flex items-center gap-2 px-2 py-1">
+              <div className="flex items-center gap-2 px-1 py-1 bg-[var(--color-bg-primary)]">
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setToolbarState(p => ({ ...p, showLinkInput: false }));
+                  }}
+                  className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-md transition-all"
+                  title="Back"
+                >
+                  <ArrowLeft size={14} />
+                </button>
                 <input
                   autoFocus
                   type="text"
@@ -3686,10 +3872,10 @@ export default function App() {
                           document.execCommand('createLink', false, url);
                           syncContentToState();
                         }
-                        setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
+                        setToolbarState(p => ({ ...p, show: false, showLinkInput: false, showColorPicker: false }));
                       }
                     } else if (e.key === 'Escape') {
-                      setToolbarState(p => ({ ...p, show: false, showLinkInput: false }));
+                      setToolbarState(p => ({ ...p, show: false, showLinkInput: false, showColorPicker: false }));
                     }
                   }}
                 />
@@ -3698,24 +3884,24 @@ export default function App() {
               <>
                 <button
                   onClick={(e) => formatText(e, "bold")}
-                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
                   title="Bold"
                 >
-                  <Bold size={15} strokeWidth={2.5} />
+                  <Bold size={14} />
                 </button>
                 <button
                   onClick={(e) => formatText(e, "italic")}
-                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
                   title="Italic"
                 >
-                  <Italic size={15} strokeWidth={2.5} />
+                  <Italic size={14} />
                 </button>
                 <button
                   onClick={(e) => formatText(e, "strikeThrough")}
-                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
                   title="Strikethrough"
                 >
-                  <Strikethrough size={15} strokeWidth={2.5} />
+                  <Strikethrough size={14} />
                 </button>
                 {toolbarState.isLinkActive ? (
                   <button
@@ -3724,45 +3910,147 @@ export default function App() {
                       syncContentToState();
                       setToolbarState(p => ({ ...p, show: false, showLinkInput: false, isLinkActive: false }));
                     }}
-                    className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                    className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
                     title="Unlink"
                   >
-                    <Unlink size={15} strokeWidth={2.5} />
+                    <Unlink size={14} />
                   </button>
                 ) : (
                   <button
-                    onClick={(e) => {
-                      setToolbarState(p => ({ ...p, showLinkInput: true }));
-                    }}
-                    className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                    onClick={(e) => setToolbarState(p => ({ ...p, showLinkInput: true }))}
+                    className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
                     title="Insert Link"
                   >
-                    <Link size={15} strokeWidth={2.5} />
+                    <Link size={14} />
                   </button>
                 )}
-                <div className="w-px h-4 bg-gray-200 mx-1"></div>
-                <button
-                  onClick={(e) => {
-                    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                    const targetColor = isDark ? '#716215' : '#fef08a';
-                    const currentColor = document.queryCommandValue('backColor');
-
-                    const isHighlighted = currentColor && (
-                      currentColor.replace(/\s+/g, '').toLowerCase() === '#fef08a' ||
-                      currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(254,240,138)' ||
-                      currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(254,240,138,1)' ||
-                      currentColor.replace(/\s+/g, '').toLowerCase() === '#716215' ||
-                      currentColor.replace(/\s+/g, '').toLowerCase() === 'rgb(113,98,21)' ||
-                      currentColor.replace(/\s+/g, '').toLowerCase() === 'rgba(113,98,21,1)'
-                    );
-
-                    formatText(e, "backColor", isHighlighted ? "transparent" : targetColor);
-                  }}
-                  className="p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-                  title="Highlight"
-                >
-                  <Highlighter size={15} strokeWidth={2.5} />
-                </button>
+                
+                <div className="w-px h-4 bg-[var(--color-border-primary)] mx-0.5" />
+                
+                <div className="flex items-center gap-0.5 relative">
+                  <button
+                    onClick={(e) => {
+                      if (toolbarState.savedRange) {
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(toolbarState.savedRange);
+                      }
+                      
+                      const expectedHex = (toolbarState.activeHighlightColor || '#fef08a') + '40';
+                      const dummy = document.createElement('div');
+                      dummy.style.backgroundColor = expectedHex;
+                      const expectedRgba = dummy.style.backgroundColor;
+                      
+                      let isHighlighted = false;
+                      let currentColor = null;
+                      let node = window.getSelection().anchorNode;
+                      if (node?.nodeType === 3) node = node.parentNode;
+                      while (node && node !== editorRef.current && node.tagName !== 'ARTICLE' && node.tagName !== 'MAIN') {
+                        if (node.style?.backgroundColor && node.style.backgroundColor !== 'transparent' && node.style.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+                          isHighlighted = true;
+                          currentColor = node.style.backgroundColor;
+                          break;
+                        }
+                        node = node.parentNode;
+                      }
+                      
+                      if (isHighlighted && currentColor === expectedRgba) {
+                        formatText(e, "backColor", "transparent");
+                      } else {
+                        formatText(e, "backColor", expectedHex);
+                      }
+                    }}
+                    className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                    title="Toggle Highlight"
+                  >
+                    <Highlighter size={14} />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setToolbarState(p => ({ ...p, showColorPicker: !p.showColorPicker, showAlignPicker: false }));
+                    }}
+                    className={`p-1.5 w-[26px] h-[26px] flex items-center justify-center rounded-md transition-colors ${toolbarState.showColorPicker ? 'bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)]' : 'text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                    title="Color Picker"
+                  >
+                    <div className="w-[10px] h-[10px] rounded-full border border-black/10 dark:border-white/10" style={{ backgroundColor: toolbarState.activeHighlightColor || '#fef08a' }} />
+                  </button>
+                  
+                  {/* Color Context Menus */}
+                  {toolbarState.showColorPicker && (
+                    <div className="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-md px-1 py-1 flex items-center gap-0.5 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-100">
+                      {['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'].map(color => (
+                        <button
+                          key={color}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setToolbarState(p => ({ ...p, showColorPicker: false, activeHighlightColor: color }));
+                          }}
+                          className={`p-1.5 flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-bg-hover-strong)]`}
+                          title="Select highlight color"
+                        >
+                          <div 
+                            className={`w-3.5 h-3.5 rounded-full transition-opacity hover:opacity-80 ${toolbarState.activeHighlightColor === color ? 'ring-2 ring-offset-1 ring-[var(--color-border-primary)] dark:ring-offset-gray-900' : ''}`}
+                            style={{ backgroundColor: color }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="w-px h-4 bg-[var(--color-border-primary)] mx-0.5" />
+                
+                <div className="relative flex items-center">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setToolbarState(p => ({ ...p, showAlignPicker: !p.showAlignPicker, showColorPicker: false }));
+                    }}
+                    className={`p-1.5 flex items-center gap-0.5 rounded-md transition-colors ${toolbarState.showAlignPicker ? 'bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                    title="Alignment"
+                  >
+                    {toolbarState.activeAlign === 'center' ? <AlignCenter size={14} /> :
+                     toolbarState.activeAlign === 'right' ? <AlignRight size={14} /> :
+                     toolbarState.activeAlign === 'justify' ? <AlignJustify size={14} /> :
+                     <AlignLeft size={14} />}
+                    <ChevronDown size={10} strokeWidth={3} className="text-[var(--color-icon-muted)]" />
+                  </button>
+                  
+                  {/* Alignment Context Menus */}
+                  {toolbarState.showAlignPicker && (
+                    <div className="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-md px-1 py-1 flex items-center animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-100">
+                      <button
+                        onClick={(e) => { formatText(e, "justifyLeft"); setToolbarState(p => ({ ...p, showAlignPicker: false, show: false })); }}
+                        className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                        title="Align Left"
+                      >
+                        <AlignLeft size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => { formatText(e, "justifyCenter"); setToolbarState(p => ({ ...p, showAlignPicker: false, show: false })); }}
+                        className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                        title="Align Center"
+                      >
+                        <AlignCenter size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => { formatText(e, "justifyRight"); setToolbarState(p => ({ ...p, showAlignPicker: false, show: false })); }}
+                        className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                        title="Align Right"
+                      >
+                        <AlignRight size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => { formatText(e, "justifyFull"); setToolbarState(p => ({ ...p, showAlignPicker: false, show: false })); }}
+                        className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                        title="Justify"
+                      >
+                        <AlignJustify size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </motion.div>
@@ -3995,6 +4283,17 @@ export default function App() {
           style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x + 4}px` }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button
+            className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingDocId(contextMenu.docId);
+              setEditingDocTitle(docs.find(d => d.id === contextMenu.docId)?.title || "");
+              setContextMenu(null);
+            }}
+          >
+            <Pencil size={14} /> Rename
+          </button>
           <button
             className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={(e) => { togglePinDoc(e, contextMenu.docId); setContextMenu(null); }}
