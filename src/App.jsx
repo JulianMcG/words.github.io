@@ -56,12 +56,21 @@ import {
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
 import { motion, AnimatePresence } from "framer-motion";
 import GradualBlur from "./components/GradualBlur";
-
+import { Sparkles } from "lucide-react";
+import BuddyIcon from "./components/BuddyIcon";
+import BuddyWidget from "./components/BuddyWidget";
 import { EMOJIS, getEmojiForTitle } from "./utils/emojiMap";
 
 
 // Define the separated commands
 const COMMANDS = [
+  {
+    id: "buddy",
+    title: "Ask Buddy",
+    description: "Edit, generate, or brainstorm.",
+    icon: BuddyIcon,
+    type: "buddy",
+  },
   {
     id: "text",
     title: "Text",
@@ -109,6 +118,7 @@ const COMMANDS = [
     type: "list",
     tag: "insertUnorderedList",
   },
+
   {
     id: "ol",
     title: "Numbered List",
@@ -372,6 +382,14 @@ export default function App() {
     x: 0,
     y: 0,
   });
+  const [buddyState, setBuddyState] = useState({
+    show: false,
+    x: 0,
+    y: 0,
+    savedRange: null,
+    selectedText: "",
+    isCollapsed: true,
+  });
 
   const editorRef = useRef(null);
   const titleRef = useRef(null);
@@ -384,9 +402,17 @@ export default function App() {
 
   const filteredCommands = COMMANDS.filter(
     (cmd) =>
-      cmd.title.toLowerCase().includes(slashState.query.toLowerCase()) ||
-      cmd.id.toLowerCase().includes(slashState.query.toLowerCase()),
-  );
+      (cmd.id !== "buddy" || user) &&
+      (cmd.title.toLowerCase().includes(slashState.query.toLowerCase()) ||
+       cmd.id.toLowerCase().includes(slashState.query.toLowerCase())),
+  ).sort((a, b) => {
+    const q = slashState.query.toLowerCase();
+    if (q.startsWith("b")) {
+      if (a.id === "ul" && b.id === "buddy") return -1;
+      if (a.id === "buddy" && b.id === "ul") return 1;
+    }
+    return 0; // Preserve default COMMANDS ordering
+  });
 
   // Synchronous flush: saves current editor state to docsRef + state
   const flushCurrentDoc = useCallback(() => {
@@ -975,21 +1001,8 @@ export default function App() {
               // Insert DOM nodes directly so it stays perfectly inline
               const sel = window.getSelection();
               if (sel && sel.rangeCount > 0) {
-                const range = sel.getRangeAt(0);
-
-                const span = document.createElement("span");
-                span.className = "math-preview";
-                span.contentEditable = "false";
-                span.textContent = ans;
-
-                range.insertNode(span);
-                range.setStartAfter(span);
-                range.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(range);
-
-                // Zero-width space locks the cursor safely after the uneditable element
-                document.execCommand("insertHTML", false, "\u200B");
+                const placeholderHtml = `<span class="math-preview" contenteditable="false">${ans}</span>\u200B`;
+                document.execCommand("insertHTML", false, placeholderHtml);
               }
 
               isInternalEdit.current = false;
@@ -1009,23 +1022,17 @@ export default function App() {
 
       // Delete the typed URL + space
       range.setStart(node, selection.focusOffset - url.length - 1);
-      range.deleteContents();
-
-      // Insert placeholder
-      const placeholderId = `link-preview-${Date.now()}`;
-      const placeholder = document.createElement("div");
-      placeholder.id = placeholderId;
-      placeholder.contentEditable = "false";
-      placeholder.className = "link-preview-loading";
-
-      range.insertNode(placeholder);
-
-      const space = document.createTextNode("\u00A0");
-      placeholder.after(space);
-      range.setStartAfter(space);
-      range.collapse(true);
       selection.removeAllRanges();
       selection.addRange(range);
+      document.execCommand("delete", false, null);
+
+      // Insert placeholder map natively
+      const placeholderId = `link-preview-${Date.now()}`;
+      const placeholderHtml = `<div id="${placeholderId}" contenteditable="false" class="link-preview-loading"></div>`;
+      document.execCommand("insertHTML", false, placeholderHtml);
+      
+      const spaceHtml = `\u00A0`;
+      document.execCommand("insertHTML", false, spaceHtml);
 
       syncContentToState();
 
@@ -1719,6 +1726,19 @@ export default function App() {
       document.execCommand("delete", false, null);
     }
 
+    if (command.type === "buddy") {
+      setBuddyState({
+        show: true,
+        x: slashState.x,
+        y: slashState.y,
+        savedRange: range,
+        selectedText: "",
+        isCollapsed: true,
+      });
+      setSlashState((prev) => ({ ...prev, isOpen: false, query: "" }));
+      return;
+    }
+
     if (command.type === "formatBlock") {
       document.execCommand("formatBlock", false, `<${command.tag}>`);
     } else if (command.type === "list") {
@@ -1747,6 +1767,155 @@ export default function App() {
 
     setTimeout(() => {
       editorRef.current.focus();
+      syncContentToState();
+    }, 10);
+  };
+
+  const handleBuddyApply = (newText, mode) => {
+    if (!editorRef.current) return;
+    
+    // Restore editor focus so execCommand targets the correct contentEditable region without jumping the page
+    editorRef.current.focus({ preventScroll: true });
+
+    if (typeof newText === 'object' && newText !== null) {
+      if (!newText.generated_html) return;
+      
+      let targetHtml = newText.generated_html;
+      
+      // Actively convert LLM hallucinated Markdown syntax into Native HTML tags
+      targetHtml = targetHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      targetHtml = targetHtml.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      targetHtml = targetHtml.replace(/_(.*?)_/g, '<em>$1</em>');
+
+      // Deep DOM Sanitization for Structural Line-Height Inheritance
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(targetHtml, "text/html");
+      const newBody = document.createElement("body");
+
+      // Verify if original target area has bold to conditionally strip hallucinative bolding
+      const targetAreaHtml = buddyState.selectedText === "GLOBAL_CHAT" 
+        ? editorRef.current.innerHTML 
+        : buddyState.selectedText;
+      const originalHasBold = targetAreaHtml ? /<(b|strong)[>\s]/i.test(targetAreaHtml) : false;
+
+      // 1. Permanently strip LLM hallucinated bolding across the entire DOM tree natively
+      if (!originalHasBold) {
+          doc.body.querySelectorAll('b, strong').forEach(el => {
+              const textNode = document.createTextNode(el.textContent);
+              el.parentNode.replaceChild(textNode, el);
+          });
+      }
+
+      // 2. Force structural inheritance: bind all standalone text/inline tags into <p> dynamically
+      Array.from(doc.body.childNodes).forEach(node => {
+          if (node.nodeType === Node.TEXT_NODE) {
+              if (node.textContent.trim() !== '') {
+                  const p = document.createElement('p');
+                  p.textContent = node.textContent;
+                  newBody.appendChild(p);
+              }
+          } else if (node.nodeType === Node.ELEMENT_NODE) {
+              const tagName = node.tagName.toLowerCase();
+              if (['b', 'strong', 'i', 'em', 'u', 'span', 'a'].includes(tagName)) {
+                  const p = document.createElement('p');
+                  p.appendChild(node.cloneNode(true));
+                  newBody.appendChild(p);
+              } else {
+                  newBody.appendChild(node.cloneNode(true));
+              }
+          }
+      });
+
+      targetHtml = newBody.innerHTML;
+      
+      // If the user actively highlighted a specific block, natively override that physical range, bypassing search-and-replace
+      if (buddyState.savedRange && buddyState.selectedText !== "GLOBAL_CHAT") {
+         const sel = window.getSelection();
+         sel.removeAllRanges();
+         
+         let range = buddyState.savedRange.cloneRange();
+         if (mode !== "append" && range.commonAncestorContainer) {
+             let node = range.commonAncestorContainer;
+             if (node.nodeType === 3) node = node.parentNode;
+             const blockParent = node.closest('h1, h2, h3, h4, h5, h6, b, strong, i, em');
+             
+             if (blockParent && blockParent.textContent.trim() === buddyState.selectedText.trim()) {
+                 range.selectNode(blockParent);
+             }
+         }
+
+         sel.addRange(range);
+         
+         const scrollY = window.scrollY; // Capture scroll immediately prior to native injection
+         
+         if (mode === "append") {
+             sel.collapseToEnd();
+             document.execCommand("insertHTML", false, `&nbsp;` + targetHtml);
+         } else {
+             document.execCommand("insertHTML", false, targetHtml);
+         }
+         
+         window.scrollTo({ top: scrollY, behavior: 'instant' }); // Instantly restore layout scroll
+         syncContentToState();
+         return;
+      }
+      
+      // GLOBAL_CHAT: Completely replace the document natively
+      const scrollY = window.scrollY;
+      document.execCommand('selectAll', false, null);
+      document.execCommand('insertHTML', false, targetHtml);
+      window.scrollTo({ top: scrollY, behavior: 'instant' });
+      syncContentToState();
+      return;
+    }
+
+    // Legacy String-based Pipeline
+    let htmlToInsert = newText;
+    const hasStructuralHtml = /<(p|h[1-6]|ul|ol|li)[>\s]/.test(newText);
+    
+    if (newText.includes('\\n') && !hasStructuralHtml) {
+      htmlToInsert = newText.split('\\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('');
+    } else if (hasStructuralHtml) {
+      htmlToInsert = newText.replace(/\\n/g, ' ');
+    }
+
+    if (buddyState.selectedText === "GLOBAL_CHAT" || !buddyState.savedRange) {
+       // Global edit handles entire document or end-of-document injections
+       if (mode === "replace") {
+         document.execCommand('selectAll', false, null);
+         document.execCommand('insertHTML', false, htmlToInsert || "<p><br></p>");
+       } else {
+         // Move physical caret to very end of the document to append
+         const sel = window.getSelection();
+         sel.selectAllChildren(editorRef.current);
+         sel.collapseToEnd();
+         document.execCommand('insertHTML', false, `<br/>` + htmlToInsert);
+       }
+       syncContentToState();
+       return;
+    }
+
+    setTimeout(() => {
+      editorRef.current.focus();
+
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      
+      if (buddyState.savedRange) {
+        sel.addRange(buddyState.savedRange);
+        
+        if (mode === "append") {
+          // Collapse selection to its end point so we insert after the highlighted text
+          sel.collapseToEnd();
+          document.execCommand("insertHTML", false, `&nbsp;` + htmlToInsert);
+        } else {
+          // 'replace' mode natively overwrites the active highlighted range
+          document.execCommand("insertHTML", false, htmlToInsert);
+        }
+      } else {
+        document.execCommand("insertHTML", false, htmlToInsert);
+      }
+      
       syncContentToState();
     }, 10);
   };
@@ -1959,19 +2128,14 @@ export default function App() {
       if (!selection.rangeCount) return;
       const range = selection.getRangeAt(0);
 
-      const placeholderId = `link-preview-${Date.now()}`;
-      const placeholder = document.createElement("div");
-      placeholder.id = placeholderId;
-      placeholder.contentEditable = "false";
-      placeholder.className = "link-preview-loading";
-
-      range.deleteContents();
-      range.insertNode(placeholder);
-
-      range.setStartAfter(placeholder);
-      range.collapse(true);
       selection.removeAllRanges();
       selection.addRange(range);
+      document.execCommand("delete", false, null);
+      
+      const placeholderId = `link-preview-${Date.now()}`;
+      const placeholderHtml = `<div id="${placeholderId}" contenteditable="false" class="link-preview-loading"></div>`;
+      
+      document.execCommand("insertHTML", false, placeholderHtml);
 
       document.execCommand('insertParagraph', false);
 
@@ -2073,14 +2237,7 @@ export default function App() {
       // Insert the cleaned HTML
       const sel = window.getSelection();
       if (sel.rangeCount) {
-        const range = sel.getRangeAt(0);
-        range.deleteContents();
-        const frag = range.createContextualFragment(container.innerHTML);
-        range.insertNode(frag);
-        // Move cursor to end of inserted content
-        range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
+        document.execCommand("insertHTML", false, container.innerHTML);
       }
 
       syncContentToState();
@@ -2333,7 +2490,9 @@ export default function App() {
             const range = selection.getRangeAt(0);
             range.setStart(focusNode, selection.focusOffset - 2);
             range.setEnd(focusNode, selection.focusOffset);
-            range.deleteContents();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand("delete", false, null);
             document.execCommand("insertOrderedList", false, null);
             syncContentToState();
             return;
@@ -2345,7 +2504,9 @@ export default function App() {
             const range = selection.getRangeAt(0);
             range.setStart(focusNode, selection.focusOffset - 1);
             range.setEnd(focusNode, selection.focusOffset);
-            range.deleteContents();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand("delete", false, null);
             document.execCommand("insertUnorderedList", false, null);
             syncContentToState();
             return;
@@ -2354,7 +2515,9 @@ export default function App() {
             const range = selection.getRangeAt(0);
             range.setStart(focusNode, selection.focusOffset - 2);
             range.setEnd(focusNode, selection.focusOffset);
-            range.deleteContents();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand("delete", false, null);
             document.execCommand("insertUnorderedList", false, null);
             setTimeout(() => {
               const curSel = window.getSelection();
@@ -2377,7 +2540,9 @@ export default function App() {
             const range = selection.getRangeAt(0);
             range.setStart(focusNode, selection.focusOffset - 6);
             range.setEnd(focusNode, selection.focusOffset);
-            range.deleteContents();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand("delete", false, null);
             const cmd = COMMANDS.find((c) => c.id === "table");
             document.execCommand("insertHTML", false, cmd.tag);
             syncContentToState();
@@ -2627,12 +2792,13 @@ export default function App() {
       {/* Dynamic Editor Typography */}
       <style
         dangerouslySetInnerHTML={{
-          __html: ` .editor-content { outline: none; padding-bottom: 30vh; color:
-              var(--color-text-primary); } .editor-content::after { content: "" ; display: table; clear: both; } .editor-content>
-              * {
+          __html: ` .editor-content { outline: none; padding-bottom: 30vh; color: var(--color-text-primary); transition: line-height 0.3s cubic-bezier(0.16, 1, 0.3, 1); } 
+              .editor-content::after { content: "" ; display: table; clear: both; } 
+              .editor-content > * {
                 margin-top: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
                 margin-bottom: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
                 line-height: inherit;
+                transition: margin-top 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin-bottom 0.3s cubic-bezier(0.16, 1, 0.3, 1);
               }
 
               .editor-content h1,
@@ -2679,10 +2845,14 @@ export default function App() {
 
               .editor-content ul {
                 list-style-type: disc;
-                list-style-position: inside;
-                padding-left: 0;
+                list-style-position: outside;
+                padding-left: 1.5em;
                 margin-top: 0.5em;
                 margin-bottom: 0.5em;
+              }
+              
+              .editor-content ul li {
+                padding-left: 0.1em;
               }
 
               .editor-content ul ul {
@@ -3919,6 +4089,7 @@ export default function App() {
                 >
                   <Strikethrough size={14} />
                 </button>
+                <div className="w-px h-4 bg-[var(--color-border-primary)] mx-0.5" />
                 {toolbarState.isLinkActive ? (
                   <button
                     onClick={(e) => {
@@ -4490,6 +4661,41 @@ export default function App() {
         </div>
       )}
 
+      {user && (
+        <BuddyWidget 
+          isOpen={buddyState.show}
+          position={{ x: Math.min(Math.max(buddyState.x || window.innerWidth / 2, 0), window.innerWidth - 380), y: Math.max(buddyState.y || 100, 0) + 16 }}
+          onClose={() => setBuddyState(p => ({ ...p, show: false }))}
+          onApplyText={handleBuddyApply}
+          selectedText={buddyState.selectedText}
+          isCollapsedSelection={buddyState.isCollapsed}
+          fullDocumentText={editorRef.current?.innerHTML || ""}
+          docs={docs}
+          activeDocId={activeDocId}
+          onGlobalClick={() => {
+            const sel = window.getSelection();
+            let text = sel.toString();
+            let savedRange = null;
+            let isCollapsed = true;
+            
+            if (editorRef.current && editorRef.current.contains(sel.anchorNode) && text.trim().length > 0) {
+               savedRange = sel.getRangeAt(0).cloneRange();
+               isCollapsed = false;
+            } else {
+               text = "GLOBAL_CHAT";
+            }
+
+            setBuddyState({
+              show: true,
+              x: window.innerWidth - 380 - 45,
+              y: window.innerHeight - 200, 
+              savedRange,
+              selectedText: text,
+              isCollapsed,
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
