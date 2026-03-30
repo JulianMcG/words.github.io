@@ -317,6 +317,20 @@ body {
   margin-left: 8px;
 }
 
+.editor-content h1,
+.editor-content h2,
+.editor-content h3 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.25rem;
+  line-height: 1.2;
+}
+
+.editor-content h1:first-child,
+.editor-content h2:first-child,
+.editor-content h3:first-child {
+  margin-top: 0;
+}
+
 .theme-font-serif .title-input,
 .theme-font-serif .editor-content h1,
 .theme-font-serif .editor-content h2,
