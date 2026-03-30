@@ -30,7 +30,14 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   const isMounted = useRef(false);
 
+  const shouldBackgroundBlink = isOpen || (isHovered && isHoverSequenceComplete);
+
   useEffect(() => {
+    if (!shouldBackgroundBlink) {
+      setBlinkState("");
+      return;
+    }
+
     let timeoutId;
     let currentBlinkTimeouts = [];
 
@@ -70,7 +77,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         clearTimeout(timeoutId); 
         clearBlinks();
     };
-  }, []);
+  }, [shouldBackgroundBlink]);
 
   useEffect(() => {
     if (!isMounted.current) {
@@ -173,7 +180,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   }, [isClicked, isOpen, isHovered]);
 
   let activeExpression = hasError ? "error" : expression;
-  const shouldBackgroundBlink = isOpen || (isHovered && isHoverSequenceComplete);
   
   if (!hasError && (expression === "idle" || expression === "smile") && blinkState === "blink" && shouldBackgroundBlink) {
      activeExpression = expression === "idle" ? "blink" : "smileblink";
