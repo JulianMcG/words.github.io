@@ -101,6 +101,15 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const getUrl = (key) => `/buddy expressions/buddy${isDark ? 'dark' : 'light'}${key === "idle" ? "" : key}.png`;
 
   useEffect(() => {
+    // Preload image assets to prevent "single-blink" network cache glitch on first hover
+    const expressions = ["", "blink", "smile", "smilebetween", "smileblink", "click", "error"];
+    expressions.forEach(key => {
+      const img = new Image();
+      img.src = `/buddy expressions/buddy${isDark ? 'dark' : 'light'}${key}.png`;
+    });
+  }, [isDark]);
+
+  useEffect(() => {
     const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -151,13 +160,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     if (isHovered) {
       setIsHoverSequenceComplete(false);
       let t1 = setTimeout(() => setExpression("smilebetween"), 0);
-      let t2 = setTimeout(() => setExpression("smileblink"), 80); // first 120ms blink starts
-      let t3 = setTimeout(() => setExpression("smile"), 200);     // 120ms later: gap starts
-      let t4 = setTimeout(() => setExpression("smileblink"), 300); // 100ms later: second 120ms blink starts
+      let t2 = setTimeout(() => setExpression("smileblink"), 50);  // first quick blink (50ms gap)
+      let t3 = setTimeout(() => setExpression("smile"), 130);      // 80ms blink length
+      let t4 = setTimeout(() => setExpression("smileblink"), 200); // 70ms separation gap
       let t5 = setTimeout(() => {
          setExpression("smile");
          setIsHoverSequenceComplete(true);
-      }, 420);     // 120ms later: smile resumes
+      }, 280);     // 80ms blink length
       
       return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5); setIsHoverSequenceComplete(false); };
     } else {
