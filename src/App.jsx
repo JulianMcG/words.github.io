@@ -390,6 +390,7 @@ export default function App() {
     selectedText: "",
     isCollapsed: true,
   });
+  const [isSpacingAnimating, setIsSpacingAnimating] = useState(false);
 
   const editorRef = useRef(null);
   const titleRef = useRef(null);
@@ -2792,13 +2793,13 @@ export default function App() {
       {/* Dynamic Editor Typography */}
       <style
         dangerouslySetInnerHTML={{
-          __html: ` .editor-content { outline: none; padding-bottom: 30vh; color: var(--color-text-primary); transition: line-height 0.3s cubic-bezier(0.16, 1, 0.3, 1); } 
+          __html: ` .editor-content { outline: none; padding-bottom: 30vh; color: var(--color-text-primary); ${isSpacingAnimating ? 'transition: line-height 0.3s cubic-bezier(0.16, 1, 0.3, 1);' : ''} } 
               .editor-content::after { content: "" ; display: table; clear: both; } 
               .editor-content > * {
                 margin-top: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
                 margin-bottom: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
                 line-height: inherit;
-                transition: margin-top 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin-bottom 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+                ${isSpacingAnimating ? 'transition: margin-top 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin-bottom 0.3s cubic-bezier(0.16, 1, 0.3, 1);' : ''}
               }
 
               .editor-content h1,
@@ -3246,11 +3247,15 @@ export default function App() {
                         <div className="flex flex-col border border-[var(--color-border-primary)] rounded-md overflow-hidden bg-[var(--color-bg-secondary)]">
                           {['1.0', '1.5', '2.0'].map((space, idx) => {
                             const lbl = space === '1.0' ? 'Compact' : space === '1.5' ? 'Standard' : 'Spacious';
-                            const active = activeDoc?.lineSpacing === space || (!activeDoc?.lineSpacing && space === '1.5');
-                            return (
-                              <button
-                                key={space}
-                                onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, lineSpacing: space } : d))}
+                                const active = activeDoc?.lineSpacing === space || (!activeDoc?.lineSpacing && space === '1.5');
+                                return (
+                                  <button
+                                    key={space}
+                                    onClick={() => {
+                                      setIsSpacingAnimating(true);
+                                      setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, lineSpacing: space } : d));
+                                      setTimeout(() => setIsSpacingAnimating(false), 350);
+                                    }}
                                 className={`text-[12px] py-1.5 px-3 text-left hover:bg-[var(--color-bg-hover)] transition-colors ${active ? 'bg-[var(--color-bg-primary)] text-[#E8572A] font-medium' : 'text-[var(--color-text-muted)]'} ${idx > 0 ? 'border-t border-[var(--color-border-primary)]' : ''}`}
                               >
                                 <div className="flex items-center gap-2">
