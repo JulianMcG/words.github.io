@@ -1,0 +1,97 @@
+
+> words@0.0.0 dev
+> vite
+
+Port 5173 is in use, trying another one...
+Port 5174 is in use, trying another one...
+
+  VITE v7.3.1  ready in 1444 ms
+
+  ➜  Local:   http://localhost:5175/
+  ➜  Network: use --host to expose
+6:55:08 PM [vite] (client) Pre-transform error: /app/src/App.jsx: Identifier 'liElement' has already been declared. (2677:16)
+
+  2675 |           }
+  2676 |
+> 2677 |           const liElement = element.closest("li");
+       |                 ^
+  2678 |           if (liElement) {
+  2679 |             setTimeout(() => {
+  2680 |               const newSel = window.getSelection();
+  Plugin: vite:react-babel
+  File: /app/src/App.jsx:2677:16
+  2675 |            }
+  2676 |
+  2677 |            const liElement = element.closest("li");
+       |                  ^
+  2678 |            if (liElement) {
+  2679 |              setTimeout(() => {
+6:55:09 PM [vite] Internal server error: /app/src/App.jsx: Identifier 'liElement' has already been declared. (2677:16)
+
+  2675 |           }
+  2676 |
+> 2677 |           const liElement = element.closest("li");
+       |                 ^
+  2678 |           if (liElement) {
+  2679 |             setTimeout(() => {
+  2680 |               const newSel = window.getSelection();
+  Plugin: vite:react-babel
+  File: /app/src/App.jsx:2677:16
+  2675 |            }
+  2676 |
+  2677 |            const liElement = element.closest("li");
+       |                  ^
+  2678 |            if (liElement) {
+  2679 |              setTimeout(() => {
+      at constructor (/app/node_modules/@babel/parser/lib/index.js:365:19)
+      at JSXParserMixin.raise (/app/node_modules/@babel/parser/lib/index.js:6599:19)
+      at ScopeHandler.checkRedeclarationInScope (/app/node_modules/@babel/parser/lib/index.js:1619:19)
+      at ScopeHandler.declareName (/app/node_modules/@babel/parser/lib/index.js:1585:12)
+      at JSXParserMixin.declareNameFromIdentifier (/app/node_modules/@babel/parser/lib/index.js:7567:16)
+      at JSXParserMixin.checkIdentifier (/app/node_modules/@babel/parser/lib/index.js:7563:12)
+      at JSXParserMixin.checkLVal (/app/node_modules/@babel/parser/lib/index.js:7500:12)
+      at JSXParserMixin.parseVarId (/app/node_modules/@babel/parser/lib/index.js:13412:10)
+      at JSXParserMixin.parseVar (/app/node_modules/@babel/parser/lib/index.js:13383:12)
+      at JSXParserMixin.parseVarStatement (/app/node_modules/@babel/parser/lib/index.js:13230:10)
+      at JSXParserMixin.parseStatementContent (/app/node_modules/@babel/parser/lib/index.js:12851:23)
+      at JSXParserMixin.parseStatementLike (/app/node_modules/@babel/parser/lib/index.js:12767:17)
+      at JSXParserMixin.parseStatementListItem (/app/node_modules/@babel/parser/lib/index.js:12747:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (/app/node_modules/@babel/parser/lib/index.js:13316:61)
+      at JSXParserMixin.parseBlockBody (/app/node_modules/@babel/parser/lib/index.js:13309:10)
+      at JSXParserMixin.parseBlock (/app/node_modules/@babel/parser/lib/index.js:13297:10)
+      at JSXParserMixin.parseStatementContent (/app/node_modules/@babel/parser/lib/index.js:12858:21)
+      at JSXParserMixin.parseStatementLike (/app/node_modules/@babel/parser/lib/index.js:12767:17)
+      at JSXParserMixin.parseStatementOrSloppyAnnexBFunctionDeclaration (/app/node_modules/@babel/parser/lib/index.js:12757:17)
+      at JSXParserMixin.parseIfStatement (/app/node_modules/@babel/parser/lib/index.js:13130:28)
+      at JSXParserMixin.parseStatementContent (/app/node_modules/@babel/parser/lib/index.js:12796:21)
+      at JSXParserMixin.parseStatementLike (/app/node_modules/@babel/parser/lib/index.js:12767:17)
+      at JSXParserMixin.parseStatementListItem (/app/node_modules/@babel/parser/lib/index.js:12747:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (/app/node_modules/@babel/parser/lib/index.js:13316:61)
+      at JSXParserMixin.parseBlockBody (/app/node_modules/@babel/parser/lib/index.js:13309:10)
+      at JSXParserMixin.parseBlock (/app/node_modules/@babel/parser/lib/index.js:13297:10)
+      at JSXParserMixin.parseStatementContent (/app/node_modules/@babel/parser/lib/index.js:12858:21)
+      at JSXParserMixin.parseStatementLike (/app/node_modules/@babel/parser/lib/index.js:12767:17)
+      at JSXParserMixin.parseStatementOrSloppyAnnexBFunctionDeclaration (/app/node_modules/@babel/parser/lib/index.js:12757:17)
+      at JSXParserMixin.parseIfStatement (/app/node_modules/@babel/parser/lib/index.js:13130:28)
+      at JSXParserMixin.parseStatementContent (/app/node_modules/@babel/parser/lib/index.js:12796:21)
+      at JSXParserMixin.parseStatementLike (/app/node_modules/@babel/parser/lib/index.js:12767:17)
+      at JSXParserMixin.parseStatementListItem (/app/node_modules/@babel/parser/lib/index.js:12747:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (/app/node_modules/@babel/parser/lib/index.js:13316:61)
+      at JSXParserMixin.parseBlockBody (/app/node_modules/@babel/parser/lib/index.js:13309:10)
+      at JSXParserMixin.parseBlock (/app/node_modules/@babel/parser/lib/index.js:13297:10)
+      at JSXParserMixin.parseFunctionBody (/app/node_modules/@babel/parser/lib/index.js:12100:24)
+      at JSXParserMixin.parseArrowExpression (/app/node_modules/@babel/parser/lib/index.js:12075:10)
+      at JSXParserMixin.parseParenAndDistinguishExpression (/app/node_modules/@babel/parser/lib/index.js:11687:12)
+      at JSXParserMixin.parseExprAtom (/app/node_modules/@babel/parser/lib/index.js:11331:23)
+      at JSXParserMixin.parseExprAtom (/app/node_modules/@babel/parser/lib/index.js:4764:20)
+      at JSXParserMixin.parseExprSubscripts (/app/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/app/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/app/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/app/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/app/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/app/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/app/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /app/node_modules/@babel/parser/lib/index.js:10800:39
+      at JSXParserMixin.allowInAnd (/app/node_modules/@babel/parser/lib/index.js:12426:12)
+6:56:15 PM [vite] (client) hmr update /src/index.css
+7:03:26 PM [vite] (client) hmr update /src/App.jsx, /src/index.css
