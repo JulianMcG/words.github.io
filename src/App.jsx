@@ -167,6 +167,444 @@ const COMMANDS = [
   },
 ];
 
+const ROOT_NATIVE_BLOCK_TAGS = new Set(["P", "H1", "H2", "H3", "BLOCKQUOTE", "UL", "OL"]);
+const DROP_CONTENT_TAGS = new Set([
+  "SCRIPT",
+  "STYLE",
+  "META",
+  "LINK",
+  "TITLE",
+  "NOSCRIPT",
+  "TEMPLATE",
+  "IFRAME",
+  "OBJECT",
+  "EMBED",
+  "SVG",
+  "CANVAS",
+  "FORM",
+  "INPUT",
+  "BUTTON",
+  "TEXTAREA",
+  "SELECT",
+  "OPTION",
+]);
+const HEADING_TAG_MAP = {
+  H1: "h1",
+  H2: "h2",
+  H3: "h3",
+  H4: "h3",
+  H5: "h3",
+  H6: "h3",
+};
+const NATIVE_HIGHLIGHT_COLORS = new Map([
+  ["#fef08a", "#fef08a"],
+  ["rgb(254,240,138)", "#fef08a"],
+  ["#fecaca", "#fecaca"],
+  ["rgb(254,202,202)", "#fecaca"],
+  ["#bbf7d0", "#bbf7d0"],
+  ["rgb(187,247,208)", "#bbf7d0"],
+  ["#716215", "#716215"],
+  ["rgb(113,98,21)", "#716215"],
+  ["#7f1d1d", "#7f1d1d"],
+  ["rgb(127,29,29)", "#7f1d1d"],
+  ["#14532d", "#14532d"],
+  ["rgb(20,83,45)", "#14532d"],
+  ["transparent", "transparent"],
+  ["rgba(0,0,0,0)", "transparent"],
+]);
+
+const hasMeaningfulText = (text = "") => text.replace(/\u00A0/g, " ").trim().length > 0;
+
+const escapeHtml = (text = "") => {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+};
+
+const normalizeColorToken = (value = "") => value.toLowerCase().replace(/\s+/g, "");
+
+const getNativeHighlightColor = (value = "") => {
+  const token = normalizeColorToken(value);
+  return NATIVE_HIGHLIGHT_COLORS.get(token) || "";
+};
+
+const sanitizeHref = (href) => {
+  if (!href) return "";
+  const trimmedHref = href.trim();
+  if (!trimmedHref) return "";
+
+  if (/^(mailto:|tel:)/i.test(trimmedHref)) return trimmedHref;
+
+  try {
+    const parsed = new URL(trimmedHref, window.location.origin);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return trimmedHref;
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+};
+
+const hasMeaningfulContent = (element) => {
+  if (!element) return false;
+  if (hasMeaningfulText(element.textContent || "")) return true;
+
+  return Array.from(element.childNodes).some((child) => {
+    if (child.nodeType !== Node.ELEMENT_NODE) return false;
+    return ["BR", "UL", "OL"].includes(child.tagName);
+  });
+};
+
+const isNativeBlockNode = (node) =>
+  node?.nodeType === Node.ELEMENT_NODE && ROOT_NATIVE_BLOCK_TAGS.has(node.tagName);
+
+const getInlineFormatting = (sourceNode, explicitTag = null) => {
+  const semanticTags = [];
+  const seenTags = new Set();
+  const pushTag = (tag) => {
+    if (tag && !seenTags.has(tag)) {
+      seenTags.add(tag);
+      semanticTags.push(tag);
+    }
+  };
+
+  pushTag(explicitTag);
+
+  const style = sourceNode.style;
+  if (style) {
+    const fontWeight = style.fontWeight?.toLowerCase() || "";
+    const numericWeight = Number.parseInt(fontWeight, 10);
+    if (
+      (fontWeight === "bold" || fontWeight === "bolder" || (!Number.isNaN(numericWeight) && numericWeight >= 600)) &&
+      explicitTag !== "strong"
+    ) {
+      pushTag("strong");
+    }
+
+    if (style.fontStyle?.toLowerCase() === "italic" && explicitTag !== "em") {
+      pushTag("em");
+    }
+
+    const textDecoration = `${style.textDecoration || ""} ${style.textDecorationLine || ""}`.toLowerCase();
+    if (textDecoration.includes("underline") && explicitTag !== "u") {
+      pushTag("u");
+    }
+    if (textDecoration.includes("line-through") && explicitTag !== "s") {
+      pushTag("s");
+    }
+  }
+
+  return {
+    semanticTags,
+    highlightColor: getNativeHighlightColor(style?.backgroundColor || ""),
+  };
+};
+
+const appendFormattedInline = (sourceNode, targetParent, explicitTag = null) => {
+  const { semanticTags, highlightColor } = getInlineFormatting(sourceNode, explicitTag);
+
+  if (!semanticTags.length && !highlightColor) {
+    sanitizeNodeChildren(sourceNode, targetParent);
+    return;
+  }
+
+  let outermost = null;
+  let currentTarget = null;
+
+  semanticTags.forEach((tag) => {
+    const el = document.createElement(tag);
+    if (!outermost) {
+      outermost = el;
+    } else {
+      currentTarget.appendChild(el);
+    }
+    currentTarget = el;
+  });
+
+  if (highlightColor) {
+    const span = document.createElement("span");
+    span.style.backgroundColor = highlightColor;
+    if (!outermost) {
+      outermost = span;
+    } else {
+      currentTarget.appendChild(span);
+    }
+    currentTarget = span;
+  }
+
+  sanitizeNodeChildren(sourceNode, currentTarget);
+
+  if (hasMeaningfulContent(outermost)) {
+    targetParent.appendChild(outermost);
+  }
+};
+
+const getFormattedContentTarget = (sourceNode, blockElement) => {
+  const { semanticTags, highlightColor } = getInlineFormatting(sourceNode);
+  let currentTarget = blockElement;
+
+  semanticTags.forEach((tag) => {
+    const el = document.createElement(tag);
+    currentTarget.appendChild(el);
+    currentTarget = el;
+  });
+
+  if (highlightColor) {
+    const span = document.createElement("span");
+    span.style.backgroundColor = highlightColor;
+    currentTarget.appendChild(span);
+    currentTarget = span;
+  }
+
+  return currentTarget;
+};
+
+const flattenSingleParagraphInListItem = (listItem) => {
+  const meaningfulChildren = Array.from(listItem.childNodes).filter((node) => {
+    if (node.nodeType === Node.TEXT_NODE) return hasMeaningfulText(node.textContent);
+    return node.nodeType === Node.ELEMENT_NODE;
+  });
+
+  if (
+    meaningfulChildren.length === 1 &&
+    meaningfulChildren[0].nodeType === Node.ELEMENT_NODE &&
+    meaningfulChildren[0].tagName === "P"
+  ) {
+    const paragraph = meaningfulChildren[0];
+    while (paragraph.firstChild) {
+      listItem.insertBefore(paragraph.firstChild, paragraph);
+    }
+    paragraph.remove();
+  }
+};
+
+const wrapLooseInlineChildren = (container) => {
+  let paragraph = null;
+
+  Array.from(container.childNodes).forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE && !hasMeaningfulText(node.textContent)) {
+      node.remove();
+      return;
+    }
+
+    if (isNativeBlockNode(node)) {
+      paragraph = null;
+      return;
+    }
+
+    if (!paragraph) {
+      paragraph = document.createElement("p");
+      container.insertBefore(paragraph, node);
+    }
+
+    paragraph.appendChild(node);
+  });
+};
+
+function sanitizeListNode(sourceList, targetList) {
+  Array.from(sourceList.childNodes).forEach((child) => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      if (hasMeaningfulText(child.textContent)) {
+        const li = document.createElement("li");
+        li.textContent = child.textContent.trim();
+        targetList.appendChild(li);
+      }
+      return;
+    }
+
+    if (child.nodeType !== Node.ELEMENT_NODE) return;
+
+    const li = document.createElement("li");
+    if (child.classList?.contains("checked")) {
+      li.classList.add("checked");
+    }
+    const listItemTarget = getFormattedContentTarget(child, li);
+
+    if (child.tagName === "LI") {
+      sanitizeNodeChildren(child, listItemTarget);
+    } else {
+      appendSanitizedNode(child, listItemTarget);
+    }
+
+    flattenSingleParagraphInListItem(li);
+
+    if (hasMeaningfulContent(li)) {
+      targetList.appendChild(li);
+    }
+  });
+}
+
+function sanitizeNodeChildren(sourceParent, targetParent) {
+  Array.from(sourceParent.childNodes).forEach((child) => appendSanitizedNode(child, targetParent));
+}
+
+function appendSanitizedNode(node, targetParent) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (hasMeaningfulText(node.textContent)) {
+      targetParent.appendChild(document.createTextNode(node.textContent));
+    }
+    return;
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+  const tagName = node.tagName.toUpperCase();
+
+  if (DROP_CONTENT_TAGS.has(tagName)) return;
+
+  if (tagName === "BR") {
+    targetParent.appendChild(document.createElement("br"));
+    return;
+  }
+
+  if (tagName === "A") {
+    const href = sanitizeHref(node.getAttribute("href"));
+    if (!href) {
+      sanitizeNodeChildren(node, targetParent);
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.setAttribute("href", href);
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noopener noreferrer");
+    sanitizeNodeChildren(node, link);
+
+    if (hasMeaningfulContent(link)) {
+      targetParent.appendChild(link);
+    }
+    return;
+  }
+
+  if (tagName === "B" || tagName === "STRONG") {
+    appendFormattedInline(node, targetParent, "strong");
+    return;
+  }
+
+  if (tagName === "I" || tagName === "EM") {
+    appendFormattedInline(node, targetParent, "em");
+    return;
+  }
+
+  if (tagName === "U") {
+    appendFormattedInline(node, targetParent, "u");
+    return;
+  }
+
+  if (tagName === "S" || tagName === "STRIKE" || tagName === "DEL") {
+    appendFormattedInline(node, targetParent, "s");
+    return;
+  }
+
+  if (tagName === "SPAN" || tagName === "FONT") {
+    appendFormattedInline(node, targetParent);
+    return;
+  }
+
+  if (HEADING_TAG_MAP[tagName]) {
+    const heading = document.createElement(HEADING_TAG_MAP[tagName]);
+    sanitizeNodeChildren(node, getFormattedContentTarget(node, heading));
+    if (hasMeaningfulContent(heading)) {
+      targetParent.appendChild(heading);
+    }
+    return;
+  }
+
+  if (tagName === "P") {
+    const paragraph = document.createElement("p");
+    sanitizeNodeChildren(node, getFormattedContentTarget(node, paragraph));
+    if (hasMeaningfulContent(paragraph)) {
+      targetParent.appendChild(paragraph);
+    }
+    return;
+  }
+
+  if (tagName === "BLOCKQUOTE") {
+    const blockquote = document.createElement("blockquote");
+    sanitizeNodeChildren(node, getFormattedContentTarget(node, blockquote));
+    wrapLooseInlineChildren(blockquote);
+    if (hasMeaningfulContent(blockquote)) {
+      targetParent.appendChild(blockquote);
+    }
+    return;
+  }
+
+  if (tagName === "UL" || tagName === "OL") {
+    const list = document.createElement(tagName.toLowerCase());
+    if (tagName === "UL" && node.classList.contains("checklist")) {
+      list.classList.add("checklist");
+    }
+    sanitizeListNode(node, list);
+    if (list.querySelector("li")) {
+      targetParent.appendChild(list);
+    }
+    return;
+  }
+
+  sanitizeNodeChildren(node, targetParent);
+}
+
+const cleanupNativeHtml = (container) => {
+  Array.from(container.querySelectorAll("strong, em, u, s, a, span, p, h1, h2, h3, blockquote, li"))
+    .reverse()
+    .forEach((element) => {
+      if (!hasMeaningfulContent(element)) {
+        element.remove();
+      }
+    });
+};
+
+const buildPlainTextHtml = (text, { forceBlockRoots = false } = {}) => {
+  const normalizedText = (text || "").replace(/\r\n?/g, "\n");
+
+  if (!forceBlockRoots) {
+    return escapeHtml(normalizedText).replace(/\n/g, "<br>");
+  }
+
+  return normalizedText
+    .split("\n")
+    .map((line) => (line.trim() ? `<p>${escapeHtml(line)}</p>` : "<p><br></p>"))
+    .join("");
+};
+
+const createNativeHtmlPayload = (rawContent, { forceBlockRoots = false } = {}) => {
+  if (typeof rawContent !== "string") {
+    return { html: forceBlockRoots ? "<p><br></p>" : "", hasBlockRoot: forceBlockRoots };
+  }
+
+  let source = rawContent
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.*?)\*/g, "<em>$1</em>")
+    .replace(/_(.*?)_/g, "<em>$1</em>");
+
+  const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(source);
+  const sourceHasBlockMarkup = /<(p|div|section|article|aside|main|nav|header|footer|center|h[1-6]|blockquote|ul|ol|li|table|thead|tbody|tfoot|tr|td|th)\b/i.test(source);
+
+  if (!looksLikeHtml) {
+    source = buildPlainTextHtml(source, { forceBlockRoots });
+  }
+
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(source, "text/html");
+  const container = document.createElement("div");
+
+  sanitizeNodeChildren(parsed.body, container);
+
+  if (forceBlockRoots || sourceHasBlockMarkup) {
+    wrapLooseInlineChildren(container);
+  }
+
+  cleanupNativeHtml(container);
+
+  const html = container.innerHTML.trim();
+  return {
+    html: html || (forceBlockRoots ? "<p><br></p>" : ""),
+    hasBlockRoot: Array.from(container.childNodes).some((node) => isNativeBlockNode(node)),
+  };
+};
+
 const fetchLinkPreviewData = async (url) => {
   try {
     const response = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`);
@@ -1774,151 +2212,69 @@ export default function App() {
 
   const handleBuddyApply = (newText, mode) => {
     if (!editorRef.current) return;
-    
+
     // Restore editor focus so execCommand targets the correct contentEditable region without jumping the page
     editorRef.current.focus({ preventScroll: true });
 
-    if (typeof newText === 'object' && newText !== null) {
-      if (!newText.generated_html) return;
-      
-      let targetHtml = newText.generated_html;
-      
-      // Actively convert LLM hallucinated Markdown syntax into Native HTML tags
-      targetHtml = targetHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      targetHtml = targetHtml.replace(/\*(.*?)\*/g, '<em>$1</em>');
-      targetHtml = targetHtml.replace(/_(.*?)_/g, '<em>$1</em>');
+    const rawHtml =
+      typeof newText === "object" && newText !== null ? newText.generated_html : newText;
 
-      // Deep DOM Sanitization for Structural Line-Height Inheritance
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(targetHtml, "text/html");
-      const newBody = document.createElement("body");
+    if (typeof rawHtml !== "string" || !rawHtml.trim()) return;
 
-      // Verify if original target area has bold to conditionally strip hallucinative bolding
-      const targetAreaHtml = buddyState.selectedText === "GLOBAL_CHAT" 
-        ? editorRef.current.innerHTML 
-        : buddyState.selectedText;
-      const originalHasBold = targetAreaHtml ? /<(b|strong)[>\s]/i.test(targetAreaHtml) : false;
+    const nativeContent = createNativeHtmlPayload(rawHtml, {
+      forceBlockRoots:
+        buddyState.selectedText === "GLOBAL_CHAT" ||
+        (!buddyState.isCollapsed && mode !== "append"),
+    });
 
-      // 1. Permanently strip LLM hallucinated bolding across the entire DOM tree natively
-      if (!originalHasBold) {
-          doc.body.querySelectorAll('b, strong').forEach(el => {
-              const textNode = document.createTextNode(el.textContent);
-              el.parentNode.replaceChild(textNode, el);
-          });
+    const htmlToInsert = nativeContent.html || "<p><br></p>";
+    const appendHtml =
+      mode === "append" && !nativeContent.hasBlockRoot ? `&nbsp;${htmlToInsert}` : htmlToInsert;
+    const scrollY = window.scrollY;
+
+    if (buddyState.selectedText === "GLOBAL_CHAT" || !buddyState.savedRange) {
+      if (mode === "replace") {
+        document.execCommand("selectAll", false, null);
+        document.execCommand("insertHTML", false, htmlToInsert);
+      } else {
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(editorRef.current);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand("insertHTML", false, appendHtml);
       }
 
-      // 2. Force structural inheritance: bind all standalone text/inline tags into <p> dynamically
-      Array.from(doc.body.childNodes).forEach(node => {
-          if (node.nodeType === Node.TEXT_NODE) {
-              if (node.textContent.trim() !== '') {
-                  const p = document.createElement('p');
-                  p.textContent = node.textContent;
-                  newBody.appendChild(p);
-              }
-          } else if (node.nodeType === Node.ELEMENT_NODE) {
-              const tagName = node.tagName.toLowerCase();
-              if (['b', 'strong', 'i', 'em', 'u', 'span', 'a'].includes(tagName)) {
-                  const p = document.createElement('p');
-                  p.appendChild(node.cloneNode(true));
-                  newBody.appendChild(p);
-              } else {
-                  newBody.appendChild(node.cloneNode(true));
-              }
-          }
-      });
-
-      targetHtml = newBody.innerHTML;
-      
-      // If the user actively highlighted a specific block, natively override that physical range, bypassing search-and-replace
-      if (buddyState.savedRange && buddyState.selectedText !== "GLOBAL_CHAT") {
-         const sel = window.getSelection();
-         sel.removeAllRanges();
-         
-         let range = buddyState.savedRange.cloneRange();
-         if (mode !== "append" && range.commonAncestorContainer) {
-             let node = range.commonAncestorContainer;
-             if (node.nodeType === 3) node = node.parentNode;
-             const blockParent = node.closest('h1, h2, h3, h4, h5, h6, b, strong, i, em');
-             
-             if (blockParent && blockParent.textContent.trim() === buddyState.selectedText.trim()) {
-                 range.selectNode(blockParent);
-             }
-         }
-
-         sel.addRange(range);
-         
-         const scrollY = window.scrollY; // Capture scroll immediately prior to native injection
-         
-         if (mode === "append") {
-             sel.collapseToEnd();
-             document.execCommand("insertHTML", false, `&nbsp;` + targetHtml);
-         } else {
-             document.execCommand("insertHTML", false, targetHtml);
-         }
-         
-         window.scrollTo({ top: scrollY, behavior: 'instant' }); // Instantly restore layout scroll
-         syncContentToState();
-         return;
-      }
-      
-      // GLOBAL_CHAT: Completely replace the document natively
-      const scrollY = window.scrollY;
-      document.execCommand('selectAll', false, null);
-      document.execCommand('insertHTML', false, targetHtml);
-      window.scrollTo({ top: scrollY, behavior: 'instant' });
+      window.scrollTo({ top: scrollY, behavior: "instant" });
       syncContentToState();
       return;
     }
 
-    // Legacy String-based Pipeline
-    let htmlToInsert = newText;
-    const hasStructuralHtml = /<(p|h[1-6]|ul|ol|li)[>\s]/.test(newText);
-    
-    if (newText.includes('\\n') && !hasStructuralHtml) {
-      htmlToInsert = newText.split('\\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('');
-    } else if (hasStructuralHtml) {
-      htmlToInsert = newText.replace(/\\n/g, ' ');
-    }
+    const sel = window.getSelection();
+    sel.removeAllRanges();
 
-    if (buddyState.selectedText === "GLOBAL_CHAT" || !buddyState.savedRange) {
-       // Global edit handles entire document or end-of-document injections
-       if (mode === "replace") {
-         document.execCommand('selectAll', false, null);
-         document.execCommand('insertHTML', false, htmlToInsert || "<p><br></p>");
-       } else {
-         // Move physical caret to very end of the document to append
-         const sel = window.getSelection();
-         sel.selectAllChildren(editorRef.current);
-         sel.collapseToEnd();
-         document.execCommand('insertHTML', false, `<br/>` + htmlToInsert);
-       }
-       syncContentToState();
-       return;
-    }
+    let range = buddyState.savedRange.cloneRange();
+    if (mode !== "append" && range.commonAncestorContainer) {
+      let node = range.commonAncestorContainer;
+      if (node.nodeType === 3) node = node.parentNode;
+      const blockParent = node.closest("h1, h2, h3, h4, h5, h6, p, blockquote, li");
 
-    setTimeout(() => {
-      editorRef.current.focus();
-
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      
-      if (buddyState.savedRange) {
-        sel.addRange(buddyState.savedRange);
-        
-        if (mode === "append") {
-          // Collapse selection to its end point so we insert after the highlighted text
-          sel.collapseToEnd();
-          document.execCommand("insertHTML", false, `&nbsp;` + htmlToInsert);
-        } else {
-          // 'replace' mode natively overwrites the active highlighted range
-          document.execCommand("insertHTML", false, htmlToInsert);
-        }
-      } else {
-        document.execCommand("insertHTML", false, htmlToInsert);
+      if (blockParent && blockParent.textContent.trim() === buddyState.selectedText.trim()) {
+        range.selectNode(blockParent);
       }
-      
-      syncContentToState();
-    }, 10);
+    }
+
+    sel.addRange(range);
+    if (mode === "append") {
+      sel.collapseToEnd();
+      document.execCommand("insertHTML", false, appendHtml);
+    } else {
+      document.execCommand("insertHTML", false, htmlToInsert);
+    }
+
+    window.scrollTo({ top: scrollY, behavior: "instant" });
+    syncContentToState();
   };
 
   const formatText = (e, format, value = null) => {
@@ -2114,10 +2470,7 @@ export default function App() {
       }
     }
 
-    // Handle HTML paste: strip external font/color styles so content uses our native fonts
     const html = e.clipboardData.getData('text/html');
-
-    // Handle Link paste
     const textData = e.clipboardData.getData('text/plain');
     const isExactUrl = /^https?:\/\/[^\s]+$/.test(textData.trim());
 
@@ -2188,57 +2541,24 @@ export default function App() {
 
     if (html) {
       e.preventDefault();
-      const container = document.createElement('div');
-      container.innerHTML = html;
-
-      // Strip font-related inline styles from all elements
-      const stylesToRemove = [
-        'font-family', 'font-size', 'font-weight', 'color', 'background-color',
-        'background', 'line-height', 'letter-spacing', 'word-spacing',
-        'text-indent', 'margin', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right',
-        'padding', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right',
-        'text-align', 'float', 'clear', 'display', 'position', 'width', 'height', 'min-width', 'max-width', 'flex', 'grid'
-      ];
-
-      container.querySelectorAll('*').forEach(el => {
-        // Remove class attributes that carry external styling
-        el.removeAttribute('class');
-        el.removeAttribute('id');
-        el.removeAttribute('align');
-        el.removeAttribute('valign');
-
-        if (el.style) {
-          stylesToRemove.forEach(prop => el.style.removeProperty(prop));
-          // If style attribute is now empty, remove it entirely
-          if (!el.getAttribute('style')?.trim()) {
-            el.removeAttribute('style');
-          }
-        }
-
-        // Unwrap layout tags that break formatting
-        if (['FONT', 'CENTER', 'SECTION', 'ARTICLE', 'ASIDE', 'MAIN', 'NAV', 'HEADER', 'FOOTER'].includes(el.tagName)) {
-          const parent = el.parentNode;
-          if (parent) {
-            while (el.firstChild) parent.insertBefore(el.firstChild, el);
-            parent.removeChild(el);
-          }
-        }
-      });
-
-      // Unwrap spans that have no remaining attributes (they cause cursor/caret issues)
-      container.querySelectorAll('span').forEach(span => {
-        if (span.attributes.length === 0) {
-          const parent = span.parentNode;
-          while (span.firstChild) parent.insertBefore(span.firstChild, span);
-          parent.removeChild(span);
-        }
-      });
-
-      // Re-apply bold/italic from semantic tags (b, strong, i, em are preserved naturally)
-      // Insert the cleaned HTML
+      const nativePaste = createNativeHtmlPayload(html);
       const sel = window.getSelection();
-      if (sel.rangeCount) {
-        document.execCommand("insertHTML", false, container.innerHTML);
+      if (sel.rangeCount && nativePaste.html) {
+        document.execCommand("insertHTML", false, nativePaste.html);
+      }
+
+      syncContentToState();
+      return;
+    }
+
+    if (textData) {
+      e.preventDefault();
+
+      if (textData.includes("\n")) {
+        const nativeTextPaste = createNativeHtmlPayload(textData, { forceBlockRoots: true });
+        document.execCommand("insertHTML", false, nativeTextPaste.html || "<p><br></p>");
+      } else {
+        document.execCommand("insertText", false, textData);
       }
 
       syncContentToState();
