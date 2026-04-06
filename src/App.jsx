@@ -748,6 +748,7 @@ export default function App() {
   const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [draggedItem, setDraggedItem] = useState(null); // { type: 'doc' | 'group', id: string }
   const [dragTarget, setDragTarget] = useState(null); // { id: string, position: 'before' | 'after' | 'inset', type: 'doc' | 'group' }
+  const [folderPendingId, setFolderPendingId] = useState(null); // doc id currently in "hold to create folder" state
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { docId, x, y }
   const [editingDocId, setEditingDocId] = useState(null);
@@ -1461,17 +1462,18 @@ export default function App() {
       margin: '0',
       pointerEvents: 'none',
       zIndex: '9999',
-      borderRadius: '6px',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08)',
+      borderRadius: 'calc(0.375rem + var(--radius-bonus))',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08)',
       background: 'var(--color-bg-secondary)',
-      opacity: '1',
-      transform: 'scale(1.01)',
-      transition: 'box-shadow 0.1s, transform 0.1s',
+      opacity: '0.78',
+      backdropFilter: 'blur(2px)',
+      transform: 'scale(1.015)',
+      transition: 'none',
     });
     document.body.appendChild(clone);
 
     // Store current drag target in ref so handleUp always reads the latest value
-    pointerDragRef.current = { docId, idsToMove, clone, offsetY: currentY - rect.top, currentTarget: null };
+    pointerDragRef.current = { docId, idsToMove, clone, offsetY: currentY - rect.top, currentTarget: null, folderHoverTimer: null, folderHoverTarget: null };
     lastReorderRef.current = null;
     setDraggedItem({ type: 'doc', id: docId });
 
@@ -1497,18 +1499,49 @@ export default function App() {
       if (docEl) {
         const targetId = docEl.getAttribute('data-doc-id');
         if (pointerDragRef.current.idsToMove.includes(targetId)) {
+          clearTimeout(pointerDragRef.current.folderHoverTimer);
+          pointerDragRef.current.folderHoverTimer = null;
+          pointerDragRef.current.folderHoverTarget = null;
           pointerDragRef.current.currentTarget = null;
+          setFolderPendingId(null);
           setDragTarget(null);
           return;
         }
         const targetRect = docEl.getBoundingClientRect();
         const relY = moveE.clientY - targetRect.top;
         const h = targetRect.height;
-        if (relY >= h * 0.3 && relY <= h * 0.7) {
-          const t = { id: targetId, position: 'inset', type: 'doc' };
-          pointerDragRef.current.currentTarget = t;
-          setDragTarget(t);
+
+        if (relY >= h * 0.28 && relY <= h * 0.72) {
+          // Center zone — folder creation requires a hold
+          if (pointerDragRef.current.folderHoverTarget !== targetId) {
+            // Moved to a new doc center — reset timer
+            clearTimeout(pointerDragRef.current.folderHoverTimer);
+            pointerDragRef.current.folderHoverTarget = targetId;
+            // Clear any existing inset state
+            const prevTarget = pointerDragRef.current.currentTarget;
+            if (prevTarget?.position !== 'inset') {
+              pointerDragRef.current.currentTarget = null;
+              setDragTarget(null);
+            }
+            setFolderPendingId(targetId);
+            pointerDragRef.current.folderHoverTimer = setTimeout(() => {
+              if (pointerDragRef.current?.folderHoverTarget === targetId) {
+                const t = { id: targetId, position: 'inset', type: 'doc' };
+                pointerDragRef.current.currentTarget = t;
+                setFolderPendingId(null);
+                setDragTarget(t);
+              }
+            }, 420);
+          }
+          // else: already counting down for this target, do nothing
         } else {
+          // Outside center zone — clear folder hover state
+          if (pointerDragRef.current.folderHoverTarget) {
+            clearTimeout(pointerDragRef.current.folderHoverTimer);
+            pointerDragRef.current.folderHoverTimer = null;
+            pointerDragRef.current.folderHoverTarget = null;
+            setFolderPendingId(null);
+          }
           const position = relY < h * 0.5 ? 'before' : 'after';
           const t = { id: targetId, position, type: 'doc' };
           pointerDragRef.current.currentTarget = t;
@@ -1516,11 +1549,21 @@ export default function App() {
           liveReorderDocs(pointerDragRef.current.idsToMove, targetId, position);
         }
       } else if (groupHeaderEl) {
+        clearTimeout(pointerDragRef.current.folderHoverTimer);
+        pointerDragRef.current.folderHoverTimer = null;
+        pointerDragRef.current.folderHoverTarget = null;
+        setFolderPendingId(null);
         const targetGroupId = groupHeaderEl.getAttribute('data-group-id');
         const t = { id: targetGroupId, position: 'inset', type: 'group' };
         pointerDragRef.current.currentTarget = t;
         setDragTarget(t);
       } else {
+        if (pointerDragRef.current.folderHoverTarget) {
+          clearTimeout(pointerDragRef.current.folderHoverTimer);
+          pointerDragRef.current.folderHoverTimer = null;
+          pointerDragRef.current.folderHoverTarget = null;
+          setFolderPendingId(null);
+        }
         pointerDragRef.current.currentTarget = null;
         setDragTarget(null);
       }
@@ -1556,8 +1599,10 @@ export default function App() {
         }
       }
 
+      clearTimeout(pointerDragRef.current?.folderHoverTimer);
       pointerDragRef.current = null;
       lastReorderRef.current = null;
+      setFolderPendingId(null);
       setDragTarget(null);
       setDraggedItem(null);
       document.removeEventListener('pointermove', handleMove);
