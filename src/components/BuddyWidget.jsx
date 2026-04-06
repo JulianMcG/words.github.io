@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Loader2, ArrowRight, CornerDownLeft, X, FileText, Check } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 
-export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId }) {
+export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId }) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [previewText, setPreviewText] = useState("");
@@ -312,7 +312,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
          const surrounding = fullDocumentText ? fullDocumentText.slice(-200) : "";
          context = `The user has a collapsed cursor (no text selected) and wants to generate or insert content here.${surrounding ? `\n\nDocument context (last 200 chars before cursor):\n"${surrounding}"` : ""}`;
       } else {
-         context = `Here is the exact selection the user wants to modify:\n\n"${selectedText}"`;
+         // Pass the HTML of the selection so the AI knows the full structure (e.g. if it's a <h2>, <strong>, etc.)
+         context = `Here is the exact HTML the user has selected and wants to modify:\n\n${selectedHtml || `"${selectedText}"`}`;
       }
 
       const activeReferences = mentionedDocs.filter(d => input.includes(`@${d.title}`));
@@ -386,8 +387,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                      <div className="text-[11px] text-orange-500 opacity-80 font-semibold uppercase tracking-wider mb-1">
                        [ Document Rewrite ]
                      </div>
-                   ) : selectedText ? (
-                     <div className="text-red-500/70 dark:text-red-400/70 line-through decoration-red-500/40 mb-1" dangerouslySetInnerHTML={{ __html: selectedText }} />
+                   ) : (selectedHtml || selectedText) ? (
+                     <div className="text-red-500/70 dark:text-red-400/70 line-through decoration-red-500/40 mb-1" dangerouslySetInnerHTML={{ __html: selectedHtml || selectedText }} />
                    ) : null}
                    
                    <div className="text-green-600 dark:text-green-400" dangerouslySetInnerHTML={{ __html: previewText.generated_html }} />
