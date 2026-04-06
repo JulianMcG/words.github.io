@@ -773,6 +773,8 @@ export default function App() {
   const [isCloudDocsLoaded, setIsCloudDocsLoaded] = useState(false);
   const skipSyncRef = useRef(false);
   const pendingLocalSaveRef = useRef(false);
+  const pointerDragRef = useRef(null); // { docId, idsToMove, clone, offsetY }
+  const lastReorderRef = useRef(null); // prevents duplicate reorder state updates
 
   useEffect(() => {
     if (sharePopupInfo) {
@@ -1351,10 +1353,10 @@ export default function App() {
     }
   }, [docs, activeDocId]);
 
-  // Dismiss sidebar peek only after cursor moves 80px past the sidebar edge
+  // Dismiss sidebar peek only after cursor moves 30px past the sidebar edge
   useEffect(() => {
     if (!isSidebarPeeking || isSidebarOpen) return;
-    const DISMISS_THRESHOLD = 80;
+    const DISMISS_THRESHOLD = 30;
     const SIDEBAR_WIDTH = 256;
     const handleMouseMove = (e) => {
       if (e.clientX > SIDEBAR_WIDTH + DISMISS_THRESHOLD) {
@@ -1364,6 +1366,207 @@ export default function App() {
     document.addEventListener('mousemove', handleMouseMove);
     return () => document.removeEventListener('mousemove', handleMouseMove);
   }, [isSidebarPeeking, isSidebarOpen]);
+
+  // Live-reorder docs during pointer drag (adopted target's groupId)
+  const liveReorderDocs = (idsToMove, targetId, position) => {
+    const key = `${idsToMove.join(',')}-${targetId}-${position}`;
+    if (lastReorderRef.current === key) return;
+    lastReorderRef.current = key;
+    setDocs(prev => {
+      const withoutDragged = prev.filter(d => !idsToMove.includes(d.id));
+      const targetIdx = withoutDragged.findIndex(d => d.id === targetId);
+      if (targetIdx === -1) return prev;
+      const targetGroupId = withoutDragged[targetIdx].groupId;
+      const docsToInsert = prev
+        .filter(d => idsToMove.includes(d.id))
+        .map(d => ({ ...d, groupId: targetGroupId }));
+      const result = [...withoutDragged];
+      result.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, ...docsToInsert);
+      docsRef.current = result;
+      return result;
+    });
+  };
+
+  const handleInsetDrop = (idsToMove, targetDocId) => {
+    const targetDoc = docsRef.current.find(d => d.id === targetDocId);
+    if (!targetDoc) return;
+    let targetGroupId = targetDoc.groupId;
+    let isNewGroup = false;
+    if (!targetGroupId) {
+      targetGroupId = Math.random().toString(36).substring(2, 9);
+      isNewGroup = true;
+      setGroups(prev => [{ id: targetGroupId, name: "New Group", color: "#9ca3af", isCollapsed: false }, ...prev]);
+    }
+    setDocs(prev => {
+      let newDocs = [...prev];
+      const docsToMoveIds = isNewGroup ? [...idsToMove, targetDocId] : [...idsToMove];
+      docsToMoveIds.forEach(id => {
+        const idx = newDocs.findIndex(d => d.id === id);
+        if (idx !== -1) newDocs[idx] = { ...newDocs[idx], groupId: targetGroupId };
+      });
+      newDocs = newDocs.filter(d => !idsToMove.includes(d.id));
+      const targetIdx = newDocs.findIndex(d => d.id === targetDocId);
+      if (targetIdx !== -1) {
+        const docsToInsert = prev
+          .filter(d => idsToMove.includes(d.id))
+          .map(d => ({ ...d, groupId: targetGroupId }));
+        newDocs.splice(targetIdx + 1, 0, ...docsToInsert);
+      }
+      docsRef.current = newDocs;
+      return newDocs;
+    });
+  };
+
+  const startDocPointerDrag = (e, docId) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, a')) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragStarted = false;
+
+    const tryStart = (moveE) => {
+      const dx = moveE.clientX - startX;
+      const dy = moveE.clientY - startY;
+      if (!dragStarted && Math.sqrt(dx * dx + dy * dy) > 5) {
+        dragStarted = true;
+        cleanup();
+        initDocDrag(docId, moveE.clientX, moveE.clientY);
+      }
+    };
+    const cleanup = () => {
+      document.removeEventListener('pointermove', tryStart);
+      document.removeEventListener('pointerup', cleanup);
+    };
+    document.addEventListener('pointermove', tryStart);
+    document.addEventListener('pointerup', cleanup);
+  };
+
+  const initDocDrag = (docId, currentX, currentY) => {
+    const idsToMove = selectedDocIds.includes(docId) ? selectedDocIds : [docId];
+    if (!selectedDocIds.includes(docId)) setSelectedDocIds([docId]);
+
+    const el = document.querySelector(`[data-doc-id="${docId}"]`);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+
+    // Build a floating clone that looks like the real sidebar item
+    const clone = el.cloneNode(true);
+    // Remove any hover/focus states that may be stale
+    clone.removeAttribute('data-doc-id');
+    Object.assign(clone.style, {
+      position: 'fixed',
+      top: rect.top + 'px',
+      left: rect.left + 'px',
+      width: rect.width + 'px',
+      margin: '0',
+      pointerEvents: 'none',
+      zIndex: '9999',
+      borderRadius: '6px',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08)',
+      background: 'var(--color-bg-secondary)',
+      opacity: '1',
+      transform: 'scale(1.01)',
+      transition: 'box-shadow 0.1s, transform 0.1s',
+    });
+    document.body.appendChild(clone);
+
+    // Store current drag target in ref so handleUp always reads the latest value
+    pointerDragRef.current = { docId, idsToMove, clone, offsetY: currentY - rect.top, currentTarget: null };
+    lastReorderRef.current = null;
+    setDraggedItem({ type: 'doc', id: docId });
+
+    const handleMove = (moveE) => {
+      if (!pointerDragRef.current) return;
+      const { clone, offsetY } = pointerDragRef.current;
+      clone.style.top = (moveE.clientY - offsetY) + 'px';
+
+      // Temporarily hide clone to hit-test what's underneath
+      clone.style.visibility = 'hidden';
+      const elBelow = document.elementFromPoint(moveE.clientX, moveE.clientY);
+      clone.style.visibility = 'visible';
+
+      if (!elBelow) {
+        pointerDragRef.current.currentTarget = null;
+        setDragTarget(null);
+        return;
+      }
+
+      const docEl = elBelow.closest('[data-doc-id]');
+      const groupHeaderEl = !docEl && elBelow.closest('[data-group-id]');
+
+      if (docEl) {
+        const targetId = docEl.getAttribute('data-doc-id');
+        if (pointerDragRef.current.idsToMove.includes(targetId)) {
+          pointerDragRef.current.currentTarget = null;
+          setDragTarget(null);
+          return;
+        }
+        const targetRect = docEl.getBoundingClientRect();
+        const relY = moveE.clientY - targetRect.top;
+        const h = targetRect.height;
+        if (relY >= h * 0.3 && relY <= h * 0.7) {
+          const t = { id: targetId, position: 'inset', type: 'doc' };
+          pointerDragRef.current.currentTarget = t;
+          setDragTarget(t);
+        } else {
+          const position = relY < h * 0.5 ? 'before' : 'after';
+          const t = { id: targetId, position, type: 'doc' };
+          pointerDragRef.current.currentTarget = t;
+          setDragTarget(t);
+          liveReorderDocs(pointerDragRef.current.idsToMove, targetId, position);
+        }
+      } else if (groupHeaderEl) {
+        const targetGroupId = groupHeaderEl.getAttribute('data-group-id');
+        const t = { id: targetGroupId, position: 'inset', type: 'group' };
+        pointerDragRef.current.currentTarget = t;
+        setDragTarget(t);
+      } else {
+        pointerDragRef.current.currentTarget = null;
+        setDragTarget(null);
+      }
+    };
+
+    const handleUp = (upE) => {
+      if (!pointerDragRef.current) return;
+      pointerDragRef.current.clone.remove();
+      const { idsToMove, currentTarget } = pointerDragRef.current;
+
+      // Resolve the final drop action using the ref value (always fresh)
+      if (currentTarget?.position === 'inset' && currentTarget?.type === 'doc') {
+        handleInsetDrop(idsToMove, currentTarget.id);
+      } else if (currentTarget?.position === 'inset' && currentTarget?.type === 'group') {
+        setDocs(d => {
+          const newDocs = d.map(dd =>
+            idsToMove.includes(dd.id) ? { ...dd, groupId: currentTarget.id } : dd
+          );
+          docsRef.current = newDocs;
+          return newDocs;
+        });
+      } else if (!currentTarget) {
+        // Dropped over empty sidebar space → remove from any group
+        const sidebarEl = document.getElementById('sidebar-scroll-root');
+        if (sidebarEl && sidebarEl.contains(upE.target)) {
+          setDocs(d => {
+            const newDocs = d.map(dd =>
+              idsToMove.includes(dd.id) ? { ...dd, groupId: null } : dd
+            );
+            docsRef.current = newDocs;
+            return newDocs;
+          });
+        }
+      }
+
+      pointerDragRef.current = null;
+      lastReorderRef.current = null;
+      setDragTarget(null);
+      setDraggedItem(null);
+      document.removeEventListener('pointermove', handleMove);
+      document.removeEventListener('pointerup', handleUp);
+    };
+
+    document.addEventListener('pointermove', handleMove);
+    document.addEventListener('pointerup', handleUp);
+  };
 
   const handleTitleInput = () => {
     const newTitle = titleRef.current?.textContent || "";
@@ -3001,12 +3204,9 @@ export default function App() {
         key={doc._isTemp ? `temp-${doc.id}` : doc.id}
       >
         <div
-          draggable
-          onDragStart={(e) => handleDragStart(e, 'doc', doc.id)}
-          onDragEnd={handleDragEnd}
-          onDragOver={(e) => handleSidebarDragOver(e, doc.id, 'doc')}
-          onDragLeave={handleDragLeave}
-          onDrop={(e) => handleDropOnDoc(e, doc.id)}
+          data-doc-id={doc.id}
+          data-sidebar-item
+          onPointerDown={(e) => startDocPointerDrag(e, doc.id)}
           onClick={(e) => handleDocClick(e, doc.id)}
           onMouseEnter={(e) => {
             clearTimeout(hoverTimeoutRef.current);
@@ -3026,14 +3226,12 @@ export default function App() {
               setPreviewHoverDocId(null);
             }, 300);
           }}
-          className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors ${isSelected
+          style={draggedItem?.type === 'doc' && draggedItem?.id === doc.id ? { opacity: 0, pointerEvents: 'none' } : undefined}
+          className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-grab active:cursor-grabbing transition-colors select-none ${isSelected
             ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
             : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-            }`}
+            } ${dragTarget?.id === doc.id && dragTarget?.position === 'inset' ? 'ring-1 ring-[var(--color-accent)] bg-[var(--color-accent)]/[0.06]' : ''}`}
         >
-          {dragTarget?.id === doc.id && dragTarget?.position === 'before' && (
-            <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
-          )}
           <div
             ref={(el) => {
               if (el) {
@@ -3113,9 +3311,6 @@ export default function App() {
               <MoreHorizontal size={14} />
             </button>
           </div>
-          {dragTarget?.id === doc.id && dragTarget?.position === 'after' && (
-            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
-          )}
         </div>
       </motion.div>
     )
@@ -3719,6 +3914,7 @@ export default function App() {
             </button>
           </div>
           <div
+            id="sidebar-scroll-root"
             ref={sidebarScrollRef}
             className="flex-1 overflow-y-auto no-scrollbar pb-6 mt-2 flex flex-col h-full px-2"
             onScroll={(e) => setIsSidebarScrolled(e.currentTarget.scrollTop > 5)}
@@ -3876,15 +4072,19 @@ export default function App() {
                       return (
                         <div
                           key={group.id}
+                          data-group-id={group.id}
                           className="flex flex-col relative"
                           onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
                           onDrop={(e) => handleDropOnGroup(e, group.id)}
                         >
                           {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'before' && (
-                            <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
+                            <div className="absolute top-[-1px] left-2 right-2 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
                           )}
                           {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'after' && (
-                            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
+                            <div className="absolute bottom-[-1px] left-2 right-2 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
+                          )}
+                          {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'inset' && (
+                            <div className="absolute inset-0 rounded-md ring-1 ring-[var(--color-accent)] bg-[var(--color-accent)]/[0.06] pointer-events-none z-10" />
                           )}
                           <div
                             className="group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
