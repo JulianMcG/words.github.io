@@ -1508,7 +1508,7 @@ export default function App() {
       borderRadius: 'calc(0.375rem + var(--radius-bonus))',
       boxShadow: '0 8px 24px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08)',
       background: 'var(--color-bg-secondary)',
-      opacity: '0.78',
+      opacity: '0.55',
       backdropFilter: 'blur(2px)',
       transform: 'scale(1.015)',
       transition: 'none',
@@ -3321,7 +3321,7 @@ export default function App() {
           className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-grab active:cursor-grabbing transition-colors select-none ${isSelected
             ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
             : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-            } ${folderPendingId === doc.id ? 'folder-pending-stroke' : ''}`}
+            }`}
         >
           <div
             ref={(el) => {
@@ -5215,7 +5215,7 @@ export default function App() {
 
       {/* Sync Suggestion Popup */}
       {showSyncSuggestion && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[90] animate-slide-in-right">
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[200] animate-slide-in-right">
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-medium text-sm text-[var(--color-text-primary)] flex items-center gap-2">
               <Cloud size={16} className="text-[var(--color-text-faint)]" /> Back up your data
@@ -5258,24 +5258,31 @@ export default function App() {
 
       {/* Delete Undo Popup */}
       {deletedDocInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-72 z-[100] animate-slide-in-right flex flex-col gap-3">
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
-              <Trash2 size={16} className="text-[var(--color-text-faint)]" /> Document Deleted
+              <Trash2 size={15} className="text-[var(--color-text-faint)]" />
+              Document Deleted
             </div>
             <button
               onClick={() => { deletedDocInfoRef.current = null; setDeletedDocInfo(null); }}
-              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors rounded p-0.5"
             >
-              <X size={14} />
+              <X size={13} />
             </button>
           </div>
           <div className="flex gap-2">
             <button
               onClick={undoDeleteDoc}
-              className="flex-1 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] px-3 py-1.5 rounded-md text-xs font-medium hover:bg-[var(--color-bg-hover)] transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 flex items-center justify-center gap-1.5 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] px-3 py-1.5 rounded-lg text-xs font-semibold hover:opacity-80 transition-opacity"
             >
               <Undo2 size={12} /> Undo
+            </button>
+            <button
+              onClick={() => { deletedDocInfoRef.current = null; setDeletedDocInfo(null); }}
+              className="flex-1 flex items-center justify-center gap-1.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-muted)] px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] transition-colors"
+            >
+              Dismiss
             </button>
           </div>
         </div>
@@ -5283,7 +5290,7 @@ export default function App() {
 
       {/* Custom Share UI Popup */}
       {sharePopupInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[100] animate-slide-in-right flex flex-col gap-3">
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[200] animate-slide-in-right flex flex-col gap-3">
           <div className="flex justify-between items-start">
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
               <Share size={16} className="text-[var(--color-text-faint)]" /> Link Copied
