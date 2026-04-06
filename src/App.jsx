@@ -1420,10 +1420,11 @@ export default function App() {
       const withoutDragged = prev.filter(d => !idsToMove.includes(d.id));
       const targetIdx = withoutDragged.findIndex(d => d.id === targetId);
       if (targetIdx === -1) return prev;
-      const targetGroupId = withoutDragged[targetIdx].groupId;
+      const targetDoc = withoutDragged[targetIdx];
+      const targetGroupId = targetDoc.isPinned ? null : targetDoc.groupId;
       const docsToInsert = prev
         .filter(d => idsToMove.includes(d.id))
-        .map(d => ({ ...d, groupId: targetGroupId }));
+        .map(d => ({ ...d, groupId: targetGroupId, isPinned: targetDoc.isPinned }));
       const result = [...withoutDragged];
       result.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, ...docsToInsert);
       docsRef.current = result;
@@ -1536,10 +1537,19 @@ export default function App() {
         return;
       }
 
-      const docEl = elBelow.closest('[data-doc-id]');
-      const groupHeaderEl = !docEl && elBelow.closest('[data-group-id]');
+      const pinZoneEl = elBelow.closest('[data-pin-zone]');
+      const docEl = !pinZoneEl && elBelow.closest('[data-doc-id]');
+      const groupHeaderEl = !pinZoneEl && !docEl && elBelow.closest('[data-group-id]');
 
-      if (docEl) {
+      if (pinZoneEl) {
+        clearTimeout(pointerDragRef.current.folderHoverTimer);
+        pointerDragRef.current.folderHoverTimer = null;
+        pointerDragRef.current.folderHoverTarget = null;
+        setFolderPendingId(null);
+        const t = { id: 'pin-zone', position: 'inset', type: 'pin-zone' };
+        pointerDragRef.current.currentTarget = t;
+        setDragTarget(t);
+      } else if (docEl) {
         const targetId = docEl.getAttribute('data-doc-id');
         if (pointerDragRef.current.idsToMove.includes(targetId)) {
           clearTimeout(pointerDragRef.current.folderHoverTimer);
@@ -1614,7 +1624,15 @@ export default function App() {
       const { idsToMove, currentTarget } = pointerDragRef.current;
 
       // Resolve the final drop action using the ref value (always fresh)
-      if (currentTarget?.position === 'inset' && currentTarget?.type === 'doc') {
+      if (currentTarget?.type === 'pin-zone') {
+        setDocs(d => {
+          const newDocs = d.map(dd =>
+            idsToMove.includes(dd.id) ? { ...dd, isPinned: true, groupId: null } : dd
+          );
+          docsRef.current = newDocs;
+          return newDocs;
+        });
+      } else if (currentTarget?.position === 'inset' && currentTarget?.type === 'doc') {
         handleInsetDrop(idsToMove, currentTarget.id);
       } else if (currentTarget?.position === 'inset' && currentTarget?.type === 'group') {
         setDocs(d => {
@@ -4049,80 +4067,93 @@ export default function App() {
                   </div>
 
                   {/* Pinned Tabs (Icons Only) */}
-                  {pinnedDocs.length > 0 && (
-                    <div className="mb-4">
-                      <div className="flex flex-wrap gap-1">
-                        {pinnedDocs.map((doc) => {
-                          const isActive = activeDocId === doc.id;
-                          const isSelected = selectedDocIds.includes(doc.id);
-                          return (
-                            <div
-                              key={doc.id}
-                              data-sidebar-item
-                              onClick={(e) => handleDocClick(e, doc.id)}
-                              onMouseEnter={(e) => {
-                                clearTimeout(hoverTimeoutRef.current);
-                                setPreviewHoverGroupId(null);
-                                if (previewHoverDocId !== doc.id) setPreviewHoverDocId(null);
-
-                                if (activeDocId === doc.id || doc.isLocked) return;
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                hoverTimeoutRef.current = setTimeout(() => {
-                                  setPreviewPos({ top: rect.top, left: 272 });
-                                  setPreviewHoverDocId(doc.id);
-                                }, 600);
-                              }}
-                              onMouseLeave={() => {
-                                clearTimeout(hoverTimeoutRef.current);
-                                hoverTimeoutRef.current = setTimeout(() => {
-                                  setPreviewHoverDocId(null);
-                                }, 300);
-                              }}
-                              className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-pointer transition-all border ${isSelected || isActive
-                                ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
-                                : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
-                                }`}
-                              title={doc.title || "Untitled"}
-                            >
-                              <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
-                                {doc.emoji ? (
-                                  <span className="animate-in zoom-in spin-in-12 duration-300">
-                                    {doc.emoji}
-                                  </span>
-                                ) : (
-                                  <FileText
-                                    size={20}
-                                    className={
-                                      isSelected || isActive
-                                        ? "text-[var(--color-text-muted)]"
-                                        : "text-[var(--color-icon-muted)]"
-                                    }
-                                  />
-                                )}
-                              </div>
-                              <button
-                                onClick={(e) => togglePinDoc(e, doc.id)}
+                  {(pinnedDocs.length > 0 || draggedItem?.type === 'doc') && (
+                    <div
+                      data-pin-zone
+                      className={`mb-4 rounded-md transition-colors duration-150 ${dragTarget?.type === 'pin-zone' ? 'bg-[#E8572A]/[0.06]' : ''}`}
+                    >
+                      {pinnedDocs.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 p-0.5">
+                          {pinnedDocs.map((doc) => {
+                            const isActive = activeDocId === doc.id;
+                            const isSelected = selectedDocIds.includes(doc.id);
+                            const isDraggingThis = draggedItem?.type === 'doc' && draggedItem?.id === doc.id;
+                            return (
+                              <div
+                                key={doc.id}
+                                data-doc-id={doc.id}
+                                data-sidebar-item
+                                onPointerDown={(e) => startDocPointerDrag(e, doc.id)}
+                                onClick={(e) => handleDocClick(e, doc.id)}
                                 onMouseEnter={(e) => {
                                   clearTimeout(hoverTimeoutRef.current);
-                                  setPreviewHoverDocId(null);
-                                }}
-                                onMouseLeave={(e) => {
+                                  setPreviewHoverGroupId(null);
+                                  if (previewHoverDocId !== doc.id) setPreviewHoverDocId(null);
                                   if (activeDocId === doc.id || doc.isLocked) return;
-                                  const rect = e.currentTarget.closest('[data-sidebar-item]').getBoundingClientRect();
+                                  const rect = e.currentTarget.getBoundingClientRect();
                                   hoverTimeoutRef.current = setTimeout(() => {
                                     setPreviewPos({ top: rect.top, left: 272 });
                                     setPreviewHoverDocId(doc.id);
                                   }, 600);
                                 }}
-                                className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
-                                title="Unpin"
+                                onMouseLeave={() => {
+                                  clearTimeout(hoverTimeoutRef.current);
+                                  hoverTimeoutRef.current = setTimeout(() => {
+                                    setPreviewHoverDocId(null);
+                                  }, 300);
+                                }}
+                                style={isDraggingThis ? { opacity: 0, pointerEvents: 'none' } : undefined}
+                                className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-grab active:cursor-grabbing transition-all border select-none ${isSelected || isActive
+                                  ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
+                                  : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
+                                  }`}
+                                title={doc.title || "Untitled"}
                               >
-                                <PinOff size={10} />
-                              </button>
-                            </div>
-                          )
-                        })}
-                      </div>
+                                <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
+                                  {doc.emoji ? (
+                                    <span className="animate-in zoom-in spin-in-12 duration-300">
+                                      {doc.emoji}
+                                    </span>
+                                  ) : (
+                                    <FileText
+                                      size={20}
+                                      className={
+                                        isSelected || isActive
+                                          ? "text-[var(--color-text-muted)]"
+                                          : "text-[var(--color-icon-muted)]"
+                                      }
+                                    />
+                                  )}
+                                </div>
+                                <button
+                                  onClick={(e) => togglePinDoc(e, doc.id)}
+                                  onMouseEnter={(e) => {
+                                    clearTimeout(hoverTimeoutRef.current);
+                                    setPreviewHoverDocId(null);
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    if (activeDocId === doc.id || doc.isLocked) return;
+                                    const rect = e.currentTarget.closest('[data-sidebar-item]').getBoundingClientRect();
+                                    hoverTimeoutRef.current = setTimeout(() => {
+                                      setPreviewPos({ top: rect.top, left: 272 });
+                                      setPreviewHoverDocId(doc.id);
+                                    }, 600);
+                                  }}
+                                  className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 p-0.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full transition-all z-20"
+                                  title="Unpin"
+                                >
+                                  <PinOff size={10} />
+                                </button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-md border border-dashed text-[12px] transition-colors ${dragTarget?.type === 'pin-zone' ? 'border-[#E8572A]/50 text-[#E8572A]' : 'border-[var(--color-border-primary)] text-[var(--color-text-faint)]'}`}>
+                          <Pin size={11} />
+                          Drop here to pin
+                        </div>
+                      )}
                     </div>
                   )}
 
