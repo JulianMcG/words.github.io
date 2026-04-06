@@ -826,6 +826,7 @@ export default function App() {
     y: 0,
     savedRange: null,
     selectedText: "",
+    selectedHtml: "",
     isCollapsed: true,
   });
   const [isSpacingAnimating, setIsSpacingAnimating] = useState(false);
@@ -2213,86 +2214,127 @@ export default function App() {
   const handleBuddyApply = (newText, op) => {
     if (!editorRef.current) return;
 
-    // Restore editor focus so execCommand targets the correct contentEditable region
-    editorRef.current.focus({ preventScroll: true });
-
     const rawHtml =
       typeof newText === "object" && newText !== null ? newText.generated_html : newText;
-
     if (typeof rawHtml !== "string" || !rawHtml.trim()) return;
+
     const scrollY = window.scrollY;
 
-    // replace_document: select all and overwrite
+    // Walk up from a DOM node to find its direct-child-of-editor ancestor
+    const getEditorBlock = (node) => {
+      let n = node?.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+      while (n && n.parentNode !== editorRef.current) n = n.parentNode;
+      return n && editorRef.current.contains(n) ? n : null;
+    };
+
+    // ── replace_document ─────────────────────────────────────────────────────
+    // Set innerHTML directly — avoids execCommand selectAll/insertHTML artifacts
     if (op === "replace_document") {
       const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: true });
-      document.execCommand("selectAll", false, null);
-      document.execCommand("insertHTML", false, html || "<p><br></p>");
+      editorRef.current.innerHTML = html || "<p><br></p>";
       window.scrollTo({ top: scrollY, behavior: "instant" });
       syncContentToState();
       return;
     }
 
-    // append (Insert button from chat panel)
+    // ── append (Insert button from chat panel) ────────────────────────────────
     if (op === "append") {
+      editorRef.current.focus({ preventScroll: true });
       const { html, hasBlockRoot } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: false });
-      const appendHtml = !hasBlockRoot ? `&nbsp;${html}` : html;
-      if (!buddyState.savedRange) {
-        const sel = window.getSelection();
-        const range = document.createRange();
-        range.selectNodeContents(editorRef.current);
-        range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } else {
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        const range = buddyState.savedRange.cloneRange();
-        sel.addRange(range);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      if (buddyState.savedRange) {
+        const r = buddyState.savedRange.cloneRange();
+        sel.addRange(r);
         sel.collapseToEnd();
+      } else {
+        const r = document.createRange();
+        r.selectNodeContents(editorRef.current);
+        r.collapse(false);
+        sel.addRange(r);
       }
-      document.execCommand("insertHTML", false, appendHtml || "<p><br></p>");
+      document.execCommand("insertHTML", false, hasBlockRoot ? html : `&nbsp;${html}` || "<p><br></p>");
       window.scrollTo({ top: scrollY, behavior: "instant" });
       syncContentToState();
       return;
     }
 
-    // replace_selection and insert_at_cursor: restore saved range
-    if (!buddyState.savedRange) {
-      // Fallback: no saved range, insert at end
-      const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: true });
+    // ── insert_at_cursor ──────────────────────────────────────────────────────
+    if (op === "insert_at_cursor") {
+      editorRef.current.focus({ preventScroll: true });
+      const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: false });
       const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(editorRef.current);
-      range.collapse(false);
       sel.removeAllRanges();
-      sel.addRange(range);
+      if (buddyState.savedRange) {
+        const r = buddyState.savedRange.cloneRange();
+        sel.addRange(r);
+        sel.collapseToStart();
+      } else {
+        const r = document.createRange();
+        r.selectNodeContents(editorRef.current);
+        r.collapse(false);
+        sel.addRange(r);
+      }
       document.execCommand("insertHTML", false, html || "<p><br></p>");
       window.scrollTo({ top: scrollY, behavior: "instant" });
       syncContentToState();
       return;
     }
 
-    const forceBlockRoots = op === "replace_selection" && !buddyState.isCollapsed;
-    const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots });
-    const htmlToInsert = html || "<p><br></p>";
+    // ── replace_selection ─────────────────────────────────────────────────────
+    if (op === "replace_selection" && buddyState.savedRange) {
+      const { html, hasBlockRoot } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: true });
+      const range = buddyState.savedRange.cloneRange();
+      const startBlock = getEditorBlock(range.startContainer);
+      const endBlock = getEditorBlock(range.endContainer);
 
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    let range = buddyState.savedRange.cloneRange();
+      // Determine if the selection covers whole block(s) vs. a partial inline range
+      const isFullSingleBlock =
+        startBlock &&
+        startBlock === endBlock &&
+        startBlock.textContent.trim() === buddyState.selectedText.trim();
+      const isMultiBlock = startBlock && endBlock && startBlock !== endBlock;
 
-    if (op === "replace_selection" && range.commonAncestorContainer) {
-      let node = range.commonAncestorContainer;
-      if (node.nodeType === 3) node = node.parentNode;
-      const blockParent = node.closest("h1, h2, h3, h4, h5, h6, p, blockquote, li");
-      if (blockParent && blockParent.textContent.trim() === buddyState.selectedText.trim()) {
-        range.selectNode(blockParent);
+      if (hasBlockRoot && (isFullSingleBlock || isMultiBlock) && startBlock) {
+        // DOM-level swap: insert new nodes, remove old blocks — no execCommand, no artifacts
+        const tmpDiv = document.createElement("div");
+        tmpDiv.innerHTML = html || "<p><br></p>";
+        const newNodes = Array.from(tmpDiv.childNodes);
+
+        const toRemove = [];
+        let cursor = startBlock;
+        while (cursor) {
+          toRemove.push(cursor);
+          if (cursor === endBlock) break;
+          cursor = cursor.nextSibling;
+        }
+
+        newNodes.forEach((n) => editorRef.current.insertBefore(n, startBlock));
+        toRemove.forEach((b) => b.remove());
+      } else {
+        // Inline / partial-block: execCommand works correctly for non-block replacements
+        editorRef.current.focus({ preventScroll: true });
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand("insertHTML", false, html || "");
       }
+
+      window.scrollTo({ top: scrollY, behavior: "instant" });
+      syncContentToState();
+      return;
     }
 
-    sel.addRange(range);
-    if (op === "insert_at_cursor") sel.collapseToStart();
-
-    document.execCommand("insertHTML", false, htmlToInsert);
+    // ── fallback: insert at end ───────────────────────────────────────────────
+    editorRef.current.focus({ preventScroll: true });
+    const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: true });
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.selectNodeContents(editorRef.current);
+    r.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    document.execCommand("insertHTML", false, html || "<p><br></p>");
     window.scrollTo({ top: scrollY, behavior: "instant" });
     syncContentToState();
   };
@@ -5013,6 +5055,7 @@ export default function App() {
           onClose={() => setBuddyState(p => ({ ...p, show: false }))}
           onApplyText={handleBuddyApply}
           selectedText={buddyState.selectedText}
+          selectedHtml={buddyState.selectedHtml}
           isCollapsedSelection={buddyState.isCollapsed}
           fullDocumentText={editorRef.current?.innerHTML || ""}
           docs={docs}
@@ -5020,12 +5063,17 @@ export default function App() {
           onGlobalClick={() => {
             const sel = window.getSelection();
             let text = sel.toString();
+            let selectedHtml = "";
             let savedRange = null;
             let isCollapsed = true;
-            
+
             if (editorRef.current && editorRef.current.contains(sel.anchorNode) && text.trim().length > 0) {
                savedRange = sel.getRangeAt(0).cloneRange();
                isCollapsed = false;
+               // Capture the selection as HTML so AI knows the full structure (headings, bold, etc.)
+               const tmp = document.createElement("div");
+               tmp.appendChild(sel.getRangeAt(0).cloneContents());
+               selectedHtml = tmp.innerHTML;
             } else {
                text = "GLOBAL_CHAT";
             }
@@ -5033,9 +5081,10 @@ export default function App() {
             setBuddyState({
               show: true,
               x: window.innerWidth - 380 - 45,
-              y: window.innerHeight - 200, 
+              y: window.innerHeight - 200,
               savedRange,
               selectedText: text,
+              selectedHtml,
               isCollapsed,
             });
           }}
