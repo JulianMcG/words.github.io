@@ -206,7 +206,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     const cursorPosition = e.target.selectionStart;
     const textBeforeCursor = val.slice(0, cursorPosition);
     
-    const lastAtMatch = textBeforeCursor.match(/(?:^|\\s)@([^\\/@]*)$/);
+    const lastAtMatch = textBeforeCursor.match(/(?:^|\s)@([^\/@]*)$/);
     if (lastAtMatch) {
       setMentionQuery(lastAtMatch[1]);
       setMentionIndex(0);
@@ -242,10 +242,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     const textBeforeCursor = input.slice(0, cursorPosition);
     const textAfterCursor = input.slice(cursorPosition);
     
-    const lastAtMatch = textBeforeCursor.match(/(?:^|\\s)@([^\\/@]*)$/);
+    const lastAtMatch = textBeforeCursor.match(/(?:^|\s)@([^\/@]*)$/);
     if (lastAtMatch) {
       const matchIndex = lastAtMatch.index;
-      const isSpace = textBeforeCursor[matchIndex] === ' ' || textBeforeCursor[matchIndex] === '\\n';
+      const isSpace = textBeforeCursor[matchIndex] === ' ' || textBeforeCursor[matchIndex] === '\n';
       const startIdx = isSpace ? matchIndex + 1 : matchIndex;
       
       const titleString = `@${doc.title}`;
@@ -302,16 +302,17 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       let context = "";
       
       if (isReviewing && previewText) {
-          const previousDraft = typeof previewText === 'object' 
-              ? (previewText.generated_html || previewText.conversational_reply || "") 
+          const previousDraft = typeof previewText === 'object'
+              ? (previewText.generated_html || previewText.conversational_reply || "")
               : previewText;
-          context = `The user is refining your previous response. Here is your previous draft:\\n\\n"${previousDraft}"\\n\\nThe user wants you to modify it according to this new directive: ${promptToUse}`;
+          context = `The user is refining your previous response. Here is your previous draft:\n\n"${previousDraft}"`;
       } else if (selectedText === "GLOBAL_CHAT") {
-         context = `The user is conversing globally about their document. The entire document text is:\\n\\n"${fullDocumentText}"\\n\\nCurrent request: ${promptToUse}`;
+         context = `The user is working globally on their document. The full document HTML is:\n\n"${fullDocumentText}"`;
       } else if (isCollapsedSelection) {
-         context = `The user is at an empty, collapsed cursor. Instructed prompt: "${promptToUse}"\n\nFor context, their current document is: "${fullDocumentText}".\n\nCRITICAL REQUIREMENT: Because their cursor is empty, you are strictly GENERATING brand new text right here. If the user explicitly asks you to "rewrite", "fix", "correct formatting", or "shorten" text but they haven't highlighted anything, you must respond EXACTLY with: "Please highlight the text you want me to modify first!" so they learn how to use you properly. Otherwise, generate the expected text seamlessly using HTML nodes if formatting is requested.`;
+         const surrounding = fullDocumentText ? fullDocumentText.slice(-200) : "";
+         context = `The user has a collapsed cursor (no text selected) and wants to generate or insert content here.${surrounding ? `\n\nDocument context (last 200 chars before cursor):\n"${surrounding}"` : ""}`;
       } else {
-         context = `Here is the exact selection the user wants to modify:\\n\\n"${selectedText}"\\n\\nUser directive for modification: ${promptToUse}`;
+         context = `Here is the exact selection the user wants to modify:\n\n"${selectedText}"`;
       }
 
       const activeReferences = mentionedDocs.filter(d => input.includes(`@${d.title}`));
@@ -329,13 +330,15 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       setTimeout(() => setExpression("smilebetween"), 2400);
       setTimeout(() => setExpression("idle"), 2480);
 
-      if (typeof aiResponse === 'object' && aiResponse.generated_html) {
-          // Native Auto-Apply Document Wipe Architecture (Notion AI Flow)
-          onApplyText(aiResponse, "replace");
+      const op = aiResponse?.operation;
+
+      if (op === "replace_selection" || op === "replace_document" || op === "insert_at_cursor") {
+          onApplyText(aiResponse, op);
           setIsChangesApplied(true);
           setIsViewingChanges(false);
           setIsReviewing(true);
       } else {
+          // chat: show in panel, no document change
           setIsReviewing(true);
           setIsChangesApplied(false);
       }
