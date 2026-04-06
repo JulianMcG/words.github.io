@@ -2210,69 +2210,89 @@ export default function App() {
     }, 10);
   };
 
-  const handleBuddyApply = (newText, mode) => {
+  const handleBuddyApply = (newText, op) => {
     if (!editorRef.current) return;
 
-    // Restore editor focus so execCommand targets the correct contentEditable region without jumping the page
+    // Restore editor focus so execCommand targets the correct contentEditable region
     editorRef.current.focus({ preventScroll: true });
 
     const rawHtml =
       typeof newText === "object" && newText !== null ? newText.generated_html : newText;
 
     if (typeof rawHtml !== "string" || !rawHtml.trim()) return;
-
-    const nativeContent = createNativeHtmlPayload(rawHtml, {
-      forceBlockRoots:
-        buddyState.selectedText === "GLOBAL_CHAT" ||
-        (!buddyState.isCollapsed && mode !== "append"),
-    });
-
-    const htmlToInsert = nativeContent.html || "<p><br></p>";
-    const appendHtml =
-      mode === "append" && !nativeContent.hasBlockRoot ? `&nbsp;${htmlToInsert}` : htmlToInsert;
     const scrollY = window.scrollY;
 
-    if (buddyState.selectedText === "GLOBAL_CHAT" || !buddyState.savedRange) {
-      if (mode === "replace") {
-        document.execCommand("selectAll", false, null);
-        document.execCommand("insertHTML", false, htmlToInsert);
-      } else {
+    // replace_document: select all and overwrite
+    if (op === "replace_document") {
+      const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: true });
+      document.execCommand("selectAll", false, null);
+      document.execCommand("insertHTML", false, html || "<p><br></p>");
+      window.scrollTo({ top: scrollY, behavior: "instant" });
+      syncContentToState();
+      return;
+    }
+
+    // append (Insert button from chat panel)
+    if (op === "append") {
+      const { html, hasBlockRoot } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: false });
+      const appendHtml = !hasBlockRoot ? `&nbsp;${html}` : html;
+      if (!buddyState.savedRange) {
         const sel = window.getSelection();
         const range = document.createRange();
         range.selectNodeContents(editorRef.current);
         range.collapse(false);
         sel.removeAllRanges();
         sel.addRange(range);
-        document.execCommand("insertHTML", false, appendHtml);
+      } else {
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        const range = buddyState.savedRange.cloneRange();
+        sel.addRange(range);
+        sel.collapseToEnd();
       }
-
+      document.execCommand("insertHTML", false, appendHtml || "<p><br></p>");
       window.scrollTo({ top: scrollY, behavior: "instant" });
       syncContentToState();
       return;
     }
 
+    // replace_selection and insert_at_cursor: restore saved range
+    if (!buddyState.savedRange) {
+      // Fallback: no saved range, insert at end
+      const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: true });
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editorRef.current);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.execCommand("insertHTML", false, html || "<p><br></p>");
+      window.scrollTo({ top: scrollY, behavior: "instant" });
+      syncContentToState();
+      return;
+    }
+
+    const forceBlockRoots = op === "replace_selection" && !buddyState.isCollapsed;
+    const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots });
+    const htmlToInsert = html || "<p><br></p>";
+
     const sel = window.getSelection();
     sel.removeAllRanges();
-
     let range = buddyState.savedRange.cloneRange();
-    if (mode !== "append" && range.commonAncestorContainer) {
+
+    if (op === "replace_selection" && range.commonAncestorContainer) {
       let node = range.commonAncestorContainer;
       if (node.nodeType === 3) node = node.parentNode;
       const blockParent = node.closest("h1, h2, h3, h4, h5, h6, p, blockquote, li");
-
       if (blockParent && blockParent.textContent.trim() === buddyState.selectedText.trim()) {
         range.selectNode(blockParent);
       }
     }
 
     sel.addRange(range);
-    if (mode === "append") {
-      sel.collapseToEnd();
-      document.execCommand("insertHTML", false, appendHtml);
-    } else {
-      document.execCommand("insertHTML", false, htmlToInsert);
-    }
+    if (op === "insert_at_cursor") sel.collapseToStart();
 
+    document.execCommand("insertHTML", false, htmlToInsert);
     window.scrollTo({ top: scrollY, behavior: "instant" });
     syncContentToState();
   };
