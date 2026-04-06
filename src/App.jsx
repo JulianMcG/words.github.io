@@ -51,7 +51,8 @@ import {
   ArrowLeft,
   Maximize2,
   Minimize2,
-  AlignJustify
+  AlignJustify,
+  Undo2
 } from "lucide-react";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
 import { motion, AnimatePresence } from "framer-motion";
@@ -770,6 +771,8 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [showSyncSuggestion, setShowSyncSuggestion] = useState(false);
   const [sharePopupInfo, setSharePopupInfo] = useState(null);
+  const [deletedDocInfo, setDeletedDocInfo] = useState(null);
+  const [isAltHeld, setIsAltHeld] = useState(false);
   const [pendingShareId, setPendingShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
   const [isCloudDocsLoaded, setIsCloudDocsLoaded] = useState(false);
   const skipSyncRef = useRef(false);
@@ -785,6 +788,16 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [sharePopupInfo]);
+
+  useEffect(() => {
+    if (deletedDocInfo) {
+      const timer = setTimeout(() => {
+        deletedDocInfoRef.current = null;
+        setDeletedDocInfo(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [deletedDocInfo]);
 
   // We don't want to use state for the backups, otherwise they re-render when they shouldn't.
   // We'll use refs, and initialize them from localStorage if they exist.
@@ -839,9 +852,39 @@ export default function App() {
   const emojiPickerRef = useRef(null);
   const slashMenuRef = useRef(null);
   const docsRef = useRef(docs);
+  const deletedDocInfoRef = useRef(null);
   const isInternalEdit = useRef(false);
   const titleTimeoutRef = useRef(null);
   const prevActiveDocIdRef = useRef(activeDocId);
+
+  const undoDeleteDoc = useCallback(() => {
+    const info = deletedDocInfoRef.current;
+    if (!info) return;
+    setDocs(info.prevDocs);
+    docsRef.current = info.prevDocs;
+    setActiveDocId(info.prevActiveDocId);
+    deletedDocInfoRef.current = null;
+    setDeletedDocInfo(null);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Alt') setIsAltHeld(true);
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'z' && deletedDocInfoRef.current) {
+        undoDeleteDoc();
+      }
+    };
+    const onKeyUp = (e) => { if (e.key === 'Alt') setIsAltHeld(false); };
+    const onBlur = () => setIsAltHeld(false);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [undoDeleteDoc]);
 
   const filteredCommands = COMMANDS.filter(
     (cmd) =>
@@ -1890,6 +1933,9 @@ export default function App() {
 
   const deleteDoc = (e, id) => {
     e.stopPropagation();
+    const snapshot = { prevDocs: docsRef.current, prevActiveDocId: activeDocId };
+    deletedDocInfoRef.current = snapshot;
+    setDeletedDocInfo(snapshot);
     setDocs((prev) => {
       if (prev.length === 1) {
         const freshDoc = {
@@ -3349,11 +3395,18 @@ export default function App() {
             }}
           >
             <button
-              onClick={(e) => handleContextMenu(e, doc.id)}
-              className="words-context-menu p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded transition-colors"
-              title="More options"
+              onClick={(e) => {
+                if (isAltHeld) {
+                  deleteDoc(e, doc.id);
+                  setContextMenu(null);
+                } else {
+                  handleContextMenu(e, doc.id);
+                }
+              }}
+              className={`words-context-menu p-1 rounded transition-colors ${isAltHeld ? 'text-red-500 hover:text-red-600' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
+              title={isAltHeld ? "Delete" : "More options"}
             >
-              <MoreHorizontal size={14} />
+              {isAltHeld ? <Trash2 size={14} /> : <MoreHorizontal size={14} />}
             </button>
           </div>
         </div>
@@ -5198,6 +5251,31 @@ export default function App() {
               className="flex-1 py-1.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-md text-xs font-medium transition-colors"
             >
               Later
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Undo Popup */}
+      {deletedDocInfo && (
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-72 z-[100] animate-slide-in-right flex flex-col gap-3">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
+              <Trash2 size={16} className="text-[var(--color-text-faint)]" /> Document Deleted
+            </div>
+            <button
+              onClick={() => { deletedDocInfoRef.current = null; setDeletedDocInfo(null); }}
+              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={undoDeleteDoc}
+              className="flex-1 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] px-3 py-1.5 rounded-md text-xs font-medium hover:bg-[var(--color-bg-hover)] transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Undo2 size={12} /> Undo
             </button>
           </div>
         </div>
