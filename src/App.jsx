@@ -1554,18 +1554,14 @@ export default function App() {
         const relY = moveE.clientY - targetRect.top;
         const h = targetRect.height;
 
-        if (relY >= h * 0.28 && relY <= h * 0.72) {
-          // Center zone — folder creation requires a hold
+        if (relY > h * 0.42) {
+          // Bottom zone — folder creation requires a brief hold
           if (pointerDragRef.current.folderHoverTarget !== targetId) {
-            // Moved to a new doc center — reset timer
+            // New target — reset timer and start fresh
             clearTimeout(pointerDragRef.current.folderHoverTimer);
             pointerDragRef.current.folderHoverTarget = targetId;
-            // Clear any existing inset state
-            const prevTarget = pointerDragRef.current.currentTarget;
-            if (prevTarget?.position !== 'inset') {
-              pointerDragRef.current.currentTarget = null;
-              setDragTarget(null);
-            }
+            pointerDragRef.current.currentTarget = null;
+            setDragTarget(null);
             setFolderPendingId(targetId);
             pointerDragRef.current.folderHoverTimer = setTimeout(() => {
               if (pointerDragRef.current?.folderHoverTarget === targetId) {
@@ -1574,18 +1570,18 @@ export default function App() {
                 setFolderPendingId(null);
                 setDragTarget(t);
               }
-            }, 420);
+            }, 300);
           }
-          // else: already counting down for this target, do nothing
+          // else: timer already running for this target — do nothing
         } else {
-          // Outside center zone — clear folder hover state
+          // Top zone — reorder before; clear any folder hover state
           if (pointerDragRef.current.folderHoverTarget) {
             clearTimeout(pointerDragRef.current.folderHoverTimer);
             pointerDragRef.current.folderHoverTimer = null;
             pointerDragRef.current.folderHoverTarget = null;
             setFolderPendingId(null);
           }
-          const position = relY < h * 0.5 ? 'before' : 'after';
+          const position = 'before';
           const t = { id: targetId, position, type: 'doc' };
           pointerDragRef.current.currentTarget = t;
           setDragTarget(t);
@@ -3317,11 +3313,15 @@ export default function App() {
               setPreviewHoverDocId(null);
             }, 300);
           }}
-          style={draggedItem?.type === 'doc' && draggedItem?.id === doc.id ? { opacity: 0, pointerEvents: 'none' } : undefined}
+          style={(() => {
+            if (draggedItem?.type === 'doc' && draggedItem?.id === doc.id) return { opacity: 0, pointerEvents: 'none' };
+            if (dragTarget?.id === doc.id && dragTarget?.position === 'inset') return { boxShadow: 'inset 0 0 0 1.5px rgba(232, 87, 42, 0.65)' };
+            return undefined;
+          })()}
           className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-grab active:cursor-grabbing transition-colors select-none ${isSelected
             ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
             : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-            } ${dragTarget?.id === doc.id && dragTarget?.position === 'inset' ? 'ring-1 ring-[var(--color-accent)] bg-[var(--color-accent)]/[0.06]' : ''}`}
+            } ${folderPendingId === doc.id ? 'folder-pending-stroke' : ''}`}
         >
           <div
             ref={(el) => {
