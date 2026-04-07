@@ -4184,7 +4184,7 @@ export default function App() {
                             <div className="absolute bottom-[-1px] left-2 right-2 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
                           )}
                           {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'inset' && (
-                            <div className="absolute inset-0 rounded-md bg-[var(--color-bg-hover-strong)] pointer-events-none z-10" />
+                            <div className="absolute inset-0 rounded-md bg-[var(--color-text-primary)]/[0.06] pointer-events-none z-10" />
                           )}
                           <div
                             className="group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
