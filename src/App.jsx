@@ -1537,28 +1537,10 @@ export default function App() {
         return;
       }
 
-      const pinZoneNode = document.querySelector('[data-pin-zone]');
-      let isInPinZone = false;
-      if (pinZoneNode) {
-        const pr = pinZoneNode.getBoundingClientRect();
-        const effectiveBottom = Math.max(pr.bottom, pr.top + 52);
-        isInPinZone = moveE.clientX >= pr.left && moveE.clientX <= pr.right &&
-                      moveE.clientY >= pr.top && moveE.clientY <= effectiveBottom;
-      }
-      const docEl = !isInPinZone && elBelow.closest('[data-doc-id]');
-      const groupHeaderEl = !isInPinZone && !docEl && elBelow.closest('[data-group-id]');
+      const docEl = elBelow.closest('[data-doc-id]');
+      const groupHeaderEl = !docEl && elBelow.closest('[data-group-id]');
 
-      if (isInPinZone) {
-        clearTimeout(pointerDragRef.current.folderHoverTimer);
-        pointerDragRef.current.folderHoverTimer = null;
-        pointerDragRef.current.folderHoverTarget = null;
-        setFolderPendingId(null);
-        if (pointerDragRef.current.currentTarget?.type !== 'pin-zone') {
-          const t = { id: 'pin-zone', position: 'inset', type: 'pin-zone' };
-          pointerDragRef.current.currentTarget = t;
-          setDragTarget(t);
-        }
-      } else if (docEl) {
+      if (docEl) {
         const targetId = docEl.getAttribute('data-doc-id');
         if (pointerDragRef.current.idsToMove.includes(targetId)) {
           clearTimeout(pointerDragRef.current.folderHoverTimer);
@@ -1633,15 +1615,7 @@ export default function App() {
       const { idsToMove, currentTarget } = pointerDragRef.current;
 
       // Resolve the final drop action using the ref value (always fresh)
-      if (currentTarget?.type === 'pin-zone') {
-        setDocs(d => {
-          const newDocs = d.map(dd =>
-            idsToMove.includes(dd.id) ? { ...dd, isPinned: true, groupId: null } : dd
-          );
-          docsRef.current = newDocs;
-          return newDocs;
-        });
-      } else if (currentTarget?.position === 'inset' && currentTarget?.type === 'doc') {
+      if (currentTarget?.position === 'inset' && currentTarget?.type === 'doc') {
         handleInsetDrop(idsToMove, currentTarget.id);
       } else if (currentTarget?.position === 'inset' && currentTarget?.type === 'group') {
         setDocs(d => {
@@ -4076,13 +4050,9 @@ export default function App() {
                   </div>
 
                   {/* Pinned Tabs (Icons Only) */}
-                  <div
-                    data-pin-zone
-                    className={`rounded-md ${pinnedDocs.length > 0 ? 'mb-4' : ''}`}
-                  >
-                    {pinnedDocs.length > 0 && (
-                      <div className="flex flex-wrap gap-1 p-0.5">
-                        {pinnedDocs.map((doc) => {
+                  {pinnedDocs.length > 0 && (
+                    <div className="flex flex-wrap gap-1 p-0.5 mb-4">
+                      {pinnedDocs.map((doc) => {
                             const isActive = activeDocId === doc.id;
                             const isSelected = selectedDocIds.includes(doc.id);
                             const isDraggingThis = draggedItem?.type === 'doc' && draggedItem?.id === doc.id;
@@ -4155,9 +4125,8 @@ export default function App() {
                               </div>
                             )
                           })}
-                        </div>
-                      )}
                     </div>
+                  )}
 
                   {/* New Document Button or Create Group Button */}
                   <div className="space-y-[1px]">
@@ -4196,23 +4165,6 @@ export default function App() {
                 </div>
 
                 <div className="flex-1 flex flex-col relative z-0 mt-2">
-                  {/* Pin zone drop indicator — absolutely positioned so it never shifts layout */}
-                  <AnimatePresence>
-                    {pinnedDocs.length === 0 && dragTarget?.type === 'pin-zone' && (
-                      <motion.div
-                        key="pin-drop-hint"
-                        initial={{ opacity: 0, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        transition={{ duration: 0.15, ease: 'easeOut' }}
-                        style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 40, pointerEvents: 'none' }}
-                        className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-md border border-dashed border-[#E8572A]/50 text-[#E8572A]/80 text-[12px] bg-[var(--color-bg-secondary)]"
-                      >
-                        <Pin size={11} />
-                        Drop here to pin
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
                   {/* Document Groups */}
                   <div className="space-y-[2px] mb-2">
                     {groups.map((group) => {
