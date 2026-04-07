@@ -1203,8 +1203,8 @@ export default function App() {
               setActiveDocId(nextActiveId);
             }
 
-            // Force immediate synchronous DOM update ONLY if the active doc actually changed from an external source or transition
-            if (nextActiveId && nextActiveId !== prevActiveDocIdRef.current) {
+            // Force immediate synchronous DOM update with cloud content
+            if (nextActiveId) {
               prevActiveDocIdRef.current = nextActiveId;
               const activeDoc = data.docs.find(d => d.id === nextActiveId);
               if (activeDoc && editorRef.current && titleRef.current) {
