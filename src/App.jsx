@@ -2902,43 +2902,45 @@ export default function App() {
       e.preventDefault();
 
       const dropRange = document.caretRangeFromPoint?.(e.clientX, e.clientY);
-      if (!dropRange) {
-        handleEditorDragEnd();
-        return;
-      }
-
       const sourceRange = dragSourceRangeRef.current;
-      if (sourceRange) {
-        // Determine if drop point is inside the source selection — if so, bail
-        const cmp1 = sourceRange.comparePoint(dropRange.startContainer, dropRange.startOffset);
-        if (cmp1 === 0) {
-          handleEditorDragEnd();
-          return;
-        }
+      if (!dropRange || !sourceRange) { handleEditorDragEnd(); return; }
 
-        // Is the drop point after the source? We must delete source first to keep offsets valid.
-        const dropIsAfter = sourceRange.compareBoundaryPoints(Range.END_TO_START, dropRange) < 0;
+      // Bail if dropping inside the source selection
+      try {
+        const cmp = sourceRange.comparePoint(dropRange.startContainer, dropRange.startOffset);
+        if (cmp === 0) { handleEditorDragEnd(); return; }
+      } catch (_) { /* cross-document or detached range — proceed */ }
 
-        if (dropIsAfter) {
-          // Insert first, then delete — so offsets don't shift
-          const insertRange = dropRange.cloneRange();
-          insertRange.collapse(true);
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = draggedTextHtmlRef.current;
-          const frag = document.createDocumentFragment();
-          while (tempDiv.firstChild) frag.appendChild(tempDiv.firstChild);
-          insertRange.insertNode(frag);
-          sourceRange.deleteContents();
-        } else {
-          sourceRange.deleteContents();
-          // Re-resolve drop position after deletion
-          const reRange = document.caretRangeFromPoint?.(e.clientX, e.clientY) || dropRange;
-          const tempDiv = document.createElement('div');
-          tempDiv.innerHTML = draggedTextHtmlRef.current;
-          const frag = document.createDocumentFragment();
-          while (tempDiv.firstChild) frag.appendChild(tempDiv.firstChild);
-          reRange.insertNode(frag);
-        }
+      const html = draggedTextHtmlRef.current;
+      const sel = window.getSelection();
+
+      // Is the drop point after the source?
+      const dropIsAfter = sourceRange.compareBoundaryPoints(Range.END_TO_START, dropRange) < 0;
+
+      // Use execCommand so the entire operation lands on the browser's native undo stack.
+      // Cmd+Z will revert the move in one step.
+      if (dropIsAfter) {
+        // Insert at target first (before source), so source offsets stay valid
+        sel.removeAllRanges();
+        const insertRange = dropRange.cloneRange();
+        insertRange.collapse(true);
+        sel.addRange(insertRange);
+        document.execCommand('insertHTML', false, html);
+        // Now delete source content
+        sel.removeAllRanges();
+        sel.addRange(sourceRange);
+        document.execCommand('insertHTML', false, '');
+      } else {
+        // Delete source first, then re-resolve drop position and insert
+        sel.removeAllRanges();
+        sel.addRange(sourceRange);
+        document.execCommand('insertHTML', false, '');
+        const reRange = document.caretRangeFromPoint?.(e.clientX, e.clientY) || dropRange;
+        sel.removeAllRanges();
+        const insertRange = reRange.cloneRange();
+        insertRange.collapse(true);
+        sel.addRange(insertRange);
+        document.execCommand('insertHTML', false, html);
       }
 
       syncContentToState();
