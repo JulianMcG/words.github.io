@@ -1553,9 +1553,11 @@ export default function App() {
         pointerDragRef.current.folderHoverTimer = null;
         pointerDragRef.current.folderHoverTarget = null;
         setFolderPendingId(null);
-        const t = { id: 'pin-zone', position: 'inset', type: 'pin-zone' };
-        pointerDragRef.current.currentTarget = t;
-        setDragTarget(t);
+        if (pointerDragRef.current.currentTarget?.type !== 'pin-zone') {
+          const t = { id: 'pin-zone', position: 'inset', type: 'pin-zone' };
+          pointerDragRef.current.currentTarget = t;
+          setDragTarget(t);
+        }
       } else if (docEl) {
         const targetId = docEl.getAttribute('data-doc-id');
         if (pointerDragRef.current.idsToMove.includes(targetId)) {
@@ -4076,7 +4078,7 @@ export default function App() {
                   {/* Pinned Tabs (Icons Only) */}
                   <div
                     data-pin-zone
-                    className={`rounded-md transition-colors duration-150 ${pinnedDocs.length > 0 ? 'mb-4' : ''} ${dragTarget?.type === 'pin-zone' ? 'bg-[#E8572A]/[0.04]' : ''}`}
+                    className={`rounded-md ${pinnedDocs.length > 0 ? 'mb-4' : ''}`}
                   >
                     {pinnedDocs.length > 0 && (
                       <div className="flex flex-wrap gap-1 p-0.5">
@@ -4155,21 +4157,6 @@ export default function App() {
                           })}
                         </div>
                       )}
-                      <AnimatePresence>
-                        {pinnedDocs.length === 0 && dragTarget?.type === 'pin-zone' && (
-                          <motion.div
-                            key="pin-drop-hint"
-                            initial={{ opacity: 0, y: -6, scale: 0.96 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: -6, scale: 0.96 }}
-                            transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                            className="mb-2 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-md border border-dashed border-[#E8572A]/50 text-[#E8572A]/80 text-[12px] bg-[#E8572A]/[0.05]"
-                          >
-                            <Pin size={11} />
-                            Drop here to pin
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
                     </div>
 
                   {/* New Document Button or Create Group Button */}
@@ -4209,6 +4196,23 @@ export default function App() {
                 </div>
 
                 <div className="flex-1 flex flex-col relative z-0 mt-2">
+                  {/* Pin zone drop indicator — absolutely positioned so it never shifts layout */}
+                  <AnimatePresence>
+                    {pinnedDocs.length === 0 && dragTarget?.type === 'pin-zone' && (
+                      <motion.div
+                        key="pin-drop-hint"
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        transition={{ duration: 0.15, ease: 'easeOut' }}
+                        style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 40, pointerEvents: 'none' }}
+                        className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-md border border-dashed border-[#E8572A]/50 text-[#E8572A]/80 text-[12px] bg-[var(--color-bg-secondary)]"
+                      >
+                        <Pin size={11} />
+                        Drop here to pin
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   {/* Document Groups */}
                   <div className="space-y-[2px] mb-2">
                     {groups.map((group) => {
