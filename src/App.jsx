@@ -1537,11 +1537,18 @@ export default function App() {
         return;
       }
 
-      const pinZoneEl = elBelow.closest('[data-pin-zone]');
-      const docEl = !pinZoneEl && elBelow.closest('[data-doc-id]');
-      const groupHeaderEl = !pinZoneEl && !docEl && elBelow.closest('[data-group-id]');
+      const pinZoneNode = document.querySelector('[data-pin-zone]');
+      let isInPinZone = false;
+      if (pinZoneNode) {
+        const pr = pinZoneNode.getBoundingClientRect();
+        const effectiveBottom = Math.max(pr.bottom, pr.top + 52);
+        isInPinZone = moveE.clientX >= pr.left && moveE.clientX <= pr.right &&
+                      moveE.clientY >= pr.top && moveE.clientY <= effectiveBottom;
+      }
+      const docEl = !isInPinZone && elBelow.closest('[data-doc-id]');
+      const groupHeaderEl = !isInPinZone && !docEl && elBelow.closest('[data-group-id]');
 
-      if (pinZoneEl) {
+      if (isInPinZone) {
         clearTimeout(pointerDragRef.current.folderHoverTimer);
         pointerDragRef.current.folderHoverTimer = null;
         pointerDragRef.current.folderHoverTarget = null;
@@ -4067,14 +4074,13 @@ export default function App() {
                   </div>
 
                   {/* Pinned Tabs (Icons Only) */}
-                  {(pinnedDocs.length > 0 || draggedItem?.type === 'doc') && (
-                    <div
-                      data-pin-zone
-                      className={`rounded-md transition-colors duration-150 ${pinnedDocs.length === 0 ? 'min-h-[12px] mb-1' : 'mb-4'} ${dragTarget?.type === 'pin-zone' ? 'bg-[#E8572A]/[0.06]' : ''}`}
-                    >
-                      {pinnedDocs.length > 0 ? (
-                        <div className="flex flex-wrap gap-1 p-0.5">
-                          {pinnedDocs.map((doc) => {
+                  <div
+                    data-pin-zone
+                    className={`rounded-md transition-colors duration-150 ${pinnedDocs.length > 0 ? 'mb-4' : ''} ${dragTarget?.type === 'pin-zone' ? 'bg-[#E8572A]/[0.04]' : ''}`}
+                  >
+                    {pinnedDocs.length > 0 && (
+                      <div className="flex flex-wrap gap-1 p-0.5">
+                        {pinnedDocs.map((doc) => {
                             const isActive = activeDocId === doc.id;
                             const isSelected = selectedDocIds.includes(doc.id);
                             const isDraggingThis = draggedItem?.type === 'doc' && draggedItem?.id === doc.id;
@@ -4148,16 +4154,23 @@ export default function App() {
                             )
                           })}
                         </div>
-                      ) : (
-                        <div className={`overflow-hidden transition-all duration-200 ease-out ${dragTarget?.type === 'pin-zone' ? 'max-h-[52px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                          <div className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-md border border-dashed border-[#E8572A]/50 text-[#E8572A] text-[12px]">
+                      )}
+                      <AnimatePresence>
+                        {pinnedDocs.length === 0 && dragTarget?.type === 'pin-zone' && (
+                          <motion.div
+                            key="pin-drop-hint"
+                            initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                            transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                            className="mb-2 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-md border border-dashed border-[#E8572A]/50 text-[#E8572A]/80 text-[12px] bg-[#E8572A]/[0.05]"
+                          >
                             <Pin size={11} />
                             Drop here to pin
-                          </div>
-                        </div>
-                      )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
-                  )}
 
                   {/* New Document Button or Create Group Button */}
                   <div className="space-y-[1px]">
