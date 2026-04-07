@@ -1564,7 +1564,7 @@ export default function App() {
         const relY = moveE.clientY - targetRect.top;
         const h = targetRect.height;
 
-        if (relY > h * 0.42) {
+        if (relY > h * 0.58) {
           // Bottom zone — folder creation requires a brief hold
           if (pointerDragRef.current.folderHoverTarget !== targetId) {
             // New target — reset timer and start fresh
@@ -1580,7 +1580,7 @@ export default function App() {
                 setFolderPendingId(null);
                 setDragTarget(t);
               }
-            }, 300);
+            }, 350);
           }
           // else: timer already running for this target — do nothing
         } else {
@@ -4070,7 +4070,7 @@ export default function App() {
                   {(pinnedDocs.length > 0 || draggedItem?.type === 'doc') && (
                     <div
                       data-pin-zone
-                      className={`mb-4 rounded-md transition-colors duration-150 ${dragTarget?.type === 'pin-zone' ? 'bg-[#E8572A]/[0.06]' : ''}`}
+                      className={`rounded-md transition-colors duration-150 ${pinnedDocs.length === 0 ? 'min-h-[12px] mb-1' : 'mb-4'} ${dragTarget?.type === 'pin-zone' ? 'bg-[#E8572A]/[0.06]' : ''}`}
                     >
                       {pinnedDocs.length > 0 ? (
                         <div className="flex flex-wrap gap-1 p-0.5">
@@ -4149,9 +4149,11 @@ export default function App() {
                           })}
                         </div>
                       ) : (
-                        <div className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-md border border-dashed text-[12px] transition-colors ${dragTarget?.type === 'pin-zone' ? 'border-[#E8572A]/50 text-[#E8572A]' : 'border-[var(--color-border-primary)] text-[var(--color-text-faint)]'}`}>
-                          <Pin size={11} />
-                          Drop here to pin
+                        <div className={`overflow-hidden transition-all duration-200 ease-out ${dragTarget?.type === 'pin-zone' ? 'max-h-[52px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                          <div className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-md border border-dashed border-[#E8572A]/50 text-[#E8572A] text-[12px]">
+                            <Pin size={11} />
+                            Drop here to pin
+                          </div>
                         </div>
                       )}
                     </div>
