@@ -856,6 +856,10 @@ export default function App() {
   const isInternalEdit = useRef(false);
   const titleTimeoutRef = useRef(null);
   const prevActiveDocIdRef = useRef(activeDocId);
+  const draggedTextHtmlRef = useRef(null);
+  const dragSourceRangeRef = useRef(null);
+  const isInternalTextDragRef = useRef(false);
+  const dragCursorRef = useRef(null);
 
   const undoDeleteDoc = useCallback(() => {
     const info = deletedDocInfoRef.current;
@@ -2868,7 +2872,80 @@ export default function App() {
       syncContentToState();
     }
   };
+  const handleEditorDragStart = (e) => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !editorRef.current?.contains(sel.anchorNode)) {
+      isInternalTextDragRef.current = false;
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const fragment = range.cloneContents();
+    const div = document.createElement('div');
+    div.appendChild(fragment);
+    draggedTextHtmlRef.current = div.innerHTML;
+    dragSourceRangeRef.current = range.cloneRange();
+    isInternalTextDragRef.current = true;
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleEditorDragEnd = () => {
+    isInternalTextDragRef.current = false;
+    draggedTextHtmlRef.current = null;
+    dragSourceRangeRef.current = null;
+    if (dragCursorRef.current) dragCursorRef.current.style.display = 'none';
+  };
+
   const handleDrop = (e) => {
+    if (dragCursorRef.current) dragCursorRef.current.style.display = 'none';
+
+    if (isInternalTextDragRef.current && draggedTextHtmlRef.current) {
+      e.preventDefault();
+
+      const dropRange = document.caretRangeFromPoint?.(e.clientX, e.clientY);
+      if (!dropRange) {
+        handleEditorDragEnd();
+        return;
+      }
+
+      const sourceRange = dragSourceRangeRef.current;
+      if (sourceRange) {
+        // Determine if drop point is inside the source selection — if so, bail
+        const cmp1 = sourceRange.comparePoint(dropRange.startContainer, dropRange.startOffset);
+        if (cmp1 === 0) {
+          handleEditorDragEnd();
+          return;
+        }
+
+        // Is the drop point after the source? We must delete source first to keep offsets valid.
+        const dropIsAfter = sourceRange.compareBoundaryPoints(Range.END_TO_START, dropRange) < 0;
+
+        if (dropIsAfter) {
+          // Insert first, then delete — so offsets don't shift
+          const insertRange = dropRange.cloneRange();
+          insertRange.collapse(true);
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = draggedTextHtmlRef.current;
+          const frag = document.createDocumentFragment();
+          while (tempDiv.firstChild) frag.appendChild(tempDiv.firstChild);
+          insertRange.insertNode(frag);
+          sourceRange.deleteContents();
+        } else {
+          sourceRange.deleteContents();
+          // Re-resolve drop position after deletion
+          const reRange = document.caretRangeFromPoint?.(e.clientX, e.clientY) || dropRange;
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = draggedTextHtmlRef.current;
+          const frag = document.createDocumentFragment();
+          while (tempDiv.firstChild) frag.appendChild(tempDiv.firstChild);
+          reRange.insertNode(frag);
+        }
+      }
+
+      syncContentToState();
+      handleEditorDragEnd();
+      return;
+    }
+
     const files = e.dataTransfer?.files;
     if (files && files.length > 0) {
       const file = files[0];
@@ -2891,7 +2968,32 @@ export default function App() {
 
   const handleDragOver = (e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
+
+    if (isInternalTextDragRef.current && dragCursorRef.current && document.caretRangeFromPoint) {
+      e.dataTransfer.dropEffect = 'move';
+      const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+      if (range) {
+        // Insert a zero-width marker to get an accurate bounding rect
+        isInternalEdit.current = true;
+        const marker = document.createElement('span');
+        marker.textContent = '\u200b';
+        range.insertNode(marker);
+        const rect = marker.getBoundingClientRect();
+        marker.parentNode?.removeChild(marker);
+        isInternalEdit.current = false;
+
+        if (rect.height > 0) {
+          const cursor = dragCursorRef.current;
+          cursor.style.left = rect.left + 'px';
+          cursor.style.top = rect.top + 'px';
+          cursor.style.height = rect.height + 'px';
+          cursor.style.display = 'block';
+        }
+      }
+    } else {
+      e.dataTransfer.dropEffect = "copy";
+      if (dragCursorRef.current) dragCursorRef.current.style.display = 'none';
+    }
   };
 
   const handleKeyDown = useCallback(
@@ -4584,6 +4686,8 @@ export default function App() {
             onKeyDown={handleKeyDown}
             onMouseDown={handleEditorMouseDown}
             onPaste={handlePaste}
+            onDragStart={handleEditorDragStart}
+            onDragEnd={handleEditorDragEnd}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onClick={(e) => {
@@ -4599,6 +4703,20 @@ export default function App() {
           ></div>
         </main>
       </div>{" "}
+      {/* Orange text-drag insertion cursor */}
+      <div
+        ref={dragCursorRef}
+        style={{
+          position: 'fixed',
+          display: 'none',
+          width: '2px',
+          backgroundColor: '#f97316',
+          pointerEvents: 'none',
+          zIndex: 9999,
+          borderRadius: '1px',
+          boxShadow: '0 0 4px #f9731680',
+        }}
+      />
       {/* Floating Formatting Toolbar */}
       <AnimatePresence>
         {linkPopoverState.show && (
