@@ -4627,7 +4627,22 @@ export default function App() {
               </button>{" "}
               {isEmojiPickerOpen && (
                 <div className="absolute top-full left-0 mt-2 p-3 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-xl z-50 w-64 grid grid-cols-6 gap-1 animate-in fade-in zoom-in-95 duration-100">
-                  {" "}
+                  <button
+                    className="p-2 hover:bg-[var(--color-bg-hover)] rounded-lg flex items-center justify-center transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                    title="Remove emoji"
+                    onClick={() => {
+                      setDocs((prev) =>
+                        prev.map((d) =>
+                          d.id === activeDocId
+                            ? { ...d, emoji: null, hasCustomEmoji: false }
+                            : d,
+                        ),
+                      );
+                      setIsEmojiPickerOpen(false);
+                    }}
+                  >
+                    <X size={20} />
+                  </button>
                   {EMOJIS.map((emoji) => (
                     <button
                       key={emoji}
