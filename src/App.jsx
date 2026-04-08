@@ -1203,13 +1203,17 @@ export default function App() {
               setActiveDocId(nextActiveId);
             }
 
-            // Force immediate synchronous DOM update with cloud content
+            // Force immediate synchronous DOM update with cloud content,
+            // but only if the content actually changed (avoids cursor reset
+            // when the snapshot is our own just-saved data).
             if (nextActiveId) {
               prevActiveDocIdRef.current = nextActiveId;
               const activeDoc = data.docs.find(d => d.id === nextActiveId);
               if (activeDoc && editorRef.current && titleRef.current) {
                 titleRef.current.textContent = activeDoc.title;
-                editorRef.current.innerHTML = activeDoc.content;
+                if (editorRef.current.innerHTML !== activeDoc.content) {
+                  editorRef.current.innerHTML = activeDoc.content;
+                }
               }
             }
           }
