@@ -1,3 +1,37 @@
+export const generateFolderName = async (docTitles) => {
+  const endpoint = `/api/buddy`;
+  const titlesText = docTitles.filter(Boolean).join(', ') || 'misc';
+
+  const payload = {
+    contents: [
+      {
+        role: "user",
+        parts: [{
+          text: `Name this folder in 1-2 words based on these document titles: ${titlesText}. Reply with ONLY the name, nothing else.`
+        }]
+      }
+    ],
+    generationConfig: {
+      maxOutputTokens: 8,
+    }
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    return text || null;
+  } catch (err) {
+    console.error("Folder name generation failed:", err);
+    return null;
+  }
+};
+
 export const generateAIResponse = async (userPrompt, context, referenceDocs = []) => {
   const endpoint = `/api/buddy`;
 
