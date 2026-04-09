@@ -61,6 +61,7 @@ import { Sparkles } from "lucide-react";
 import BuddyIcon from "./components/BuddyIcon";
 import BuddyWidget from "./components/BuddyWidget";
 import { EMOJIS, getEmojiForTitle } from "./utils/emojiMap";
+import { generateFolderName } from "./utils/gemini";
 
 
 // Define the separated commands
@@ -1440,7 +1441,9 @@ export default function App() {
     });
   };
 
-  const handleInsetDrop = (idsToMove, targetDocId) => {
+  const FOLDER_COLORS = ['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
+
+  const handleInsetDrop = async (idsToMove, targetDocId) => {
     const targetDoc = docsRef.current.find(d => d.id === targetDocId);
     if (!targetDoc) return;
     let targetGroupId = targetDoc.groupId;
@@ -1448,7 +1451,15 @@ export default function App() {
     if (!targetGroupId) {
       targetGroupId = Math.random().toString(36).substring(2, 9);
       isNewGroup = true;
-      setGroups(prev => [{ id: targetGroupId, name: "New Group", color: "#9ca3af", isCollapsed: false }, ...prev]);
+      const randomColor = FOLDER_COLORS[Math.floor(Math.random() * FOLDER_COLORS.length)];
+
+      // Capture titles before state changes, then await AI name
+      const involvedTitles = docsRef.current
+        .filter(d => [...idsToMove, targetDocId].includes(d.id))
+        .map(d => d.title);
+      const aiName = await generateFolderName(involvedTitles);
+
+      setGroups(prev => [{ id: targetGroupId, name: aiName || "New Group", color: randomColor, isCollapsed: false }, ...prev]);
     }
     setDocs(prev => {
       let newDocs = [...prev];
@@ -1902,24 +1913,37 @@ export default function App() {
     }
   };
 
-  const createGroup = () => {
+  const createGroup = async () => {
     const newGroupId = Math.random().toString(36).substring(2, 9);
+    const randomColor = FOLDER_COLORS[Math.floor(Math.random() * FOLDER_COLORS.length)];
+
+    // Gather selected doc titles before any state changes
+    let selectedTitles = [];
+    let newDocs = null;
+    if (selectedDocIds.length > 0) {
+      selectedTitles = docsRef.current
+        .filter(d => selectedDocIds.includes(d.id))
+        .map(d => d.title);
+      newDocs = docsRef.current.map(d =>
+        selectedDocIds.includes(d.id) ? { ...d, groupId: newGroupId } : d
+      );
+    }
+
+    // Fetch AI name before creating the folder so it appears with the right name
+    const aiName = await generateFolderName(selectedTitles);
+
     const newGroup = {
       id: newGroupId,
-      name: "New Group",
-      color: "#9ca3af", // default gray
+      name: aiName || "New Group",
+      color: randomColor,
       isCollapsed: false,
     };
     setGroups(prev => [newGroup, ...prev]);
 
-    // If docs are selected, move them to the new group
-    if (selectedDocIds.length > 0) {
-      const newDocs = docsRef.current.map(d =>
-        selectedDocIds.includes(d.id) ? { ...d, groupId: newGroupId } : d
-      );
+    if (newDocs) {
       docsRef.current = newDocs;
       setDocs(newDocs);
-      setSelectedDocIds([]); // Clear selection to revert to 'New Document' button
+      setSelectedDocIds([]);
     }
   };
 
