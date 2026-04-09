@@ -3015,7 +3015,7 @@ export default function App() {
         let deletedAny = false;
 
         tables.forEach(t => {
-          if (sel.containsNode(t, true)) {
+          if (sel.containsNode(t, true) || (t.compareDocumentPosition(startEl) & Node.DOCUMENT_POSITION_PRECEDING && t.compareDocumentPosition(endEl) & Node.DOCUMENT_POSITION_FOLLOWING)) {
             t.remove();
             deletedAny = true;
           }
@@ -3036,6 +3036,57 @@ export default function App() {
           }
         } else if (deletedAny) {
           setTimeout(() => syncContentToState(), 10);
+        }
+      } else if (e.key === "Backspace" && window.getSelection() && window.getSelection().isCollapsed) {
+        // Fix for empty list backspace
+        const sel = window.getSelection();
+        if (sel && sel.focusNode) {
+          const focusNode = sel.focusNode;
+          const element = focusNode.nodeType === 3 ? focusNode.parentElement : focusNode;
+
+          // Fix table backspace (deleting before a table doesn't delete it unless we select it)
+          // But actually, we want to allow backspacing a table if cursor is right after it, or if cursor is at the beginning of the block after it.
+          if (sel.focusOffset === 0) {
+             let block = element.closest('p, h1, h2, h3, blockquote, div, span');
+             if (!block) block = element;
+
+             // Check parents until editor content
+             let curr = block;
+             while (curr && curr.classList && !curr.classList.contains('editor-content')) {
+                 if (curr.previousElementSibling && curr.previousElementSibling.classList && curr.previousElementSibling.classList.contains('table-container')) {
+                     // Check if there is text before the cursor in the current block
+                     const r = document.createRange();
+                     r.setStart(curr, 0);
+                     r.setEnd(sel.focusNode, sel.focusOffset);
+                     if (r.toString().trim() === '') {
+                         e.preventDefault();
+                         curr.previousElementSibling.remove();
+                         syncContentToState();
+                         return;
+                     }
+                 }
+                 curr = curr.parentElement;
+             }
+
+             // What if element is the editor itself?
+             if (element.classList && element.classList.contains('editor-content') && sel.focusNode.childNodes[sel.focusOffset - 1] && sel.focusNode.childNodes[sel.focusOffset - 1].classList && sel.focusNode.childNodes[sel.focusOffset - 1].classList.contains('table-container')) {
+                 e.preventDefault();
+                 sel.focusNode.childNodes[sel.focusOffset - 1].remove();
+                 syncContentToState();
+                 return;
+             }
+          }
+
+          let liElement = element.closest("li");
+
+          // If we are at the start of an empty LI, break out of it
+          if (liElement && (liElement.textContent.trim() === "" || liElement.innerHTML === "<br>") && sel.focusOffset === 0) {
+            e.preventDefault();
+            document.execCommand("outdent", false, null);
+            document.execCommand("formatBlock", false, "P");
+            syncContentToState();
+            return;
+          }
         }
       }
 
@@ -3303,6 +3354,18 @@ export default function App() {
           const focusNode = selection.focusNode;
           const element =
             focusNode.nodeType === 3 ? focusNode.parentElement : focusNode;
+
+          const liElement = element.closest("li");
+          if (liElement && (liElement.textContent.trim() === "" || liElement.innerHTML === "<br>")) {
+             e.preventDefault();
+             document.execCommand("outdent", false, null);
+             document.execCommand("formatBlock", false, "P");
+             setTimeout(() => {
+                syncContentToState();
+             }, 0);
+             return;
+          }
+
           const blockElement = element.closest("h1, h2, h3, blockquote");
 
           if (blockElement) {
@@ -3321,13 +3384,30 @@ export default function App() {
                 ) {
                   document.execCommand("formatBlock", false, "P");
                   syncContentToState();
+                } else if (newElement && newElement.tagName === "DIV" && !newElement.closest(".table-container")) {
+                  document.execCommand("formatBlock", false, "P");
+                  syncContentToState();
                 }
               }
             }, 0);
+          } else {
+             setTimeout(() => {
+              const newSelection = window.getSelection();
+              if (newSelection && newSelection.focusNode) {
+                const newNode = newSelection.focusNode;
+                const newElement =
+                  newNode.nodeType === 3 ? newNode.parentElement : newNode;
+
+                if (newElement && newElement.tagName === "DIV" && !newElement.closest(".table-container")) {
+                  document.execCommand("formatBlock", false, "P");
+                  syncContentToState();
+                }
+              }
+             }, 0);
           }
 
-          const liElement = element.closest("li");
-          if (liElement) {
+          const liElement2 = element.closest("li");
+          if (liElement2) {
             setTimeout(() => {
               const newSel = window.getSelection();
               if (newSel && newSel.focusNode) {
