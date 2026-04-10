@@ -861,6 +861,7 @@ export default function App() {
   const dragSourceRangeRef = useRef(null);
   const isInternalTextDragRef = useRef(false);
   const dragCursorRef = useRef(null);
+  const newlyNamedGroupsRef = useRef(new Set());
 
   const undoDeleteDoc = useCallback(() => {
     const info = deletedDocInfoRef.current;
@@ -1443,7 +1444,16 @@ export default function App() {
 
   const FOLDER_COLORS = ['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
 
-  const handleInsetDrop = async (idsToMove, targetDocId) => {
+  const nameGroupWithAI = (groupId, titles) => {
+    generateFolderName(titles).then(aiName => {
+      newlyNamedGroupsRef.current.add(groupId);
+      setGroups(prev => prev.map(g =>
+        g.id === groupId ? { ...g, name: aiName || "New Group", isNaming: false } : g
+      ));
+    });
+  };
+
+  const handleInsetDrop = (idsToMove, targetDocId) => {
     const targetDoc = docsRef.current.find(d => d.id === targetDocId);
     if (!targetDoc) return;
     let targetGroupId = targetDoc.groupId;
@@ -1453,13 +1463,12 @@ export default function App() {
       isNewGroup = true;
       const randomColor = FOLDER_COLORS[Math.floor(Math.random() * FOLDER_COLORS.length)];
 
-      // Capture titles before state changes, then await AI name
+      // Capture titles before state changes, create group instantly with loading state
       const involvedTitles = docsRef.current
         .filter(d => [...idsToMove, targetDocId].includes(d.id))
         .map(d => d.title);
-      const aiName = await generateFolderName(involvedTitles);
-
-      setGroups(prev => [{ id: targetGroupId, name: aiName || "New Group", color: randomColor, isCollapsed: false }, ...prev]);
+      setGroups(prev => [{ id: targetGroupId, name: "", isNaming: true, color: randomColor, isCollapsed: false }, ...prev]);
+      nameGroupWithAI(targetGroupId, involvedTitles);
     }
     setDocs(prev => {
       let newDocs = [...prev];
@@ -1913,7 +1922,7 @@ export default function App() {
     }
   };
 
-  const createGroup = async () => {
+  const createGroup = () => {
     const newGroupId = Math.random().toString(36).substring(2, 9);
     const randomColor = FOLDER_COLORS[Math.floor(Math.random() * FOLDER_COLORS.length)];
 
@@ -1929,16 +1938,9 @@ export default function App() {
       );
     }
 
-    // Fetch AI name before creating the folder so it appears with the right name
-    const aiName = await generateFolderName(selectedTitles);
-
-    const newGroup = {
-      id: newGroupId,
-      name: aiName || "New Group",
-      color: randomColor,
-      isCollapsed: false,
-    };
-    setGroups(prev => [newGroup, ...prev]);
+    // Create folder instantly with loading state, name it in background
+    setGroups(prev => [{ id: newGroupId, name: "", isNaming: true, color: randomColor, isCollapsed: false }, ...prev]);
+    nameGroupWithAI(newGroupId, selectedTitles);
 
     if (newDocs) {
       docsRef.current = newDocs;
@@ -4388,12 +4390,30 @@ export default function App() {
                                   }}
                                   className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
                                 />
+                              ) : group.isNaming ? (
+                                <div className="flex-1 overflow-hidden py-0.5">
+                                  <div className="relative h-2.5 w-16 rounded-full overflow-hidden bg-[var(--color-border-primary)]">
+                                    <motion.div
+                                      className="absolute inset-0 rounded-full"
+                                      style={{ background: 'linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-text-primary) 20%, transparent) 50%, transparent 100%)', width: '60%' }}
+                                      animate={{ x: ['-100%', '200%'] }}
+                                      transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+                                    />
+                                  </div>
+                                </div>
                               ) : (
-                                <span
-                                  className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none"
-                                >
-                                  {group.name}
-                                </span>
+                                <AnimatePresence mode="wait">
+                                  <motion.span
+                                    key={group.id + '-name'}
+                                    className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none block"
+                                    initial={newlyNamedGroupsRef.current.has(group.id) ? { clipPath: 'inset(0 100% 0 0)' } : false}
+                                    animate={{ clipPath: 'inset(0 0% 0 0)' }}
+                                    transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+                                    onAnimationComplete={() => newlyNamedGroupsRef.current.delete(group.id)}
+                                  >
+                                    {group.name}
+                                  </motion.span>
+                                </AnimatePresence>
                               )}
                             </div>
                             <div
