@@ -862,6 +862,8 @@ export default function App() {
   const isInternalTextDragRef = useRef(false);
   const dragCursorRef = useRef(null);
   const newlyNamedGroupsRef = useRef(new Set());
+  const aiNamingInitiatedRef = useRef(new Set());
+  const lastFolderColorRef = useRef(null);
 
   const undoDeleteDoc = useCallback(() => {
     const info = deletedDocInfoRef.current;
@@ -1282,6 +1284,18 @@ export default function App() {
     return () => clearTimeout(timeout);
   }, [docs, groups, activeDocId, lockPasscode, user]);
 
+  // Auto-name "New Folder" groups once they accumulate 2+ docs
+  useEffect(() => {
+    groups.forEach(group => {
+      if (group.name !== "New Folder" || group.isNaming || aiNamingInitiatedRef.current.has(group.id)) return;
+      const groupDocs = docs.filter(d => d.groupId === group.id);
+      if (groupDocs.length >= 2) {
+        setGroups(prev => prev.map(g => g.id === group.id ? { ...g, isNaming: true } : g));
+        nameGroupWithAI(group.id, groupDocs.map(d => d.title));
+      }
+    });
+  }, [docs, groups]);
+
   const handleGoogleLogin = (e) => {
     e.preventDefault();
     signInWithPopup(auth, googleProvider)
@@ -1444,11 +1458,19 @@ export default function App() {
 
   const FOLDER_COLORS = ['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
 
+  const getNextFolderColor = () => {
+    const available = FOLDER_COLORS.filter(c => c !== lastFolderColorRef.current);
+    const color = available[Math.floor(Math.random() * available.length)];
+    lastFolderColorRef.current = color;
+    return color;
+  };
+
   const nameGroupWithAI = (groupId, titles) => {
+    aiNamingInitiatedRef.current.add(groupId);
     generateFolderName(titles).then(aiName => {
       newlyNamedGroupsRef.current.add(groupId);
       setGroups(prev => prev.map(g =>
-        g.id === groupId ? { ...g, name: aiName || "New Group", isNaming: false } : g
+        g.id === groupId ? { ...g, name: aiName || "New Folder", isNaming: false } : g
       ));
     });
   };
@@ -1461,7 +1483,7 @@ export default function App() {
     if (!targetGroupId) {
       targetGroupId = Math.random().toString(36).substring(2, 9);
       isNewGroup = true;
-      const randomColor = FOLDER_COLORS[Math.floor(Math.random() * FOLDER_COLORS.length)];
+      const randomColor = getNextFolderColor();
 
       // Capture titles before state changes, create group instantly with loading state
       const involvedTitles = docsRef.current
@@ -1924,7 +1946,8 @@ export default function App() {
 
   const createGroup = () => {
     const newGroupId = Math.random().toString(36).substring(2, 9);
-    const randomColor = FOLDER_COLORS[Math.floor(Math.random() * FOLDER_COLORS.length)];
+    const randomColor = getNextFolderColor();
+    const has2PlusDocs = selectedDocIds.length >= 2;
 
     // Gather selected doc titles before any state changes
     let selectedTitles = [];
@@ -1938,9 +1961,12 @@ export default function App() {
       );
     }
 
-    // Create folder instantly with loading state, name it in background
-    setGroups(prev => [{ id: newGroupId, name: "", isNaming: true, color: randomColor, isCollapsed: false }, ...prev]);
-    nameGroupWithAI(newGroupId, selectedTitles);
+    // Only AI-name immediately if 2+ docs are being added; otherwise stay "New Folder"
+    const initialName = has2PlusDocs ? "" : "New Folder";
+    const initialIsNaming = has2PlusDocs;
+    setGroups(prev => [{ id: newGroupId, name: initialName, isNaming: initialIsNaming, color: randomColor, isCollapsed: false }, ...prev]);
+
+    if (has2PlusDocs) nameGroupWithAI(newGroupId, selectedTitles);
 
     if (newDocs) {
       docsRef.current = newDocs;
@@ -4391,29 +4417,27 @@ export default function App() {
                                   className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
                                 />
                               ) : group.isNaming ? (
-                                <div className="flex-1 overflow-hidden py-0.5">
-                                  <div className="relative h-2.5 w-16 rounded-full overflow-hidden bg-[var(--color-border-primary)]">
+                                <div className="flex-1 overflow-hidden flex items-center">
+                                  <div className="relative h-[11px] w-[72px] rounded-[4px] overflow-hidden bg-[var(--color-border-primary)]">
                                     <motion.div
-                                      className="absolute inset-0 rounded-full"
-                                      style={{ background: 'linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-text-primary) 20%, transparent) 50%, transparent 100%)', width: '60%' }}
-                                      animate={{ x: ['-100%', '200%'] }}
-                                      transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+                                      className="absolute inset-y-0 w-[55%]"
+                                      style={{ background: 'linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-text-primary) 18%, transparent) 50%, transparent 100%)' }}
+                                      animate={{ x: ['-100%', '280%'] }}
+                                      transition={{ duration: 1.3, repeat: Infinity, ease: [0.4, 0, 0.6, 1] }}
                                     />
                                   </div>
                                 </div>
                               ) : (
-                                <AnimatePresence mode="wait">
-                                  <motion.span
-                                    key={group.id + '-name'}
-                                    className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none block"
-                                    initial={newlyNamedGroupsRef.current.has(group.id) ? { clipPath: 'inset(0 100% 0 0)' } : false}
-                                    animate={{ clipPath: 'inset(0 0% 0 0)' }}
-                                    transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                                    onAnimationComplete={() => newlyNamedGroupsRef.current.delete(group.id)}
-                                  >
-                                    {group.name}
-                                  </motion.span>
-                                </AnimatePresence>
+                                <motion.span
+                                  key={group.id + '-name'}
+                                  className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none block"
+                                  initial={newlyNamedGroupsRef.current.has(group.id) ? { clipPath: 'inset(0 100% 0 0)', opacity: 0.5 } : false}
+                                  animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
+                                  transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                                  onAnimationComplete={() => newlyNamedGroupsRef.current.delete(group.id)}
+                                >
+                                  {group.name}
+                                </motion.span>
                               )}
                             </div>
                             <div
