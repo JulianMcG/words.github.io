@@ -1460,6 +1460,10 @@ export default function App() {
   useEffect(() => {
     const flushSave = () => {
       if (editorRef.current && titleRef.current) {
+        // Strip leading bare <br> nodes browsers insert before block-level elements
+        while (editorRef.current.firstChild && editorRef.current.firstChild.nodeName === 'BR') {
+          editorRef.current.removeChild(editorRef.current.firstChild);
+        }
         const currentDocs = docsRef.current.map((d) =>
           d.id === activeDocId
             ? {
