@@ -784,12 +784,14 @@ export default function App() {
 
   // Single progress value (0 → 1) drives the entire new-doc reveal
   const animProgress = useMotionValue(1); // 1 = fully settled
+  const animControlRef = useRef(null);    // holds the animateMV playback control
+  const animStartedIdRef = useRef(null);  // tracks which doc ID has already begun animating
 
   // ── Image: sweeps up from below, scale-blooms, blurs + fades to white at exit ──
   // ∨ shape at start: outer highest (wings), middle lowest (tip). Middle fastest.
-  const imageYMiddle = useTransform(animProgress, [0, 0.75], ['84%',  '-122%']);
-  const imageYSide   = useTransform(animProgress, [0, 0.85], ['68%',  '-122%']);
-  const imageYOuter  = useTransform(animProgress, [0, 0.94], ['52%',  '-122%']);
+  const imageYMiddle = useTransform(animProgress, [0, 0.75], ['102%', '-122%']);
+  const imageYSide   = useTransform(animProgress, [0, 0.85], ['86%',  '-122%']);
+  const imageYOuter  = useTransform(animProgress, [0, 0.94], ['70%',  '-122%']);
   const imageScaleN  = useTransform(animProgress, [0, 0.70], [1.07, 1.0]);
   const imageOp      = useTransform(animProgress, [0, 0.50, 1], [1, 1, 0]);
   // Blur builds progressively as elements rise
@@ -1424,22 +1426,30 @@ export default function App() {
 
   // New doc reveal: single progress value drives image sweep + content reveal
   useEffect(() => {
-    if (animatingDocId === activeDocId) {
-      animateMV(animProgress, 1, {
-        duration: 1.1,
+    // Only fire once per animatingDocId; prevents re-triggering if activeDocId changes away and back
+    if (animatingDocId === activeDocId && animatingDocId !== null && animStartedIdRef.current !== animatingDocId) {
+      animStartedIdRef.current = animatingDocId;
+      animControlRef.current = animateMV(animProgress, 1, {
+        duration: 1.4,
         ease: [0.16, 0, 0.06, 1],
       });
     }
   }, [animatingDocId, activeDocId]);
 
-  // Preload all new-doc animation images on mount so they never pop in mid-animation
+  // Preload all new-doc animation images on mount so they never pop in mid-animation.
+  // decode() goes further than src-setting — it ensures the browser fully decodes the
+  // image into GPU-ready pixels so the first animation frame paints without a stutter.
   useEffect(() => {
     const srcs = ['middle', 'left', 'right', 'leftside', 'rightside'];
     const urls = [
       ...srcs.map(s => `/newdoceffect/lightassets/${s}.png`),
       ...srcs.map(s => `/newdoceffect/darkassets/${s}dark.png`),
     ];
-    urls.forEach(url => { const img = new Image(); img.src = url; });
+    urls.forEach(url => {
+      const img = new Image();
+      img.src = url;
+      img.decode().catch(() => {}); // ensures fully decoded before first paint
+    });
   }, []);
 
   // Failsafe: Synchronous save on unmount/refresh + visibility change
@@ -1987,11 +1997,14 @@ export default function App() {
     docsRef.current = newDocs;
     setDocs(newDocs);
 
+    // Stop any in-flight animation before resetting — prevents the old animateMV RAF
+    // from overriding the set(0) on the very next frame
+    if (animControlRef.current) animControlRef.current.stop();
     animProgress.set(0); // freeze content hidden before overlay mounts
     setAnimatingDocId(newId);
     setTimeout(() => {
       setAnimatingDocId((prev) => (prev === newId ? null : prev));
-    }, 1200);
+    }, 1700); // 300ms buffer past the 1.4s animation
 
     prevActiveDocIdRef.current = newId;
     setActiveDocId(newId);
@@ -2138,10 +2151,12 @@ export default function App() {
       return updated;
     });
 
+    if (animControlRef.current) animControlRef.current.stop();
+    animProgress.set(0); // freeze content hidden before overlay mounts
     setAnimatingDocId(newDocId);
     setTimeout(() => {
       setAnimatingDocId((prev) => (prev === newDocId ? null : prev));
-    }, 1000);
+    }, 1700); // 300ms buffer past the 1.4s animation
 
     setActiveDocId(newDocId);
     setContextMenu(null);
