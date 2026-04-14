@@ -957,6 +957,10 @@ export default function App() {
   const flushCurrentDoc = useCallback(() => {
     if (!editorRef.current || !titleRef.current) return;
     const currentId = prevActiveDocIdRef.current;
+    // Strip leading bare <br> nodes browsers insert before block-level elements
+    while (editorRef.current.firstChild && editorRef.current.firstChild.nodeName === 'BR') {
+      editorRef.current.removeChild(editorRef.current.firstChild);
+    }
     const content = editorRef.current.innerHTML || "<p><br></p>";
     const title = titleRef.current.textContent || "";
     // Update ref synchronously so subsequent reads are correct
@@ -1819,6 +1823,10 @@ export default function App() {
       // Enforce checklist inheritance on nested lists created via Tab indentation
       const nestedUls = editorRef.current.querySelectorAll('ul.checklist ul:not(.checklist)');
       nestedUls.forEach(ul => ul.classList.add('checklist'));
+      // Strip leading bare <br> nodes browsers insert before block-level elements
+      while (editorRef.current.firstChild && editorRef.current.firstChild.nodeName === 'BR') {
+        editorRef.current.removeChild(editorRef.current.firstChild);
+      }
     }
     const newContent = editorRef.current?.innerHTML || "<p><br></p>";
     setDocs((prev) => {
@@ -3847,7 +3855,7 @@ export default function App() {
 
               .editor-content ul.checklist {
                 list-style: none;
-                padding-left: 0;
+                padding-left: 0 !important;
               }
 
               .editor-content ul.checklist>li {
