@@ -4420,38 +4420,36 @@ export default function App() {
                                 <div className="flex-1 overflow-hidden flex items-center">
                                   <div className="relative h-[10px] w-[80px] rounded-[5px] overflow-hidden bg-[var(--color-border-primary)]">
                                     <motion.div
-                                      className="absolute inset-y-[-3px] w-[50%]"
-                                      style={{
-                                        background: 'linear-gradient(90deg, transparent 0%, rgba(249,115,22,0.25) 20%, rgba(255,165,60,0.95) 50%, rgba(249,115,22,0.25) 80%, transparent 100%)',
-                                        filter: 'blur(2.5px)'
-                                      }}
-                                      animate={{ x: ['-100%', '300%'] }}
-                                      transition={{ duration: 1.7, repeat: Infinity, ease: [0.4, 0, 0.6, 1], repeatDelay: 0.45 }}
+                                      className="absolute inset-y-0 w-[45%]"
+                                      style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(249,115,22,0.38) 30%, rgba(255,190,100,0.92) 50%, rgba(249,115,22,0.38) 70%, transparent 100%)' }}
+                                      animate={{ x: ['-100%', '320%'] }}
+                                      transition={{ duration: 1.15, repeat: Infinity, ease: [0.4, 0, 0.6, 1], repeatDelay: 0.1 }}
                                     />
                                   </div>
                                 </div>
-                              ) : newlyNamedGroupsRef.current.has(group.id) ? (
-                                <span
-                                  key={group.id + '-name'}
-                                  className="text-[13px] font-medium text-[var(--color-text-primary)] select-none flex overflow-hidden max-w-full"
-                                >
-                                  {group.name.split('').map((char, i, arr) => (
-                                    <motion.span
-                                      key={i}
-                                      initial={{ opacity: 0, scale: 1.32, filter: 'blur(5px)', textShadow: '0 0 10px rgba(249,115,22,0.95), 0 0 20px rgba(249,115,22,0.45)' }}
-                                      animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', textShadow: '0 0 0px rgba(249,115,22,0)' }}
-                                      transition={{ duration: 0.42, delay: i * 0.032, ease: [0.16, 1, 0.3, 1] }}
-                                      onAnimationComplete={i === arr.length - 1 ? () => newlyNamedGroupsRef.current.delete(group.id) : undefined}
-                                      style={{ display: 'inline-block', whiteSpace: 'pre' }}
-                                    >
-                                      {char}
-                                    </motion.span>
-                                  ))}
-                                </span>
                               ) : (
-                                <span className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none block">
+                                <motion.span
+                                  key={group.id + '-name'}
+                                  className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none block"
+                                  initial={newlyNamedGroupsRef.current.has(group.id) ? {
+                                    clipPath: 'inset(0 100% 0 0)',
+                                    textShadow: '0 0 10px rgba(249,115,22,0.85), 0 0 22px rgba(249,115,22,0.3)',
+                                    opacity: 0.88
+                                  } : false}
+                                  animate={{
+                                    clipPath: 'inset(0 0% 0 0)',
+                                    textShadow: '0 0 0px rgba(249,115,22,0)',
+                                    opacity: 1
+                                  }}
+                                  transition={{
+                                    clipPath: { duration: 0.44, ease: [0.16, 1, 0.3, 1] },
+                                    textShadow: { duration: 0.65, delay: 0.18, ease: [0.16, 1, 0.3, 1] },
+                                    opacity: { duration: 0.22, ease: 'easeOut' }
+                                  }}
+                                  onAnimationComplete={() => newlyNamedGroupsRef.current.delete(group.id)}
+                                >
                                   {group.name}
-                                </span>
+                                </motion.span>
                               )}
                             </div>
                             <div
