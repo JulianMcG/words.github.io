@@ -55,7 +55,7 @@ import {
   Undo2
 } from "lucide-react";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, useTransform, animate as animateMV } from "framer-motion";
 import GradualBlur from "./components/GradualBlur";
 import { Sparkles } from "lucide-react";
 import BuddyIcon from "./components/BuddyIcon";
@@ -432,6 +432,28 @@ function sanitizeListNode(sourceList, targetList) {
 
     flattenSingleParagraphInListItem(li);
 
+    // If the li has no direct text/inline content and only contains nested
+    // lists, the empty wrapper would render as a phantom bullet. Promote
+    // the nested list items directly into targetList instead.
+    const liChildElements = Array.from(li.children);
+    const onlyNestedLists =
+      liChildElements.length > 0 &&
+      liChildElements.every((c) => c.tagName === "UL" || c.tagName === "OL");
+    const hasDirectText = Array.from(li.childNodes).some(
+      (n) => n.nodeType === Node.TEXT_NODE && hasMeaningfulText(n.textContent)
+    );
+
+    if (onlyNestedLists && !hasDirectText) {
+      // The wrapper li has no text — only a nested list (e.g. copying a
+      // secondary bullet without its parent). Append the nested list
+      // directly to preserve indentation and circle-bullet style without
+      // rendering a phantom filled bullet from the empty wrapper li.
+      liChildElements.forEach((nestedList) => {
+        targetList.appendChild(nestedList);
+      });
+      return;
+    }
+
     if (hasMeaningfulContent(li)) {
       targetList.appendChild(li);
     }
@@ -748,6 +770,7 @@ export default function App() {
     return localStorage.getItem("words_active_doc") || "1";
   });
   const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [draggedItem, setDraggedItem] = useState(null); // { type: 'doc' | 'group', id: string }
   const [dragTarget, setDragTarget] = useState(null); // { id: string, position: 'before' | 'after' | 'inset', type: 'doc' | 'group' }
   const [folderPendingId, setFolderPendingId] = useState(null); // doc id currently in "hold to create folder" state
@@ -758,6 +781,26 @@ export default function App() {
   const [groupMenuOpen, setGroupMenuOpen] = useState(null);
   const [editingGroupId, setEditingGroupId] = useState(null);
   const [animatingDocId, setAnimatingDocId] = useState(null);
+
+  // Single progress value (0 → 1) drives the entire new-doc reveal
+  const animProgress = useMotionValue(1); // 1 = fully settled
+
+  // ── Image: sweeps up from below, scale-blooms, blurs + fades to white at exit ──
+  // ∨ shape at start: outer highest (wings), middle lowest (tip). Middle fastest.
+  const imageYMiddle = useTransform(animProgress, [0, 0.75], ['84%',  '-122%']);
+  const imageYSide   = useTransform(animProgress, [0, 0.85], ['68%',  '-122%']);
+  const imageYOuter  = useTransform(animProgress, [0, 0.94], ['52%',  '-122%']);
+  const imageScaleN  = useTransform(animProgress, [0, 0.70], [1.07, 1.0]);
+  const imageOp      = useTransform(animProgress, [0, 0.50, 1], [1, 1, 0]);
+  // Blur builds progressively as elements rise
+  const imageBlurN   = useTransform(animProgress, [0, 0.15, 1], [0, 2, 32]);
+  const imageFilter  = useTransform(imageBlurN, v => `blur(${v}px)`);
+  const imageOpFinal = imageOp;
+  // White overlay builds as elements move up
+  const imageWhiteOp = useTransform(animProgress, [0.1, 0.85], [0, 0.92]);
+  // Text fades in smoothly as the middle element sweeps over it, then stays visible
+  // Pure opacity — GPU-composited, zero jitter
+  const contentOpacity = useTransform(animProgress, [0, 0.42, 0.68, 1], [0, 0, 1, 1]);
   const [lockPasscode, setLockPasscode] = useState(() => localStorage.getItem('words_lock_passcode') || null);
   const [lockModal, setLockModal] = useState(null); // { mode: 'create' | 'unlock', docId }
   const [passcodeInput, setPasscodeInput] = useState('');
@@ -1374,10 +1417,30 @@ export default function App() {
 
     // Listen for theme changes to update favicon
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = () => setFavicon();
+    const handleChange = (e) => { setFavicon(); setIsDark(e.matches); };
     mq.addEventListener('change', handleChange);
     return () => mq.removeEventListener('change', handleChange);
   }, [activeDocId, docs]);
+
+  // New doc reveal: single progress value drives image sweep + content reveal
+  useEffect(() => {
+    if (animatingDocId === activeDocId) {
+      animateMV(animProgress, 1, {
+        duration: 1.1,
+        ease: [0.16, 0, 0.06, 1],
+      });
+    }
+  }, [animatingDocId, activeDocId]);
+
+  // Preload all new-doc animation images on mount so they never pop in mid-animation
+  useEffect(() => {
+    const srcs = ['middle', 'left', 'right', 'leftside', 'rightside'];
+    const urls = [
+      ...srcs.map(s => `/newdoceffect/lightassets/${s}.png`),
+      ...srcs.map(s => `/newdoceffect/darkassets/${s}dark.png`),
+    ];
+    urls.forEach(url => { const img = new Image(); img.src = url; });
+  }, []);
 
   // Failsafe: Synchronous save on unmount/refresh + visibility change
   useEffect(() => {
@@ -1924,10 +1987,11 @@ export default function App() {
     docsRef.current = newDocs;
     setDocs(newDocs);
 
+    animProgress.set(0); // freeze content hidden before overlay mounts
     setAnimatingDocId(newId);
     setTimeout(() => {
       setAnimatingDocId((prev) => (prev === newId ? null : prev));
-    }, 1000);
+    }, 1200);
 
     prevActiveDocIdRef.current = newId;
     setActiveDocId(newId);
@@ -3236,18 +3300,118 @@ export default function App() {
           syncContentToState();
           return;
         }
+        // Cmd+\ — Clear formatting
+        if (e.key === '\\') {
+          e.preventDefault();
+          document.execCommand('removeFormat', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+. — Superscript
+        if (e.key === '.') {
+          e.preventDefault();
+          document.execCommand('superscript', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+, — Subscript
+        if (e.key === ',') {
+          e.preventDefault();
+          document.execCommand('subscript', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+] — Increase indent
+        if (e.key === ']') {
+          e.preventDefault();
+          document.execCommand('indent', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+[ — Decrease indent
+        if (e.key === '[') {
+          e.preventDefault();
+          document.execCommand('outdent', false, null);
+          syncContentToState();
+          return;
+        }
+      }
+
+      // --- Heading & Block Format Shortcuts (Cmd/Ctrl+Alt+0–6) ---
+      if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey) {
+        const headingMap = { '0': 'P', '1': 'H1', '2': 'H2', '3': 'H3', '4': 'H4', '5': 'H5', '6': 'H6' };
+        if (headingMap[e.key] !== undefined) {
+          e.preventDefault();
+          document.execCommand('formatBlock', false, headingMap[e.key]);
+          syncContentToState();
+          return;
+        }
       }
 
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey) {
+        // Cmd+Shift+X — Strikethrough
+        if (e.key.toLowerCase() === 'x') {
+          e.preventDefault();
+          document.execCommand('strikeThrough', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+L — Left align
+        if (e.key.toLowerCase() === 'l') {
+          e.preventDefault();
+          document.execCommand('justifyLeft', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+E — Center align
+        if (e.key.toLowerCase() === 'e') {
+          e.preventDefault();
+          document.execCommand('justifyCenter', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+R — Right align
+        if (e.key.toLowerCase() === 'r') {
+          e.preventDefault();
+          document.execCommand('justifyRight', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+J — Justify
+        if (e.key.toLowerCase() === 'j') {
+          e.preventDefault();
+          document.execCommand('justifyFull', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+7 — Ordered list
+        if (e.key === '7') {
+          e.preventDefault();
+          document.execCommand('insertOrderedList', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+8 — Unordered list
+        if (e.key === '8') {
+          e.preventDefault();
+          document.execCommand('insertUnorderedList', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+9 — Blockquote
+        if (e.key === '9') {
+          e.preventDefault();
+          document.execCommand('formatBlock', false, 'BLOCKQUOTE');
+          syncContentToState();
+          return;
+        }
+
+        // Highlight color shortcuts
         let hColor = null;
         if (e.key.toLowerCase() === 'h') {
           hColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#716215' : '#fef08a'; // Yellow
-        } else if (e.key.toLowerCase() === 'r') {
-          hColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#7f1d1d' : '#fecaca'; // Red
         } else if (e.key.toLowerCase() === 'g') {
           hColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#14532d' : '#bbf7d0'; // Green
-        } else if (e.key.toLowerCase() === 'e') {
-          hColor = 'transparent'; // Remove highlight
         }
 
         if (hColor) {
@@ -3343,6 +3507,16 @@ export default function App() {
         
         if (isList) {
           document.execCommand(e.shiftKey ? "outdent" : "indent", false, null);
+          // Strip inline margin/padding the browser adds during indent/outdent,
+          // which can cause bullets to overlap or layer on top of each other.
+          if (editorRef.current) {
+            editorRef.current.querySelectorAll('ul, ol, li').forEach(el => {
+              el.style.removeProperty('margin-left');
+              el.style.removeProperty('margin-right');
+              el.style.removeProperty('padding-left');
+              if (!el.getAttribute('style')) el.removeAttribute('style');
+            });
+          }
         } else if (!e.shiftKey) {
           document.execCommand("insertHTML", false, "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;");
         }
@@ -3634,13 +3808,15 @@ export default function App() {
               .editor-content ul {
                 list-style-type: disc;
                 list-style-position: outside;
-                padding-left: 1.5em;
+                padding-left: 1.5em !important;
+                margin-left: 0 !important;
                 margin-top: 0.5em;
                 margin-bottom: 0.5em;
               }
-              
+
               .editor-content ul li {
                 padding-left: 0.1em;
+                margin-left: 0 !important;
               }
 
               .editor-content ul ul {
@@ -3711,7 +3887,8 @@ export default function App() {
 
               .editor-content ol {
                 list-style-type: decimal !important;
-                padding-left: 1.5em;
+                padding-left: 1.5em !important;
+                margin-left: 0 !important;
                 margin-top: 0.5em;
                 margin-bottom: 0.5em;
               }
@@ -3719,6 +3896,7 @@ export default function App() {
               .editor-content ol li {
                 display: list-item;
                 list-style-type: decimal !important;
+                margin-left: 0 !important;
               }
 
               .editor-content ol ol {
@@ -3730,6 +3908,7 @@ export default function App() {
               }
 
               .editor-content li {
+                display: list-item !important;
                 font-size: 1rem;
                 margin-bottom: 0.25em;
               }
@@ -4667,7 +4846,7 @@ export default function App() {
             </div>
           </div>
         )}
-        <main className={`w-full ${activeDoc?.fullWidth ? 'max-w-[1200px] px-8 sm:px-16' : 'max-w-3xl px-12'} mx-auto pt-24 pb-32 print:pt-0 print:pb-0 flex-grow bg-[var(--color-bg-primary)] ${docFont === 'mono' ? 'font-mono' : ''} ${docFont === 'serif' ? 'font-serif theme-font-serif' : ''}`}>
+        <motion.main style={{ opacity: contentOpacity }} className={`w-full ${activeDoc?.fullWidth ? 'max-w-[1200px] px-8 sm:px-16' : 'max-w-3xl px-12'} mx-auto pt-24 pb-32 print:pt-0 print:pb-0 flex-grow bg-[var(--color-bg-primary)] ${docFont === 'mono' ? 'font-mono' : ''} ${docFont === 'serif' ? 'font-serif theme-font-serif' : ''}`}>
           {/* Print Logo */}
           <div className="hidden print:flex mb-6 items-center gap-2">
             <img src="/faviconlight.png" alt="Logo" className="w-5 h-5 object-contain" />
@@ -4675,6 +4854,7 @@ export default function App() {
           </div>
           {" "}
           {/* Title Field / Header */}
+          <>
           <div className={`flex items-start gap-3 group print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`} style={{ display: activeDoc.hideTitle ? 'none' : 'flex', marginBottom: '2rem' }}>
             <div className={`relative ${!activeDoc.emoji ? 'print:hidden' : ''}`} ref={emojiPickerRef}>
               <button
@@ -4758,8 +4938,10 @@ export default function App() {
                 }
               }}
             ></h1>
-          </div>{" "}
+          </div>
+          </>{" "}
           {/* Body Field */}
+          <>
           <div
             ref={editorRef}
             className={`editor-content w-full ${activeDoc.lineSpacing === '1.0' ? 'leading-none' : activeDoc.lineSpacing === '2.0' ? 'leading-loose' : 'leading-relaxed'}`}
@@ -4790,7 +4972,77 @@ export default function App() {
               }
             }}
           ></div>
-        </main>
+          </>
+        </motion.main>
+
+        {/* New doc reveal — 5-column chevron cascade sweeps bottom-to-top, outer leads */}
+        <AnimatePresence>
+          {animatingDocId === activeDocId && activeDoc && (
+            <motion.div
+              key={`newdoc-overlay-${activeDocId}`}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 20,
+                pointerEvents: 'none',
+                overflow: 'hidden',
+              }}
+              exit={{ opacity: 0, transition: { duration: 0 } }}
+            >
+              {/* scaleX(1.25) stretches the 10%-90% cluster to fill full width */}
+              {/* Render order: middle (bottom) → sides → left/right (top) */}
+              <div style={{ position: 'absolute', inset: 0, transform: 'scaleX(1.25)', transformOrigin: 'center' }}>
+              {[
+                { src: 'middle',    y: imageYMiddle, left: '30%',   width: '40%' },
+                { src: 'leftside',  y: imageYSide,   left: '15%',   width: '34%' },
+                { src: 'rightside', y: imageYSide,   left: '51%',   width: '34%' },
+                { src: 'left',      y: imageYOuter,  left: '10%',   width: '30%' },
+                { src: 'right',     y: imageYOuter,  left: '60%',   width: '30%' },
+              ].map(({ src, y, left, width }) => (
+                <motion.div
+                  key={src}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    height: '100%',
+                    left,
+                    width,
+                    y,
+                    scale: imageScaleN,
+                    opacity: imageOpFinal,
+                    filter: imageFilter,
+                    willChange: 'transform',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <img
+                    src={`/newdoceffect/${isDark ? 'darkassets' : 'lightassets'}/${src}${isDark ? 'dark' : ''}.png`}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'fill',
+                      display: 'block',
+                      userSelect: 'none',
+                    }}
+                    alt=""
+                    draggable={false}
+                  />
+                  {/* Fade overlay — white in light mode, dark in dark mode */}
+                  <motion.div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      backgroundColor: isDark ? '#191919' : 'white',
+                      opacity: imageWhiteOp,
+                      pointerEvents: 'none',
+                    }}
+                  />
+                </motion.div>
+              ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>{" "}
       {/* Orange text-drag insertion cursor */}
       <div
