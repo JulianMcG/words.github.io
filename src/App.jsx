@@ -4418,7 +4418,10 @@ export default function App() {
                                 />
                               ) : group.isNaming ? (
                                 <div className="flex-1 overflow-hidden flex items-center">
-                                  <div className="relative h-[10px] w-[80px] rounded-[5px] overflow-hidden bg-[var(--color-border-primary)]">
+                                  <div
+                                    className="relative h-[10px] w-[80px] rounded-[5px] overflow-hidden"
+                                    style={{ background: 'color-mix(in srgb, #f97316 11%, var(--color-border-primary))' }}
+                                  >
                                     <motion.div
                                       className="absolute inset-y-0 w-[45%]"
                                       style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(249,115,22,0.38) 30%, rgba(255,190,100,0.92) 50%, rgba(249,115,22,0.38) 70%, transparent 100%)' }}
