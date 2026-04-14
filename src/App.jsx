@@ -4418,12 +4418,15 @@ export default function App() {
                                 />
                               ) : group.isNaming ? (
                                 <div className="flex-1 overflow-hidden flex items-center">
-                                  <div className="relative h-[11px] w-[72px] rounded-[4px] overflow-hidden bg-[var(--color-border-primary)]">
+                                  <div
+                                    className="relative h-[10px] w-[80px] rounded-[5px] overflow-hidden"
+                                    style={{ background: 'color-mix(in srgb, #f97316 11%, var(--color-border-primary))' }}
+                                  >
                                     <motion.div
-                                      className="absolute inset-y-0 w-[55%]"
-                                      style={{ background: 'linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-text-primary) 18%, transparent) 50%, transparent 100%)' }}
-                                      animate={{ x: ['-100%', '280%'] }}
-                                      transition={{ duration: 1.3, repeat: Infinity, ease: [0.4, 0, 0.6, 1] }}
+                                      className="absolute inset-y-0 w-[45%]"
+                                      style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(249,115,22,0.38) 30%, rgba(255,190,100,0.92) 50%, rgba(249,115,22,0.38) 70%, transparent 100%)' }}
+                                      animate={{ x: ['-100%', '320%'] }}
+                                      transition={{ duration: 1.15, repeat: Infinity, ease: [0.4, 0, 0.6, 1], repeatDelay: 0.1 }}
                                     />
                                   </div>
                                 </div>
@@ -4431,9 +4434,21 @@ export default function App() {
                                 <motion.span
                                   key={group.id + '-name'}
                                   className="text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate select-none block"
-                                  initial={newlyNamedGroupsRef.current.has(group.id) ? { clipPath: 'inset(0 100% 0 0)', opacity: 0.5 } : false}
-                                  animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
-                                  transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                                  initial={newlyNamedGroupsRef.current.has(group.id) ? {
+                                    clipPath: 'inset(0 100% 0 0)',
+                                    textShadow: '0 0 10px rgba(249,115,22,0.85), 0 0 22px rgba(249,115,22,0.3)',
+                                    opacity: 0.88
+                                  } : false}
+                                  animate={{
+                                    clipPath: 'inset(0 0% 0 0)',
+                                    textShadow: '0 0 0px rgba(249,115,22,0)',
+                                    opacity: 1
+                                  }}
+                                  transition={{
+                                    clipPath: { duration: 0.44, ease: [0.16, 1, 0.3, 1] },
+                                    textShadow: { duration: 0.65, delay: 0.18, ease: [0.16, 1, 0.3, 1] },
+                                    opacity: { duration: 0.22, ease: 'easeOut' }
+                                  }}
                                   onAnimationComplete={() => newlyNamedGroupsRef.current.delete(group.id)}
                                 >
                                   {group.name}
