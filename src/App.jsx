@@ -788,13 +788,12 @@ export default function App() {
   const animStartedIdRef = useRef(null);  // tracks which doc ID has already begun animating
 
   // ── Image: sweeps up from below, scale-blooms, blurs + fades to white at exit ──
-  // ∨ shape at start: outer highest (wings), middle lowest (tip). Outer fastest — never crossed by middle.
-  const imageYMiddle = useTransform(animProgress, [0, 0.97], ['102%', '-122%']);
-  const imageYSide   = useTransform(animProgress, [0, 0.80], ['86%',  '-122%']);
-  const imageYOuter  = useTransform(animProgress, [0, 0.62], ['70%',  '-122%']);
+  // ∨ shape at start: outer highest (wings), middle lowest (tip). Middle fastest.
+  const imageYMiddle = useTransform(animProgress, [0, 0.75], ['102%', '-122%']);
+  const imageYSide   = useTransform(animProgress, [0, 0.85], ['86%',  '-122%']);
+  const imageYOuter  = useTransform(animProgress, [0, 0.94], ['70%',  '-122%']);
   const imageScaleN  = useTransform(animProgress, [0, 0.70], [1.07, 1.0]);
   const imageOp      = useTransform(animProgress, [0, 0.50, 1], [1, 1, 0]);
-  const imageOpOuter = useTransform(animProgress, [0, 0.18, 0.50, 1], [0, 1, 1, 0]);
   // Blur builds progressively as elements rise
   const imageBlurN   = useTransform(animProgress, [0, 0.15, 1], [0, 2, 32]);
   const imageFilter  = useTransform(imageBlurN, v => `blur(${v}px)`);
@@ -5021,12 +5020,12 @@ export default function App() {
               {/* Render order: middle (bottom) → sides → left/right (top) */}
               <div style={{ position: 'absolute', inset: 0, transform: 'scaleX(1.25)', transformOrigin: 'center' }}>
               {[
-                { src: 'middle',    y: imageYMiddle, left: '30%',   width: '40%', op: imageOpFinal  },
-                { src: 'leftside',  y: imageYSide,   left: '15%',   width: '34%', op: imageOpFinal  },
-                { src: 'rightside', y: imageYSide,   left: '51%',   width: '34%', op: imageOpFinal  },
-                { src: 'left',      y: imageYOuter,  left: '10%',   width: '30%', op: imageOpOuter  },
-                { src: 'right',     y: imageYOuter,  left: '60%',   width: '30%', op: imageOpOuter  },
-              ].map(({ src, y, left, width, op }) => (
+                { src: 'middle',    y: imageYMiddle, left: '30%',   width: '40%' },
+                { src: 'leftside',  y: imageYSide,   left: '15%',   width: '34%' },
+                { src: 'rightside', y: imageYSide,   left: '51%',   width: '34%' },
+                { src: 'left',      y: imageYOuter,  left: '10%',   width: '30%' },
+                { src: 'right',     y: imageYOuter,  left: '60%',   width: '30%' },
+              ].map(({ src, y, left, width }) => (
                 <motion.div
                   key={src}
                   style={{
@@ -5037,7 +5036,7 @@ export default function App() {
                     width,
                     y,
                     scale: imageScaleN,
-                    opacity: op,
+                    opacity: imageOpFinal,
                     filter: imageFilter,
                     willChange: 'transform',
                     overflow: 'hidden',
