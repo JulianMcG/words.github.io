@@ -789,9 +789,9 @@ export default function App() {
 
   // ── Image: sweeps up from below, scale-blooms, blurs + fades to white at exit ──
   // ∨ shape at start: outer highest (wings), middle lowest (tip). Outer fastest — never crossed by middle.
-  const imageYMiddle = useTransform(animProgress, [0, 0.92], ['102%', '-122%']);
-  const imageYSide   = useTransform(animProgress, [0, 0.85], ['86%',  '-122%']);
-  const imageYOuter  = useTransform(animProgress, [0, 0.78], ['70%',  '-122%']);
+  const imageYMiddle = useTransform(animProgress, [0, 0.97], ['102%', '-122%']);
+  const imageYSide   = useTransform(animProgress, [0, 0.80], ['86%',  '-122%']);
+  const imageYOuter  = useTransform(animProgress, [0, 0.62], ['70%',  '-122%']);
   const imageScaleN  = useTransform(animProgress, [0, 0.70], [1.07, 1.0]);
   const imageOp      = useTransform(animProgress, [0, 0.50, 1], [1, 1, 0]);
   const imageOpOuter = useTransform(animProgress, [0, 0.18, 0.50, 1], [0, 1, 1, 0]);
