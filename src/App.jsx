@@ -825,6 +825,35 @@ export default function App() {
   const pendingLocalSaveRef = useRef(false);
   const pointerDragRef = useRef(null); // { docId, idsToMove, clone, offsetY }
   const lastReorderRef = useRef(null); // prevents duplicate reorder state updates
+  const dragStartPosRef = useRef(null); // { x, y } at mousedown on draggable items
+  const [isGrabbing, setIsGrabbing] = useState(false);
+
+  // Show grabbing cursor only after dragging past a pixel threshold
+  useEffect(() => {
+    const DRAG_THRESHOLD = 8;
+    const onMouseMove = (e) => {
+      if (!dragStartPosRef.current) return;
+      const dx = e.clientX - dragStartPosRef.current.x;
+      const dy = e.clientY - dragStartPosRef.current.y;
+      if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+        setIsGrabbing(true);
+      }
+    };
+    const onMouseUp = () => {
+      dragStartPosRef.current = null;
+      setIsGrabbing(false);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    document.body.style.cursor = isGrabbing ? 'grabbing' : '';
+  }, [isGrabbing]);
 
   useEffect(() => {
     if (sharePopupInfo) {
@@ -3711,7 +3740,8 @@ export default function App() {
             if (dragTarget?.id === doc.id && dragTarget?.position === 'inset') return { boxShadow: 'inset 0 0 0 1.5px rgba(232, 87, 42, 0.65)' };
             return undefined;
           })()}
-          className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-grab active:cursor-grabbing transition-colors select-none ${isSelected
+          onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; }}
+          className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} transition-colors select-none ${isSelected
             ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
             : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
             }`}
@@ -4478,7 +4508,8 @@ export default function App() {
                                   }, 300);
                                 }}
                                 style={isDraggingThis ? { opacity: 0, pointerEvents: 'none' } : undefined}
-                                className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg cursor-grab active:cursor-grabbing transition-all border select-none ${isSelected || isActive
+                                onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; }}
+                                className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} transition-all border select-none ${isSelected || isActive
                                   ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
                                   : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
                                   }`}
@@ -4584,10 +4615,11 @@ export default function App() {
                             <div className="absolute inset-0 rounded-md bg-[var(--color-text-primary)]/[0.06] pointer-events-none z-10" />
                           )}
                           <div
-                            className="group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-grab active:cursor-grabbing"
+                            className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'}`}
                             style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
                             draggable
                             data-sidebar-item
+                            onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; }}
                             onMouseEnter={(e) => {
                               clearTimeout(hoverTimeoutRef.current);
                               setPreviewHoverDocId(null);
