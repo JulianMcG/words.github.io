@@ -902,6 +902,7 @@ export default function App() {
   const isInternalEdit = useRef(false);
   const titleTimeoutRef = useRef(null);
   const prevActiveDocIdRef = useRef(activeDocId);
+  const docHistoryRef = useRef([activeDocId].filter(Boolean)); // [current, previous] for Option+Tab
   const draggedTextHtmlRef = useRef(null);
   const dragSourceRangeRef = useRef(null);
   const isInternalTextDragRef = useRef(false);
@@ -970,11 +971,35 @@ export default function App() {
     setDocs(docsRef.current);
   }, []);
 
+  // Option+Tab: toggle between the two most recently viewed documents
+  const switchToPrevDoc = useCallback(() => {
+    const history = docHistoryRef.current;
+    if (history.length < 2 || !history[1]) return;
+    const prevId = history[1];
+    if (!docsRef.current.find(d => d.id === prevId)) return;
+    flushCurrentDoc();
+    setActiveDocId(prevId);
+    setSelectedDocIds([prevId]);
+  }, [flushCurrentDoc]);
+
+  useEffect(() => {
+    const onAltTab = (e) => {
+      if (e.altKey && e.key === 'Tab') {
+        e.preventDefault();
+        switchToPrevDoc();
+      }
+    };
+    window.addEventListener('keydown', onAltTab);
+    return () => window.removeEventListener('keydown', onAltTab);
+  }, [switchToPrevDoc]);
+
   useEffect(() => {
     // Flush the PREVIOUS doc's content before loading the new one
     const prevId = prevActiveDocIdRef.current;
     if (prevId && prevId !== activeDocId) {
       flushCurrentDoc();
+      // Keep a 2-entry history for Option+Tab switching: [current, previous]
+      docHistoryRef.current = [activeDocId, prevId];
     }
     prevActiveDocIdRef.current = activeDocId;
 
@@ -1502,19 +1527,22 @@ export default function App() {
     }
   }, [docs, activeDocId]);
 
-  // Dismiss sidebar peek only after cursor moves 30px past the sidebar edge
+  // Dismiss sidebar peek only after cursor moves 30px past the sidebar edge.
+  // Don't dismiss while any submenu, context menu, or hover preview is open —
+  // those elements extend beyond the sidebar and the cursor must reach them.
   useEffect(() => {
     if (!isSidebarPeeking || isSidebarOpen) return;
     const DISMISS_THRESHOLD = 30;
     const SIDEBAR_WIDTH = 256;
     const handleMouseMove = (e) => {
+      if (previewHoverGroupId || previewHoverDocId || contextMenu || groupMenuOpen) return;
       if (e.clientX > SIDEBAR_WIDTH + DISMISS_THRESHOLD) {
         setIsSidebarPeeking(false);
       }
     };
     document.addEventListener('mousemove', handleMouseMove);
     return () => document.removeEventListener('mousemove', handleMouseMove);
-  }, [isSidebarPeeking, isSidebarOpen]);
+  }, [isSidebarPeeking, isSidebarOpen, previewHoverGroupId, previewHoverDocId, contextMenu, groupMenuOpen]);
 
   // Live-reorder docs during pointer drag (adopted target's groupId)
   const liveReorderDocs = (idsToMove, targetId, position) => {
@@ -3989,8 +4017,8 @@ export default function App() {
               .image-outer .image-delete-btn,
               .image-wrapper .image-delete-btn {
                 position: absolute;
-                top: -6px;
-                right: -6px;
+                top: 8px;
+                right: 8px;
                 width: 22px;
                 height: 22px;
                 background: var(--color-bg-secondary, #fff);
@@ -4679,36 +4707,6 @@ export default function App() {
                                 >
                                   <MoreHorizontal size={13} />
                                 </button>
-                                {groupMenuOpen?.id === group.id && (
-                                  <>
-                                    <div 
-                                      className="words-context-menu fixed bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100"
-                                      style={{ top: groupMenuOpen.y, left: groupMenuOpen.x }}
-                                    >
-                                      <button
-                                        className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setEditingGroupId(group.id);
-                                          setGroupMenuOpen(null);
-                                        }}
-                                      >
-                                        <Pencil size={14} /> Rename
-                                      </button>
-                                      <div className="h-px bg-[var(--color-border-primary)] my-1" />
-                                      <button
-                                        className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setGroupMenuOpen(null);
-                                          deleteGroup(e, group.id);
-                                        }}
-                                      >
-                                        <FolderMinus size={14} /> Ungroup
-                                      </button>
-                                    </div>
-                                  </>
-                                )}
                               </div>
                             </div>
                           </div>
@@ -5630,6 +5628,47 @@ export default function App() {
         </div>
       )}
 
+
+      {/* Group Context Menu (rendered at root to escape sidebar transform/overflow) */}
+      {groupMenuOpen && (() => {
+        const menuGroup = groups.find(g => g.id === groupMenuOpen.id);
+        if (!menuGroup) return null;
+        return (
+          <>
+            <div
+              className="fixed inset-0 z-[59]"
+              onClick={() => setGroupMenuOpen(null)}
+            />
+            <div
+              className="words-context-menu fixed bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 z-[60] w-44 animate-in fade-in zoom-in-95 duration-100"
+              style={{ top: groupMenuOpen.y, left: groupMenuOpen.x }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingGroupId(menuGroup.id);
+                  setGroupMenuOpen(null);
+                }}
+              >
+                <Pencil size={14} /> Rename
+              </button>
+              <div className="h-px bg-[var(--color-border-primary)] my-1" />
+              <button
+                className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setGroupMenuOpen(null);
+                  deleteGroup(e, menuGroup.id);
+                }}
+              >
+                <FolderMinus size={14} /> Ungroup
+              </button>
+            </div>
+          </>
+        );
+      })()}
 
       {/* Auth Modal */}
       {authModal && (
