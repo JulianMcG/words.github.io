@@ -1458,6 +1458,9 @@ export default function App() {
     // Only fire once per animatingDocId; prevents re-triggering if activeDocId changes away and back
     if (animatingDocId === activeDocId && animatingDocId !== null && animStartedIdRef.current !== animatingDocId) {
       animStartedIdRef.current = animatingDocId;
+      // Re-confirm 0 here: the event-handler set(0) may have been overridden by a stale
+      // RAF frame from the previous animation before this effect ran.
+      animProgress.set(0);
       animControlRef.current = animateMV(animProgress, 1, {
         duration: 1.4,
         ease: [0.16, 0, 0.06, 1],
