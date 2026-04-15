@@ -75,13 +75,14 @@ When generating content (any operation except chat), output only valid semantic 
 
 **Precision rule**: Only change what the user asked for. Do not restructure, reformat, or add content that was not requested.
 
+**Poetry and verse rule**: When writing poems, song lyrics, or any verse, NEVER use <ul>, <ol>, or <li> tags. Each line of verse goes in its own <p> tag. Each stanza is a separate group of <p> tags.
+
 ## RESPONSE FORMAT
 
 Always output a valid JSON object. Never wrap it in markdown code fences.
 
 For replace_selection, replace_document, insert_at_cursor: populate "generated_html" with the complete HTML output.
-For chat: populate "conversational_reply" with plain text (newlines OK, no HTML tags).
-You may include both fields to show content AND add a brief explanatory note.${referenceSection}`;
+For chat: populate "conversational_reply" with plain text (newlines OK, no HTML tags). Never end a conversational_reply with instructions about commands, hotkeys, or prompts for the user to type something.${referenceSection}`;
 
   const userMessageText = `${context}\n\nUser request: ${userPrompt}`;
 
