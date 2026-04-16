@@ -467,26 +467,26 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       <motion.div
         ref={widgetRef}
         layout="position"
-        initial={{ y: 150, opacity: 0, width: restingWidth, height: restingWidth, borderRadius: 24 }}
+        initial={{ y: 150, opacity: 0, width: restingWidth, height: restingWidth }}
         animate={{
           y: 0,
           opacity: 1,
           width: isOpen ? activeWidth : restingWidth,
           height: isOpen ? "auto" : restingWidth,
           filter: isOpeningTransition ? "blur(3px)" : "blur(0px)",
-          borderRadius: isOpen ? 12 : 24,
         }}
         transition={{ 
           type: "spring", stiffness: 350, damping: 25, mass: 0.5,
           y: { type: "spring", stiffness: 150, damping: 20, mass: 0.8 },
           opacity: { duration: 0.4, ease: "easeOut" }
         }}
-        className={`fixed z-[100] transition-colors duration-200 print:hidden ${
+        className={`fixed z-[100] transition-colors duration-200 print:hidden border-shape-squircle ${
           isOpen ? 'bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl overflow-hidden pointer-events-auto flex flex-col' : 'bg-transparent overflow-visible pointer-events-none'
         }`}
-        style={{ 
+        style={{
+          '--r': isOpen ? '12px' : '24px',
           maxHeight: isOpen ? "600px" : "auto",
-          ...((!isOpen || isGlobal) 
+          ...((!isOpen || isGlobal)
              ? { bottom: isOpen ? 20 : (isHovered ? 15 : -20), right: isOpen ? 20 : 30 }
              : { top: safeY, left: safeX })
         }}
