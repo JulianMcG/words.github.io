@@ -63,6 +63,9 @@ import BuddyWidget from "./components/BuddyWidget";
 import { EMOJIS, getEmojiForTitle } from "./utils/emojiMap";
 import { generateFolderName } from "./utils/gemini";
 
+// Squircle helper for CSS-in-JS/pseudo-elements where Tailwind utilities can't reach
+const SQUIRCLE_SHAPE = 'shape(from calc(1.6 * var(--r)) 0, hline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.546 * var(--r)) calc(0.109 * var(--r)) with calc(100% - 1.04 * var(--r)) 0 / calc(100% - 0.76 * var(--r)) 0, arc to calc(100% - 0.109 * var(--r)) calc(0.546 * var(--r)) of var(--r) cw, curve to 100% calc(1.6 * var(--r)) with 100% calc(0.76 * var(--r)) / 100% calc(1.04 * var(--r)), vline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.109 * var(--r)) calc(100% - 0.546 * var(--r)) with 100% calc(100% - 1.04 * var(--r)) / 100% calc(100% - 0.76 * var(--r)), arc to calc(100% - 0.546 * var(--r)) calc(100% - 0.109 * var(--r)) of var(--r) cw, curve to calc(100% - 1.6 * var(--r)) 100% with calc(100% - 1.04 * var(--r)) 100% / calc(100% - 0.76 * var(--r)) 100%, hline to calc(1.6 * var(--r)), curve to calc(0.546 * var(--r)) calc(100% - 0.109 * var(--r)) with calc(1.04 * var(--r)) 100% / calc(0.76 * var(--r)) 100%, arc to calc(0.109 * var(--r)) calc(100% - 0.546 * var(--r)) of var(--r) cw, curve to 0 calc(100% - 1.6 * var(--r)) with 0 calc(100% - 0.76 * var(--r)) / 0 calc(100% - 1.04 * var(--r)), vline to calc(1.6 * var(--r)), curve to calc(0.109 * var(--r)) calc(0.546 * var(--r)) with 0 calc(1.04 * var(--r)) / 0 calc(0.76 * var(--r)), arc to calc(0.546 * var(--r)) calc(0.109 * var(--r)) of var(--r) cw, curve to calc(1.6 * var(--r)) 0 with calc(0.76 * var(--r)) 0 / calc(1.04 * var(--r)) 0)';
+const squircle = (r) => `--r: ${r}; border-radius: ${r}; border-shape: ${SQUIRCLE_SHAPE}`;
 
 // Define the separated commands
 const COMMANDS = [
@@ -1697,7 +1700,7 @@ export default function App() {
       margin: '0',
       pointerEvents: 'none',
       zIndex: '9999',
-      borderRadius: 'calc(0.375rem + var(--radius-bonus))',
+      borderRadius: '0.375rem',
       boxShadow: '0 8px 24px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08)',
       background: 'var(--color-bg-secondary)',
       opacity: '0.55',
@@ -2800,7 +2803,7 @@ export default function App() {
 
   // --- Image Insertion Utilities ---
   const createImgWrapperHTML = (src) => {
-    return `<div class="image-outer" contenteditable="false" style="display: block; max-width: 100%; width: 320px; min-width: 100px; margin: 0.75em 0; position: relative;"><span class="image-wrapper" style="display: block; border-radius: 8px; overflow: hidden; resize: horizontal; min-height: 50px;"><img
+    return `<div class="image-outer" contenteditable="false" style="display: block; max-width: 100%; width: 320px; min-width: 100px; margin: 0.75em 0; position: relative;"><span class="image-wrapper" style="display: block; overflow: hidden; resize: horizontal; min-height: 50px;"><img
       src="${src}" style="width: 100%; height: auto; display: block; object-fit: cover; pointer-events: none;" /></span><button
       class="image-delete-btn" contenteditable="false" title="Delete image"><svg xmlns="http://www.w3.org/2000/svg"
         width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -3937,7 +3940,7 @@ export default function App() {
                 width: 16px;
                 height: 16px;
                 box-shadow: inset 0 0 0 1.5px var(--color-icon-muted);
-                border-radius: calc(4px + var(--radius-bonus));
+                ${squircle('4px')};
                 cursor: pointer;
                 background-color: transparent;
                 transition: all 0.2s ease;
@@ -4022,7 +4025,7 @@ export default function App() {
 
               .editor-content span[style*="background-color"] {
                 padding: 0.1em 0.2em;
-                border-radius: 3px;
+                ${squircle('3px')};
               }
 
               /* Strict Inline Math Preview Styling */
@@ -4043,7 +4046,7 @@ export default function App() {
               }
 
               .image-wrapper {
-                border-radius: 8px;
+                ${squircle('8px')};
                 overflow: hidden;
               }
 
