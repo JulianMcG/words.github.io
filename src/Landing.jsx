@@ -27,6 +27,10 @@ import GradualBlur from './components/GradualBlur';
 
 /* ─── Springs ─── */
 const SPRING = { type: 'spring', stiffness: 180, damping: 28 };
+
+// Squircle helper for inline HTML style strings
+const SQUIRCLE_SHAPE = 'shape(from calc(1.6 * var(--r)) 0, hline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.546 * var(--r)) calc(0.109 * var(--r)) with calc(100% - 1.04 * var(--r)) 0 / calc(100% - 0.76 * var(--r)) 0, arc to calc(100% - 0.109 * var(--r)) calc(0.546 * var(--r)) of var(--r) cw, curve to 100% calc(1.6 * var(--r)) with 100% calc(0.76 * var(--r)) / 100% calc(1.04 * var(--r)), vline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.109 * var(--r)) calc(100% - 0.546 * var(--r)) with 100% calc(100% - 1.04 * var(--r)) / 100% calc(100% - 0.76 * var(--r)), arc to calc(100% - 0.546 * var(--r)) calc(100% - 0.109 * var(--r)) of var(--r) cw, curve to calc(100% - 1.6 * var(--r)) 100% with calc(100% - 1.04 * var(--r)) 100% / calc(100% - 0.76 * var(--r)) 100%, hline to calc(1.6 * var(--r)), curve to calc(0.546 * var(--r)) calc(100% - 0.109 * var(--r)) with calc(1.04 * var(--r)) 100% / calc(0.76 * var(--r)) 100%, arc to calc(0.109 * var(--r)) calc(100% - 0.546 * var(--r)) of var(--r) cw, curve to 0 calc(100% - 1.6 * var(--r)) with 0 calc(100% - 0.76 * var(--r)) / 0 calc(100% - 1.04 * var(--r)), vline to calc(1.6 * var(--r)), curve to calc(0.109 * var(--r)) calc(0.546 * var(--r)) with 0 calc(1.04 * var(--r)) / 0 calc(0.76 * var(--r)), arc to calc(0.546 * var(--r)) calc(0.109 * var(--r)) of var(--r) cw, curve to calc(1.6 * var(--r)) 0 with calc(0.76 * var(--r)) 0 / calc(1.04 * var(--r)) 0)';
+const squircle = (r) => `--r: ${r}; border-radius: ${r}; border-shape: ${SQUIRCLE_SHAPE}`;
 const SPRING_SNAPPY = { type: 'spring', stiffness: 300, damping: 26 };
 
 /* ─── Reveal wrapper ─── */
@@ -293,9 +297,9 @@ const AppPreview = () => {
             dangerouslySetInnerHTML={{ __html: `
               <p style="margin-bottom: 12px;">Our launch focuses on three pillars: <strong>clarity</strong>, <strong>speed</strong>, and <strong>delight</strong>. Every feature should feel invisible until you need it.</p>
               <blockquote style="border-left: 3px solid var(--color-accent); padding-left: 16px; margin: 16px 0; margin-left: 0; color: var(--color-text-muted); font-style: italic; font-family: 'Lora', serif;">"Simplicity is the ultimate sophistication."</blockquote>
-              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;"><div style="width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--color-accent); background: var(--color-accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><span style="text-decoration: line-through; color: var(--color-text-muted);">Define brand identity</span></div>
-              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;"><div style="width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--color-border-hover); flex-shrink: 0;"></div><span>Build the landing page</span></div>
-              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;"><div style="width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--color-border-hover); flex-shrink: 0;"></div><span>Ship to production</span></div>
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;"><div style="width: 18px; height: 18px; ${squircle('4px')}; border: 2px solid var(--color-accent); background: var(--color-accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><span style="text-decoration: line-through; color: var(--color-text-muted);">Define brand identity</span></div>
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;"><div style="width: 18px; height: 18px; ${squircle('4px')}; border: 2px solid var(--color-border-hover); flex-shrink: 0;"></div><span>Build the landing page</span></div>
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;"><div style="width: 18px; height: 18px; ${squircle('4px')}; border: 2px solid var(--color-border-hover); flex-shrink: 0;"></div><span>Ship to production</span></div>
               <p style="margin-top: 16px;"><br></p>
             ` }}
           />
