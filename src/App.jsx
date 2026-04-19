@@ -2174,7 +2174,7 @@ export default function App() {
 
   const togglePinDoc = (e, id) => {
     e.stopPropagation();
-    const newDocs = docsRef.current.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned } : d));
+    const newDocs = docsRef.current.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned, pinnedAt: !d.isPinned ? Date.now() : d.pinnedAt } : d));
     docsRef.current = newDocs;
     setDocs(newDocs);
   };
@@ -3695,7 +3695,7 @@ export default function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const pinnedDocs = docs.filter((d) => d.isPinned);
+  const pinnedDocs = docs.filter((d) => d.isPinned).sort((a, b) => (a.pinnedAt || 0) - (b.pinnedAt || 0));
   const regularDocs = docs.filter((d) => !d.isPinned);
   // A document is considered "ungrouped" if it has no groupId, OR if its groupId doesn't exist in the current groups array.
   const ungroupedDocs = regularDocs.filter((d) => !d.groupId || !groups.some(g => g.id === d.groupId));
@@ -4419,7 +4419,7 @@ export default function App() {
         <div className="w-64 h-full flex flex-col">
           {" "}
           {/* Sidebar Header with Image Logo */}
-          <div className="px-5 py-5 flex items-center justify-between group text-[var(--color-text-primary)]">
+          <div className="px-5 pt-5 pb-1.5 flex items-center justify-between group text-[var(--color-text-primary)]">
             <div className="flex items-center gap-1.5 font-bold text-[19px] tracking-tight select-none" style={{ fontFamily: '"Gowun Batang", serif' }}>
               <div className="w-6 h-6 rounded flex items-center justify-center">
                 <img src="/logolight.png" alt="Words Logo" className="w-full h-full object-contain dark:hidden" />
@@ -4480,15 +4480,33 @@ export default function App() {
                   </div>
 
                   {/* Pinned Tabs (Icons Only) */}
+                  <AnimatePresence initial={false}>
                   {pinnedDocs.length > 0 && (
-                    <div className="flex flex-wrap gap-1 p-0.5 mb-4">
+                    <motion.div
+                      key="pinned-section"
+                      initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                      animate={{ opacity: 1, height: "auto", marginBottom: 4 }}
+                      exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                      transition={{
+                        opacity: { type: "spring", stiffness: 450, damping: 40, mass: 1 },
+                        marginBottom: { type: "spring", stiffness: 450, damping: 40, mass: 1 },
+                        height: { type: "tween", duration: 0.32, ease: [0.22, 1, 0.36, 1] },
+                      }}
+                      style={{ overflow: "hidden" }}
+                      className="-mx-2"
+                    >
+                      <div className="grid gap-1 px-2 pt-2.5 pb-3" style={{ gridTemplateColumns: `repeat(${Math.min(pinnedDocs.length, 4)}, 1fr)` }}>
+                      <AnimatePresence initial={false}>
                       {pinnedDocs.map((doc) => {
                             const isActive = activeDocId === doc.id;
                             const isSelected = selectedDocIds.includes(doc.id);
                             const isDraggingThis = draggedItem?.type === 'doc' && draggedItem?.id === doc.id;
                             return (
-                              <div
+                              <motion.div
                                 key={doc.id}
+                                initial={{ opacity: 1 }}
+                                animate={{ opacity: isDraggingThis ? 0 : 1 }}
+                                exit={{ opacity: 0, transition: { duration: 0.08 } }}
                                 data-doc-id={doc.id}
                                 data-sidebar-item
                                 onPointerDown={(e) => startDocPointerDrag(e, doc.id)}
@@ -4510,9 +4528,9 @@ export default function App() {
                                     setPreviewHoverDocId(null);
                                   }, 300);
                                 }}
-                                style={isDraggingThis ? { opacity: 0, pointerEvents: 'none' } : undefined}
+                                style={isDraggingThis ? { pointerEvents: 'none' } : undefined}
                                 onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; }}
-                                className={`group relative flex-1 min-w-[50px] max-w-full flex items-center justify-center p-2 rounded-lg ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} transition-all border select-none ${isSelected || isActive
+                                className={`group relative flex items-center justify-center p-2 rounded-lg ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} transition-all border select-none ${isSelected || isActive
                                   ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
                                   : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
                                   }`}
@@ -4553,11 +4571,14 @@ export default function App() {
                                 >
                                   <PinOff size={10} />
                                 </button>
-                              </div>
+                              </motion.div>
                             )
                           })}
-                    </div>
+                      </AnimatePresence>
+                      </div>
+                    </motion.div>
                   )}
+                  </AnimatePresence>
 
                   {/* New Document Button or Create Group Button */}
                   <div className="space-y-[1px]">
