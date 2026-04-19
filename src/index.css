@@ -50,23 +50,37 @@
   --radius-3xl: 1.5rem;
 }
 
-/* iOS-style squircle corners — Figma squircle G2 path, smoothing=0.6 */
+/* Figma squircle G2 path — smoothing=0.6, bezier→arc→bezier per corner
+ * p=1.6r, coefficients: 1.04r, 0.76r, 0.546r, 0.109r (from Figma blog)
+ * border-radius in rounded/rounded-* acts as non-Chromium fallback */
+@utility rounded {
+  --r: var(--radius-md);
+  border-radius: var(--radius-md);
+  @apply border-shape-squircle;
+}
+
+@utility rounded-* {
+  --r: --value(--radius-*, [length], [*]);
+  border-radius: var(--r);
+  @apply border-shape-squircle;
+}
+
 @utility border-shape-squircle {
   border-shape: shape(
     from calc(1.6 * var(--r)) 0,
     hline to calc(100% - 1.6 * var(--r)),
     curve to calc(100% - 0.546 * var(--r)) calc(0.109 * var(--r)) with calc(100% - 1.04 * var(--r)) 0 /
-    calc(100% - 0.76 * var(--r)) 0,
+      calc(100% - 0.76 * var(--r)) 0,
     arc to calc(100% - 0.109 * var(--r)) calc(0.546 * var(--r)) of var(--r) cw,
     curve to 100% calc(1.6 * var(--r)) with 100% calc(0.76 * var(--r)) / 100% calc(1.04 * var(--r)),
     vline to calc(100% - 1.6 * var(--r)),
-    curve to calc(100% - 0.109 * var(--r)) calc(100% - 0.546 * var(--r)) with 100% calc(100% - 1.04 * var(--r)) /
-    100% calc(100% - 0.76 * var(--r)),
+    curve to calc(100% - 0.109 * var(--r)) calc(100% - 0.546 * var(--r)) with 100% calc(100% - 1.04 * var(--r)) / 100%
+      calc(100% - 0.76 * var(--r)),
     arc to calc(100% - 0.546 * var(--r)) calc(100% - 0.109 * var(--r)) of var(--r) cw,
     curve to calc(100% - 1.6 * var(--r)) 100% with calc(100% - 1.04 * var(--r)) 100% / calc(100% - 0.76 * var(--r)) 100%,
     hline to calc(1.6 * var(--r)),
     curve to calc(0.546 * var(--r)) calc(100% - 0.109 * var(--r)) with calc(1.04 * var(--r)) 100% /
-    calc(0.76 * var(--r)) 100%,
+      calc(0.76 * var(--r)) 100%,
     arc to calc(0.109 * var(--r)) calc(100% - 0.546 * var(--r)) of var(--r) cw,
     curve to 0 calc(100% - 1.6 * var(--r)) with 0 calc(100% - 0.76 * var(--r)) / 0 calc(100% - 1.04 * var(--r)),
     vline to calc(1.6 * var(--r)),
@@ -81,17 +95,9 @@
   corner-shape: round !important;
 }
 
-@utility rounded {
-  --r: var(--radius-md);
-  @apply border-shape-squircle;
-}
-
-@utility rounded-* {
-  --r: --value(--radius-*, [length], [*]);
-  @apply border-shape-squircle;
-}
-
+/* Pills/capsules stay truly round; border-radius is the non-Chromium fallback */
 @utility rounded-full {
+  border-radius: 9999px;
   @apply border-shape-initial;
 }
 
@@ -267,6 +273,7 @@ body {
   align-items: center;
   border: 1px solid var(--color-border-primary);
   --r: 12px;
+  border-radius: 12px;
   @apply border-shape-squircle;
   overflow: hidden;
   text-decoration: none !important;
@@ -337,6 +344,7 @@ body {
   background-color: var(--color-bg-primary);
   border: 1px dashed var(--color-border-primary);
   --r: 8px;
+  border-radius: 8px;
   @apply border-shape-squircle;
   color: var(--color-text-muted);
   font-size: 0.9em;
