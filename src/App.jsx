@@ -8,7 +8,7 @@ import {
   ListOrdered,
   Quote,
   Plus,
-  FileText,
+  File,
   Trash2,
   Menu,
   ChevronsLeft,
@@ -52,7 +52,8 @@ import {
   Maximize2,
   Minimize2,
   AlignJustify,
-  Undo2
+  Undo2,
+  Smile
 } from "lucide-react";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate as animateMV } from "framer-motion";
@@ -60,7 +61,8 @@ import GradualBlur from "./components/GradualBlur";
 import { Sparkles } from "lucide-react";
 import BuddyIcon from "./components/BuddyIcon";
 import BuddyWidget from "./components/BuddyWidget";
-import { EMOJIS, getEmojiForTitle } from "./utils/emojiMap";
+import { getEmojiForTitle } from "./utils/emojiMap";
+import EmojiPickerPanel from "./components/EmojiPicker";
 import { generateFolderName } from "./utils/gemini";
 
 // Squircle helper for CSS-in-JS/pseudo-elements where Tailwind utilities can't reach
@@ -2177,6 +2179,15 @@ export default function App() {
     const newDocs = docsRef.current.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned, pinnedAt: !d.isPinned ? Date.now() : d.pinnedAt } : d));
     docsRef.current = newDocs;
     setDocs(newDocs);
+    if (user) {
+      setDoc(doc(db, "users", user.uid), {
+        docs: newDocs,
+        groups,
+        activeDocId,
+        lockPasscode,
+        lastUpdated: new Date().toISOString()
+      }).catch(console.error);
+    }
   };
 
   const toggleLockDoc = (docId) => {
@@ -3776,7 +3787,7 @@ export default function App() {
                   {doc.emoji}
                 </span>
               ) : (
-                <FileText
+                <File
                   size={16}
                   className={
                     isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"
@@ -4542,7 +4553,7 @@ export default function App() {
                                       {doc.emoji}
                                     </span>
                                   ) : (
-                                    <FileText
+                                    <File
                                       size={20}
                                       className={
                                         isSelected || isActive
@@ -4939,89 +4950,103 @@ export default function App() {
           {" "}
           {/* Title Field / Header */}
           <>
-          <div className={`flex items-start gap-3 group print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`} style={{ display: activeDoc.hideTitle ? 'none' : 'flex', marginBottom: '2rem' }}>
-            <div className={`relative ${!activeDoc.emoji ? 'print:hidden' : ''}`} ref={emojiPickerRef}>
-              <button
-                className="w-[48px] h-[48px] mt-1 flex items-center justify-center -ml-2 hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer text-3xl"
-                onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
-              >
-                {" "}
-                {activeDoc.emoji ? (
-                  <span
-                    key={animatingEmojiDocId === activeDoc.id ? `anim-${activeDoc.emoji}` : activeDoc.emoji}
-                    className={`${animatingEmojiDocId === activeDoc.id ? 'animate-tasteful-pop' : ''} block leading-none print:translate-y-1`}
-                  >
-                    {" "}
-                    {activeDoc.emoji}
-                  </span>
-                ) : (
-                  <FileText
-                    size={32}
-                    className="text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-muted)] transition-colors print:hidden"
-                  />
-                )}
-              </button>{" "}
-              {isEmojiPickerOpen && (
-                <div className="absolute top-full left-0 mt-2 p-3 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-xl z-50 w-64 grid grid-cols-6 gap-1 animate-in fade-in zoom-in-95 duration-100">
-                  <button
-                    className="p-2 hover:bg-[var(--color-bg-hover)] rounded-lg flex items-center justify-center transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-                    title="Remove emoji"
-                    onClick={() => {
-                      setDocs((prev) =>
-                        prev.map((d) =>
-                          d.id === activeDocId
-                            ? { ...d, emoji: null, hasCustomEmoji: false }
-                            : d,
-                        ),
-                      );
-                      setIsEmojiPickerOpen(false);
-                    }}
-                  >
-                    <X size={20} />
-                  </button>
-                  {EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      className="text-2xl p-2 hover:bg-[var(--color-bg-hover)] rounded-lg flex items-center justify-center transition-colors"
-                      onClick={() => {
-                        setDocs((prev) =>
-                          prev.map((d) =>
-                            d.id === activeDocId
-                              ? {
-                                ...d,
-                                emoji,
-                                hasCustomEmoji: true,
-                              }
-                              : d,
-                          ),
-                        );
-                        setIsEmojiPickerOpen(false);
-                      }}
-                    >
-                      {" "}
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
+          <div
+            key={activeDocId}
+            ref={emojiPickerRef}
+            className={`relative group print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}
+            style={{ display: activeDoc.hideTitle ? 'none' : 'block', marginBottom: '2rem' }}
+          >
+            {/* "Add icon" row — always rendered to prevent vertical layout shift */}
+            <div className="h-7 flex items-center mb-1 print:hidden">
+              {!activeDoc.emoji && (
+                <button
+                  className="flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-all duration-150 opacity-0 group-hover:opacity-100"
+                  style={{ fontSize: 12 }}
+                  onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                >
+                  <Smile size={13} className="flex-shrink-0" />
+                  Add icon
+                </button>
               )}
             </div>
-            <h1
-              ref={titleRef}
-              className="flex-1 title-input text-[36px] sm:text-[42px] font-bold leading-tight outline-none w-full break-words tracking-tight mt-0"
-              style={{ textAlign: activeDoc.textAlign || "left" }}
-              contentEditable
-              suppressContentEditableWarning
-              spellCheck={true}
-              autoCapitalize="off"
-              autoCorrect="on"
-              onInput={handleTitleInput}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  editorRef.current.focus();
-                }
-              }}
-            ></h1>
+
+            {/* Title row: emoji + title text */}
+            <div className="flex items-start">
+              {/* Animated emoji button */}
+              <AnimatePresence initial={false}>
+                {activeDoc.emoji && (
+                  <motion.div
+                    key="emoji-btn"
+                    initial={{ width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }}
+                    animate={{ width: 48, opacity: 1, marginRight: 6, marginLeft: -8 }}
+                    exit={{ width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 38 }}
+                    className="flex-shrink-0 overflow-hidden print:overflow-visible"
+                  >
+                    <button
+                      className="w-[48px] h-[48px] mt-1 flex items-center justify-center hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer"
+                      style={{ fontSize: 30 }}
+                      onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                    >
+                      <span
+                        key={animatingEmojiDocId === activeDoc.id ? `anim-${activeDoc.emoji}` : activeDoc.emoji}
+                        className={`${animatingEmojiDocId === activeDoc.id ? 'animate-tasteful-pop' : ''} block leading-none print:translate-y-1`}
+                      >
+                        {activeDoc.emoji}
+                      </span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <h1
+                ref={titleRef}
+                className="flex-1 title-input text-[36px] sm:text-[42px] font-bold leading-tight outline-none w-full break-words tracking-tight mt-0"
+                style={{ textAlign: activeDoc.textAlign || "left" }}
+                contentEditable
+                suppressContentEditableWarning
+                spellCheck={true}
+                autoCapitalize="off"
+                autoCorrect="on"
+                onInput={handleTitleInput}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    editorRef.current.focus();
+                  }
+                }}
+              ></h1>
+            </div>
+
+            {/* Emoji picker dropdown */}
+            <AnimatePresence>
+              {isEmojiPickerOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -6 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                  transition={{ duration: 0.12, ease: [0.16, 1, 0.3, 1] }}
+                  className="absolute left-0 mt-2 z-50"
+                  style={{ top: activeDoc.emoji ? 'calc(100% - 8px)' : '100%' }}
+                >
+                  <EmojiPickerPanel
+                    hasEmoji={!!activeDoc.emoji}
+                    onSelect={(emoji) => {
+                      setDocs(prev => prev.map(d =>
+                        d.id === activeDocId ? { ...d, emoji, hasCustomEmoji: true } : d
+                      ));
+                      setIsEmojiPickerOpen(false);
+                    }}
+                    onRemove={() => {
+                      setDocs(prev => prev.map(d =>
+                        d.id === activeDocId ? { ...d, emoji: null, hasCustomEmoji: false } : d
+                      ));
+                      setIsEmojiPickerOpen(false);
+                    }}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
           </>{" "}
           {/* Body Field */}
@@ -5445,7 +5470,7 @@ export default function App() {
               setSidebarContextMenu({ isOpen: false, x: 0, y: 0 });
             }}
           >
-            <FileText size={14} /> New Document
+            <File size={14} /> New Document
           </button>
 
           <button
@@ -5556,7 +5581,7 @@ export default function App() {
                           ) : doc.emoji ? (
                             <span className="inline-block leading-none">{doc.emoji}</span>
                           ) : (
-                            <FileText size={16} className="text-[var(--color-icon-muted)]" strokeWidth={1.5} />
+                            <File size={16} className="text-[var(--color-icon-muted)]" strokeWidth={1.5} />
                           )}
                         </div>
                         <span className="text-[13px] font-medium w-full truncate select-none">
@@ -5658,6 +5683,17 @@ export default function App() {
             }}
           >
             <Pencil size={14} /> Rename
+          </button>
+          <button
+            className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActiveDocId(contextMenu.docId);
+              setIsEmojiPickerOpen(true);
+              setContextMenu(null);
+            }}
+          >
+            <span style={{ fontSize: 14, lineHeight: 1 }}>🙂</span> Change icon
           </button>
           <button
             className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
