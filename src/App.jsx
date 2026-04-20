@@ -937,6 +937,9 @@ export default function App() {
   const titleTimeoutRef = useRef(null);
   const prevActiveDocIdRef = useRef(activeDocId);
   const docHistoryRef = useRef([activeDocId].filter(Boolean)); // [current, previous] for Option+Tab
+  // Only updated in useEffect so it always lags one render behind — reliable doc-switch detector at render time
+  // null on first render so first mount also snaps (no spring on page load)
+  const renderedDocIdRef = useRef(null);
   const draggedTextHtmlRef = useRef(null);
   const dragSourceRangeRef = useRef(null);
   const isInternalTextDragRef = useRef(false);
@@ -1560,9 +1563,14 @@ export default function App() {
     const doc = docs.find(d => d.id === activeDocId);
     if (doc && titleRef.current && titleRef.current.textContent !== doc.title) {
       if (doc.title === undefined) return;
+      if (document.activeElement === titleRef.current) return; // never clobber while user is typing
       titleRef.current.textContent = doc.title || "";
     }
   }, [docs, activeDocId]);
+
+  useEffect(() => {
+    renderedDocIdRef.current = activeDocId;
+  }, [activeDocId]);
 
   // Dismiss sidebar peek only after cursor moves 30px past the sidebar edge.
   // Don't dismiss while any submenu, context menu, or hover preview is open —
@@ -4971,32 +4979,31 @@ export default function App() {
 
             {/* Title row: emoji + title text */}
             <div className="flex items-start">
-              {/* Animated emoji button */}
-              <AnimatePresence initial={false}>
+              {/* Animated emoji button — always mounted, driven by animate props so doc-switch transition applies instantly */}
+              <motion.div
+                initial={{ width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }}
+                animate={activeDoc.emoji
+                  ? { width: 48, opacity: 1, marginRight: 6, marginLeft: -8 }
+                  : { width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }
+                }
+                transition={renderedDocIdRef.current !== activeDocId ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 38 }}
+                className="flex-shrink-0 overflow-hidden print:overflow-visible"
+              >
                 {activeDoc.emoji && (
-                  <motion.div
-                    key="emoji-btn"
-                    initial={{ width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }}
-                    animate={{ width: 48, opacity: 1, marginRight: 6, marginLeft: -8 }}
-                    exit={{ width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }}
-                    transition={{ type: "spring", stiffness: 500, damping: 38 }}
-                    className="flex-shrink-0 overflow-hidden print:overflow-visible"
+                  <button
+                    className="w-[48px] h-[48px] mt-1 flex items-center justify-center hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer"
+                    style={{ fontSize: 30 }}
+                    onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
                   >
-                    <button
-                      className="w-[48px] h-[48px] mt-1 flex items-center justify-center hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer"
-                      style={{ fontSize: 30 }}
-                      onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                    <span
+                      key={animatingEmojiDocId === activeDoc.id ? `anim-${activeDoc.emoji}` : activeDoc.emoji}
+                      className={`${animatingEmojiDocId === activeDoc.id ? 'animate-tasteful-pop' : ''} block leading-none print:translate-y-1`}
                     >
-                      <span
-                        key={animatingEmojiDocId === activeDoc.id ? `anim-${activeDoc.emoji}` : activeDoc.emoji}
-                        className={`${animatingEmojiDocId === activeDoc.id ? 'animate-tasteful-pop' : ''} block leading-none print:translate-y-1`}
-                      >
-                        {activeDoc.emoji}
-                      </span>
-                    </button>
-                  </motion.div>
+                      {activeDoc.emoji}
+                    </span>
+                  </button>
                 )}
-              </AnimatePresence>
+              </motion.div>
 
               <h1
                 ref={titleRef}
@@ -5692,7 +5699,7 @@ export default function App() {
               setContextMenu(null);
             }}
           >
-            <span style={{ fontSize: 14, lineHeight: 1 }}>🙂</span> Change icon
+            <Smile size={14} className="flex-shrink-0" /> Change icon
           </button>
           <button
             className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
