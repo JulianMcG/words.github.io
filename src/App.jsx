@@ -4951,7 +4951,6 @@ export default function App() {
           {/* Title Field / Header */}
           <>
           <div
-            key={activeDocId}
             ref={emojiPickerRef}
             className={`relative group print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}
             style={{ display: activeDoc.hideTitle ? 'none' : 'block', marginBottom: '2rem' }}
