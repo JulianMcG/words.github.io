@@ -4956,19 +4956,19 @@ export default function App() {
             className={`relative group print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}
             style={{ display: activeDoc.hideTitle ? 'none' : 'block', marginBottom: '2rem' }}
           >
-            {/* "Add icon" row — always rendered to prevent vertical layout shift */}
-            <div className="h-7 flex items-center mb-1 print:hidden">
-              {!activeDoc.emoji && (
+            {/* "Add icon" button — zero-height, absolutely floats above title on hover */}
+            {!activeDoc.emoji && (
+              <div className="relative h-0 print:hidden">
                 <button
-                  className="flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-all duration-150 opacity-0 group-hover:opacity-100"
+                  className="absolute bottom-1 left-0 flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-all duration-150 opacity-0 group-hover:opacity-100 whitespace-nowrap"
                   style={{ fontSize: 12 }}
                   onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
                 >
                   <Smile size={13} className="flex-shrink-0" />
                   Add icon
                 </button>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Title row: emoji + title text */}
             <div className="flex items-start">
