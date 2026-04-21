@@ -4983,11 +4983,11 @@ export default function App() {
             <div className="w-full max-w-xs flex flex-col items-center">
               <Lock size={24} className="text-[var(--color-text-faint)] mb-4" />
               <p className="text-[15px] text-[var(--color-text-muted)] text-center mb-1">
-                {lockModal.mode === 'create' ? 'Create a passcode' : 'Locked Document'}
+                {lockModal.mode === 'create' ? 'Create a passcode' : 'Locked Page'}
               </p>
               <p className="text-[12px] text-[var(--color-text-faint)] text-center mb-8">
                 {lockModal.mode === 'create'
-                  ? 'This will be used for all locked documents'
+                  ? 'This will be used for all locked pages'
                   : 'Enter passcode to continue'}
               </p>
               <div className="relative flex justify-center gap-4 mb-8">
@@ -5992,7 +5992,7 @@ export default function App() {
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
               <Trash2 size={15} className="text-[var(--color-text-faint)]" />
-              Document Deleted
+              Page Deleted
             </div>
             <button
               onClick={() => { deletedDocInfoRef.current = null; setDeletedDocInfo(null); }}
