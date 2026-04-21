@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import {
   Type,
   Heading1,
@@ -15,6 +15,7 @@ import {
   ChevronsRight,
   Bold,
   Italic,
+  Underline,
   Strikethrough,
   Highlighter,
   Pin,
@@ -68,6 +69,26 @@ import { generateFolderName } from "./utils/gemini";
 // Squircle helper for CSS-in-JS/pseudo-elements where Tailwind utilities can't reach
 const SQUIRCLE_SHAPE = 'shape(from calc(1.6 * var(--r)) 0, hline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.546 * var(--r)) calc(0.109 * var(--r)) with calc(100% - 1.04 * var(--r)) 0 / calc(100% - 0.76 * var(--r)) 0, arc to calc(100% - 0.109 * var(--r)) calc(0.546 * var(--r)) of var(--r) cw, curve to 100% calc(1.6 * var(--r)) with 100% calc(0.76 * var(--r)) / 100% calc(1.04 * var(--r)), vline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.109 * var(--r)) calc(100% - 0.546 * var(--r)) with 100% calc(100% - 1.04 * var(--r)) / 100% calc(100% - 0.76 * var(--r)), arc to calc(100% - 0.546 * var(--r)) calc(100% - 0.109 * var(--r)) of var(--r) cw, curve to calc(100% - 1.6 * var(--r)) 100% with calc(100% - 1.04 * var(--r)) 100% / calc(100% - 0.76 * var(--r)) 100%, hline to calc(1.6 * var(--r)), curve to calc(0.546 * var(--r)) calc(100% - 0.109 * var(--r)) with calc(1.04 * var(--r)) 100% / calc(0.76 * var(--r)) 100%, arc to calc(0.109 * var(--r)) calc(100% - 0.546 * var(--r)) of var(--r) cw, curve to 0 calc(100% - 1.6 * var(--r)) with 0 calc(100% - 0.76 * var(--r)) / 0 calc(100% - 1.04 * var(--r)), vline to calc(1.6 * var(--r)), curve to calc(0.109 * var(--r)) calc(0.546 * var(--r)) with 0 calc(1.04 * var(--r)) / 0 calc(0.76 * var(--r)), arc to calc(0.546 * var(--r)) calc(0.109 * var(--r)) of var(--r) cw, curve to calc(1.6 * var(--r)) 0 with calc(0.76 * var(--r)) 0 / calc(1.04 * var(--r)) 0)';
 const squircle = (r) => `--r: ${r}; border-radius: ${r}; border-shape: ${SQUIRCLE_SHAPE}`;
+
+const DocPageIcon = ({ hasContent, size = 16, className = "" }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+    className={className}>
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+    <polyline points="14 2 14 8 20 8" />
+    {hasContent && <>
+      <motion.line x1="8" y1="9" x2="10" y2="9"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+        transition={{ duration: 0.12, ease: "easeOut" }} />
+      <motion.line x1="8" y1="13" x2="16" y2="13"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+        transition={{ duration: 0.18, delay: 0.07, ease: "easeOut" }} />
+      <motion.line x1="8" y1="17" x2="14" y2="17"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+        transition={{ duration: 0.15, delay: 0.15, ease: "easeOut" }} />
+    </>}
+  </svg>
+);
 
 // Define the separated commands
 const COMMANDS = [
@@ -909,6 +930,11 @@ export default function App() {
     showColorPicker: false,
     linkUrl: "",
     savedRange: null,
+    isBold: false,
+    isItalic: false,
+    isUnderline: false,
+    isStrikethrough: false,
+    isHighlighted: false,
   });
   const [linkPopoverState, setLinkPopoverState] = useState({
     show: false,
@@ -929,6 +955,7 @@ export default function App() {
 
   const editorRef = useRef(null);
   const titleRef = useRef(null);
+  const titleCursorPosRef = useRef(null);
   const emojiPickerRef = useRef(null);
   const slashMenuRef = useRef(null);
   const docsRef = useRef(docs);
@@ -1102,6 +1129,19 @@ export default function App() {
           isLinkActive,
           activeAlign,
           savedRange: range,
+          isBold: document.queryCommandState("bold"),
+          isItalic: document.queryCommandState("italic"),
+          isUnderline: document.queryCommandState("underline"),
+          isStrikethrough: document.queryCommandState("strikeThrough"),
+          isHighlighted: (() => {
+            let n = selection.focusNode;
+            if (n?.nodeType === 3) n = n.parentNode;
+            while (n && editorRef.current?.contains(n)) {
+              if (n.style?.backgroundColor && n.style.backgroundColor !== 'transparent' && n.style.backgroundColor !== 'rgba(0, 0, 0, 0)') return true;
+              n = n.parentNode;
+            }
+            return false;
+          })(),
         }));
       } else {
         setToolbarState((prev) => {
@@ -1160,7 +1200,7 @@ export default function App() {
           const newDocId = crypto.randomUUID();
           const newDoc = {
             id: newDocId,
-            title: (data.title || "Untitled") + " (Shared Copy)",
+            title: (data.title || "New Page") + " (Shared Copy)",
             content: data.content,
             isPinned: false,
             emoji: data.emoji || null,
@@ -1325,7 +1365,9 @@ export default function App() {
               prevActiveDocIdRef.current = nextActiveId;
               const activeDoc = data.docs.find(d => d.id === nextActiveId);
               if (activeDoc && editorRef.current && titleRef.current) {
-                titleRef.current.textContent = activeDoc.title;
+                if (titleRef.current.textContent !== activeDoc.title && document.activeElement !== titleRef.current) {
+                  titleRef.current.textContent = activeDoc.title;
+                }
                 if (editorRef.current.innerHTML !== activeDoc.content) {
                   editorRef.current.innerHTML = activeDoc.content;
                 }
@@ -1454,7 +1496,7 @@ export default function App() {
     if (!activeDoc) return;
 
     // Update tab title
-    document.title = activeDoc.title || 'Untitled';
+    document.title = activeDoc.title || 'New Page';
 
     // Update favicon with emoji
     let link = document.querySelector("link[rel~='icon']");
@@ -1567,6 +1609,33 @@ export default function App() {
       titleRef.current.textContent = doc.title || "";
     }
   }, [docs, activeDocId]);
+
+  // After any docs-triggered re-render, restore cursor if React moved it
+  useLayoutEffect(() => {
+    if (titleCursorPosRef.current === null) return;
+    if (document.activeElement !== titleRef.current) { titleCursorPosRef.current = null; return; }
+    const savedPos = titleCursorPosRef.current;
+    titleCursorPosRef.current = null;
+    const sel = window.getSelection();
+    if (!sel) return;
+    // Walk text nodes to find the node+offset for savedPos
+    const walker = document.createTreeWalker(titleRef.current, NodeFilter.SHOW_TEXT);
+    let remaining = savedPos;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (remaining <= node.length) break;
+      remaining -= node.length;
+    }
+    if (!node) return;
+    // Only restore if cursor actually moved (avoids stomping browser-intended moves)
+    const cur = sel.rangeCount ? sel.getRangeAt(0) : null;
+    if (cur && cur.startContainer === node && cur.startOffset === remaining) return;
+    const range = document.createRange();
+    range.setStart(node, remaining);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }, [docs]);
 
   useEffect(() => {
     renderedDocIdRef.current = activeDocId;
@@ -1858,6 +1927,15 @@ export default function App() {
   };
 
   const handleTitleInput = () => {
+    // Save cursor offset before any state update that could trigger a re-render
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && titleRef.current?.contains(sel.getRangeAt(0).startContainer)) {
+      const pre = sel.getRangeAt(0).cloneRange();
+      pre.selectNodeContents(titleRef.current);
+      pre.setEnd(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+      titleCursorPosRef.current = pre.toString().length;
+    }
+
     const newTitle = titleRef.current?.textContent || "";
 
     // Instantly sync the text typed to the document state
@@ -2104,6 +2182,18 @@ export default function App() {
         sidebarScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       }, 10);
     }
+
+    setTimeout(() => {
+      if (titleRef.current) {
+        titleRef.current.focus();
+        const range = document.createRange();
+        range.selectNodeContents(titleRef.current);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }, 50);
   };
 
   const createGroup = () => {
@@ -2228,7 +2318,7 @@ export default function App() {
     const newDoc = {
       ...docToClone,
       id: newDocId,
-      title: "Copy of " + (docToClone.title || "Untitled"),
+      title: "Copy of " + (docToClone.title || "New Page"),
       createdAt: new Date().toISOString(),
       isPinned: false,
     };
@@ -3795,11 +3885,10 @@ export default function App() {
                   {doc.emoji}
                 </span>
               ) : (
-                <File
+                <DocPageIcon
+                  hasContent={!!(doc.content && doc.content.replace(/<[^>]*>/g, '').trim().length > 0)}
                   size={16}
-                  className={
-                    isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"
-                  }
+                  className={isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"}
                 />
               )}
             </div>
@@ -3820,7 +3909,7 @@ export default function App() {
               />
             ) : (
               <span className="text-[14px] select-none whitespace-nowrap">
-                {doc.title || "Untitled"}
+                {doc.title || "New Page"}
               </span>
             )}
           </div>
@@ -4208,7 +4297,7 @@ export default function App() {
               }
 
               .title-input:empty::before {
-                content: "Untitled";
+                content: "New Page";
                 color: var(--color-text-faint);
                 
                 pointer-events: none;
@@ -4553,7 +4642,7 @@ export default function App() {
                                   ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
                                   : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
                                   }`}
-                                title={doc.title || "Untitled"}
+                                title={doc.title || "New Page"}
                               >
                                 <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
                                   {doc.emoji ? (
@@ -4561,13 +4650,10 @@ export default function App() {
                                       {doc.emoji}
                                     </span>
                                   ) : (
-                                    <File
+                                    <DocPageIcon
+                                      hasContent={!!(doc.content && doc.content.replace(/<[^>]*>/g, '').trim().length > 0)}
                                       size={20}
-                                      className={
-                                        isSelected || isActive
-                                          ? "text-[var(--color-text-muted)]"
-                                          : "text-[var(--color-icon-muted)]"
-                                      }
+                                      className={isSelected || isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"}
                                     />
                                   )}
                                 </div>
@@ -4627,7 +4713,7 @@ export default function App() {
                             <Plus size={16} className="text-[var(--color-icon-muted)]" />
                           </div>
                           <span className="text-[14px] truncate select-none text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors">
-                            New Document
+                            New Page
                           </span>
                         </div>
                       </div>
@@ -4971,7 +5057,12 @@ export default function App() {
                   style={{ fontSize: 12 }}
                   onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
                 >
-                  <Smile size={13} className="flex-shrink-0" />
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M8 14s1.5 2 4 2 4-2 4-2" stroke="var(--color-bg-primary)" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+                    <circle cx="9" cy="10" r="1.2" fill="var(--color-bg-primary)"/>
+                    <circle cx="15" cy="10" r="1.2" fill="var(--color-bg-primary)"/>
+                  </svg>
                   Add icon
                 </button>
               </div>
@@ -5225,7 +5316,7 @@ export default function App() {
             animate={{ opacity: 1, scale: 1, y: 0, x: "-50%", filter: 'blur(0px)' }}
             exit={{ opacity: 0, transition: { duration: 0 } }}
             transition={{ duration: 0.15 }}
-            className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-1 py-1 flex items-center gap-0.5"
+            className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-lg px-1 py-1 flex items-center gap-0.5"
             style={{
               top: toolbarState.y - 44,
               left: toolbarState.x,
@@ -5279,21 +5370,28 @@ export default function App() {
               <>
                 <button
                   onClick={(e) => formatText(e, "bold")}
-                  className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isBold ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
                   title="Bold"
                 >
                   <Bold size={14} />
                 </button>
                 <button
                   onClick={(e) => formatText(e, "italic")}
-                  className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isItalic ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
                   title="Italic"
                 >
                   <Italic size={14} />
                 </button>
                 <button
+                  onClick={(e) => formatText(e, "underline")}
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isUnderline ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                  title="Underline"
+                >
+                  <Underline size={14} />
+                </button>
+                <button
                   onClick={(e) => formatText(e, "strikeThrough")}
-                  className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isStrikethrough ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
                   title="Strikethrough"
                 >
                   <Strikethrough size={14} />
@@ -5331,12 +5429,12 @@ export default function App() {
                         sel.removeAllRanges();
                         sel.addRange(toolbarState.savedRange);
                       }
-                      
+
                       const expectedHex = (toolbarState.activeHighlightColor || '#fef08a') + '40';
                       const dummy = document.createElement('div');
                       dummy.style.backgroundColor = expectedHex;
                       const expectedRgba = dummy.style.backgroundColor;
-                      
+
                       let isHighlighted = false;
                       let currentColor = null;
                       let node = window.getSelection().anchorNode;
@@ -5349,14 +5447,14 @@ export default function App() {
                         }
                         node = node.parentNode;
                       }
-                      
+
                       if (isHighlighted && currentColor === expectedRgba) {
                         formatText(e, "backColor", "transparent");
                       } else {
                         formatText(e, "backColor", expectedHex);
                       }
                     }}
-                    className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                    className={`p-1.5 rounded-md transition-colors ${toolbarState.isHighlighted ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
                     title="Toggle Highlight"
                   >
                     <Highlighter size={14} />
@@ -5476,7 +5574,7 @@ export default function App() {
               setSidebarContextMenu({ isOpen: false, x: 0, y: 0 });
             }}
           >
-            <File size={14} /> New Document
+            <File size={14} /> New Page
           </button>
 
           <button
@@ -5509,7 +5607,7 @@ export default function App() {
             >
               <h3 className="font-semibold text-[13px] text-[var(--color-text-primary)] mb-1.5 break-words">
                 {previewDoc.emoji && <span className="mr-1.5">{previewDoc.emoji}</span>}
-                {previewDoc.title || "Untitled"}
+                {previewDoc.title || "New Page"}
               </h3>
               <div className="leading-relaxed relative overflow-hidden" style={{ maxHeight: '140px' }}>
                 <div
@@ -5587,11 +5685,15 @@ export default function App() {
                           ) : doc.emoji ? (
                             <span className="inline-block leading-none">{doc.emoji}</span>
                           ) : (
-                            <File size={16} className="text-[var(--color-icon-muted)]" strokeWidth={1.5} />
+                            <DocPageIcon
+                              hasContent={!!(doc.content && doc.content.replace(/<[^>]*>/g, '').trim().length > 0)}
+                              size={16}
+                              className="text-[var(--color-icon-muted)]"
+                            />
                           )}
                         </div>
                         <span className="text-[13px] font-medium w-full truncate select-none">
-                          {doc.title || "Untitled"}
+                          {doc.title || "New Page"}
                         </span>
                       </div>
                     </div>
