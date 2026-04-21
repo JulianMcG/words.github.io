@@ -2026,11 +2026,23 @@ export default function App() {
             if (isFinite(ans)) {
               isInternalEdit.current = true;
 
-              // Insert DOM nodes directly so it stays perfectly inline
               const sel = window.getSelection();
               if (sel && sel.rangeCount > 0) {
-                const placeholderHtml = `<span class="math-preview" contenteditable="false">${ans}</span>\u200B`;
-                document.execCommand("insertHTML", false, placeholderHtml);
+                const range = sel.getRangeAt(0);
+                range.collapse(true);
+
+                const previewSpan = document.createElement('span');
+                previewSpan.className = 'math-preview';
+                previewSpan.setAttribute('contenteditable', 'false');
+                previewSpan.textContent = String(ans);
+                range.insertNode(previewSpan);
+
+                // Cursor stays before the preview — it's not real until confirmed
+                const cursorRange = document.createRange();
+                cursorRange.setStartBefore(previewSpan);
+                cursorRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(cursorRange);
               }
 
               isInternalEdit.current = false;
