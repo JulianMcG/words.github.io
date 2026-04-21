@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, ArrowRight, CornerDownLeft, X, FileText, Check } from "lucide-react";
+import { Loader2, ArrowRight, CornerDownLeft, X, File, Check } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 
 export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId }) {
@@ -29,6 +29,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [blinkState, setBlinkState] = useState("");
 
   const isMounted = useRef(false);
+  const hoverSequenceStartedRef = useRef(false);
 
   const shouldBackgroundBlink = isOpen || (isHovered && isHoverSequenceComplete);
 
@@ -70,11 +71,12 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         }, 150));
       }
 
-      timeoutId = setTimeout(triggerBlink, Math.random() * 3500 + 2500); 
+      timeoutId = setTimeout(triggerBlink, Math.random() * 3500 + 2500);
     };
-    timeoutId = setTimeout(triggerBlink, Math.random() * 3500 + 2500);
-    return () => { 
-        clearTimeout(timeoutId); 
+    // Short initial delay so blinks start soon after hover sequence / widget open
+    timeoutId = setTimeout(triggerBlink, Math.random() * 600 + 600);
+    return () => {
+        clearTimeout(timeoutId);
         clearBlinks();
     };
   }, [shouldBackgroundBlink]);
@@ -153,40 +155,45 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   // Hover Sequence Engine
   useEffect(() => {
     if (isOpen || isClicked) {
+        hoverSequenceStartedRef.current = false;
         setIsHoverSequenceComplete(false);
         return;
     }
-    
+
     if (isHovered) {
+      hoverSequenceStartedRef.current = true;
       setIsHoverSequenceComplete(false);
       let t1 = setTimeout(() => setExpression("smilebetween"), 0);
       let t2 = setTimeout(() => setExpression("smileblink"), 50);  // first quick blink (50ms gap)
       let t3 = setTimeout(() => setExpression("smile"), 130);      // 80ms blink length
-      let t4 = setTimeout(() => setExpression("smileblink"), 200); // 70ms separation gap
+      let t4 = setTimeout(() => setExpression("smileblink"), 200); // 70ms separation gap, mandatory second blink
       let t5 = setTimeout(() => {
          setExpression("smile");
          setIsHoverSequenceComplete(true);
       }, 280);     // 80ms blink length
-      
+
       return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5); setIsHoverSequenceComplete(false); };
     } else {
-      setExpression("idle");
       setIsHoverSequenceComplete(false);
+      if (hoverSequenceStartedRef.current) {
+        // Transition through smilebetween when leaving smile state
+        hoverSequenceStartedRef.current = false;
+        setExpression("smilebetween");
+        const t = setTimeout(() => setExpression("idle"), 80);
+        return () => clearTimeout(t);
+      } else {
+        setExpression("idle");
+      }
     }
   }, [isHovered, isOpen, isClicked]);
 
-  // Click Sequence Engine
+  // Click Sequence Engine — only sets "click"; hover sequence handles returning to smile/idle
   useEffect(() => {
     if (isOpen) return;
-
     if (isClicked) {
       setExpression("click");
-    } else if (isHovered) {
-      setExpression("smile");
-    } else {
-      setExpression("idle");
     }
-  }, [isClicked, isOpen, isHovered]);
+  }, [isClicked, isOpen]);
 
   let activeExpression = hasError ? "error" : expression;
   
@@ -656,7 +663,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                               className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${idx === mentionIndex ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-hover)]'}`}
                             >
                               <div className="truncate font-medium text-[var(--color-text-primary)] flex items-center gap-1.5">
-                                <span className="opacity-90 flex items-center justify-center w-4 text-[13px]">{doc.emoji || <FileText size={13} className="text-[var(--color-icon-muted)]" />}</span> 
+                                <span className="opacity-90 flex items-center justify-center w-4 text-[13px]">{doc.emoji || <File size={13} className="text-[var(--color-icon-muted)]" />}</span>
                                 {doc.title}
                               </div>
                             </button>
