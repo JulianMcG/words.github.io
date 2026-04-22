@@ -384,3 +384,88 @@ body {
   font-family: 'Lora', serif !important;
   font-weight: 500 !important;
 }
+
+/* Continuous-corner (squircle) chip */
+.squircle-pill-box {
+  container-type: size;
+  display: inline-block;
+}
+.squircle-pill {
+  inline-size: 100%;
+  block-size: 100%;
+  --r: 999px;
+  --ka: 1.5287;
+  --r-eff: min(var(--r), 50cqw, 50cqh);
+  --rx: var(--r-eff);
+  --ry: var(--r-eff);
+  --tw: clamp(0, progress(50cqw, calc(var(--ka) * var(--rx)), var(--rx)), 1);
+  --th: clamp(0, progress(50cqh, calc(var(--ka) * var(--ry)), var(--ry)), 1);
+  --kwA: calc(1.5287 + (-0.5287 * var(--tw)));
+  --kwB: calc(1.0885 + (-0.2152 * var(--tw)));
+  --kwC: calc(0.8684 + (-0.1207 * var(--tw)));
+  --kwD: calc(0.631 + (-0.002 * var(--tw)));
+  --kwE: calc(0.373 + (0.002 * var(--tw)));
+  --kwF: calc(0.169 + (0.004 * var(--tw)));
+  --kwG: calc(0.075 + (-0.004 * var(--tw)));
+  --kwH: calc(0.024 * var(--tw));
+  --khA: calc(1.5287 + (-0.5287 * var(--th)));
+  --khB: calc(1.0885 + (-0.2152 * var(--th)));
+  --khC: calc(0.8684 + (-0.1207 * var(--th)));
+  --khD: calc(0.631 + (-0.002 * var(--th)));
+  --khE: calc(0.373 + (0.002 * var(--th)));
+  --khF: calc(0.169 + (0.004 * var(--th)));
+  --khG: calc(0.075 + (-0.004 * var(--th)));
+  --khH: calc(0.024 * var(--th));
+  --xwA: calc(var(--rx) * var(--kwA));
+  --xwB: calc(var(--rx) * var(--kwB));
+  --xwC: calc(var(--rx) * var(--kwC));
+  --xwD: calc(var(--rx) * var(--kwD));
+  --xwE: calc(var(--rx) * var(--kwE));
+  --xwF: calc(var(--rx) * var(--kwF));
+  --xwG: calc(var(--rx) * var(--kwG));
+  --xwH: calc(var(--rx) * var(--kwH));
+  --ywA: calc(var(--ry) * var(--kwA));
+  --ywB: calc(var(--ry) * var(--kwB));
+  --ywC: calc(var(--ry) * var(--kwC));
+  --ywD: calc(var(--ry) * var(--kwD));
+  --ywE: calc(var(--ry) * var(--kwE));
+  --ywF: calc(var(--ry) * var(--kwF));
+  --ywG: calc(var(--ry) * var(--kwG));
+  --ywH: calc(var(--ry) * var(--kwH));
+  --xhA: calc(var(--rx) * var(--khA));
+  --xhB: calc(var(--rx) * var(--khB));
+  --xhC: calc(var(--rx) * var(--khC));
+  --xhD: calc(var(--rx) * var(--khD));
+  --xhE: calc(var(--rx) * var(--khE));
+  --xhF: calc(var(--rx) * var(--khF));
+  --xhG: calc(var(--rx) * var(--khG));
+  --xhH: calc(var(--rx) * var(--khH));
+  --yhA: calc(var(--ry) * var(--khA));
+  --yhB: calc(var(--ry) * var(--khB));
+  --yhC: calc(var(--ry) * var(--khC));
+  --yhD: calc(var(--ry) * var(--khD));
+  --yhE: calc(var(--ry) * var(--khE));
+  --yhF: calc(var(--ry) * var(--khF));
+  --yhG: calc(var(--ry) * var(--khG));
+  --yhH: calc(var(--ry) * var(--khH));
+  border-radius: var(--r);
+  border-shape: shape(
+    from 0 calc(100% - var(--yhA)),
+    curve to var(--xhG) calc(100% - var(--yhD)) with 0 calc(100% - var(--yhB)) / var(--xhH) calc(100% - var(--yhC)),
+    curve to var(--xwD) calc(100% - var(--ywG)) with var(--xhF) calc(100% - var(--yhE)) / var(--xwE) calc(100% - var(--yhF)),
+    curve to var(--xwA) 100% with var(--xwC) calc(100% - var(--ywH)) / var(--xwB) 100%,
+    line to calc(100% - var(--xwA)) 100%,
+    curve to calc(100% - var(--xwD)) calc(100% - var(--ywG)) with calc(100% - var(--xwB)) 100% / calc(100% - var(--xwC)) calc(100% - var(--ywH)),
+    curve to calc(100% - var(--xhG)) calc(100% - var(--yhD)) with calc(100% - var(--xwE)) calc(100% - var(--ywF)) / calc(100% - var(--xwF)) calc(100% - var(--yhE)),
+    curve to 100% calc(100% - var(--yhA)) with calc(100% - var(--xhH)) calc(100% - var(--yhC)) / 100% calc(100% - var(--yhB)),
+    line to 100% var(--yhA),
+    curve to calc(100% - var(--xhG)) var(--yhD) with 100% var(--yhB) / calc(100% - var(--xhH)) var(--yhC),
+    curve to calc(100% - var(--xwD)) var(--ywG) with calc(100% - var(--xhF)) var(--yhE) / calc(100% - var(--xwE)) var(--yhF),
+    curve to calc(100% - var(--xwA)) 0 with calc(100% - var(--xwC)) var(--ywH) / calc(100% - var(--xwB)) 0,
+    line to var(--xwA) 0,
+    curve to var(--xwD) var(--ywG) with var(--xwB) 0 / var(--xwC) var(--ywH),
+    curve to var(--xhG) var(--yhD) with var(--xwE) var(--ywF) / var(--xwF) var(--yhE),
+    curve to 0 var(--yhA) with var(--xhH) var(--yhC) / 0 var(--yhB),
+    close
+  );
+}
