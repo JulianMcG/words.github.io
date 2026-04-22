@@ -963,6 +963,9 @@ export default function App() {
   // Cloud Sync State
   const [user, setUser] = useState(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [trashViewOpen, setTrashViewOpen] = useState(false);
+  const [trashHoverDocId, setTrashHoverDocId] = useState(null);
+  const [trashHoverPos, setTrashHoverPos] = useState({ top: 0, left: 0 });
   const [authModal, setAuthModal] = useState(false); // false, 'login', 'signup'
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -971,6 +974,19 @@ export default function App() {
   const [showSyncSuggestion, setShowSyncSuggestion] = useState(false);
   const [sharePopupInfo, setSharePopupInfo] = useState(null);
   const [deletedDocInfo, setDeletedDocInfo] = useState(null);
+  const [trashedDocs, setTrashedDocs] = useState(() => {
+    const saved = localStorage.getItem("words_trash");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+          return parsed.filter(d => d.deletedAt > cutoff);
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
   const [isAltHeld, setIsAltHeld] = useState(false);
   const [pendingShareId, setPendingShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
   const [isCloudDocsLoaded, setIsCloudDocsLoaded] = useState(false);
@@ -1026,6 +1042,13 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [deletedDocInfo]);
+
+  useEffect(() => {
+    trashedDocsRef.current = trashedDocs;
+    try {
+      localStorage.setItem("words_trash", JSON.stringify(trashedDocs));
+    } catch (e) {}
+  }, [trashedDocs]);
 
   // We don't want to use state for the backups, otherwise they re-render when they shouldn't.
   // We'll use refs, and initialize them from localStorage if they exist.
@@ -1087,6 +1110,8 @@ export default function App() {
   const slashMenuRef = useRef(null);
   const docsRef = useRef(docs);
   const deletedDocInfoRef = useRef(null);
+  const trashedDocsRef = useRef(trashedDocs);
+  const trashHoverTimeoutRef = useRef(null);
   const isInternalEdit = useRef(false);
   const titleTimeoutRef = useRef(null);
   const prevActiveDocIdRef = useRef(activeDocId);
@@ -1112,6 +1137,11 @@ export default function App() {
     setDocs(info.prevDocs);
     docsRef.current = info.prevDocs;
     setActiveDocId(info.prevActiveDocId);
+    if (info.trashedId) {
+      const next = trashedDocsRef.current.filter(d => d.id !== info.trashedId);
+      trashedDocsRef.current = next;
+      setTrashedDocs(next);
+    }
     deletedDocInfoRef.current = null;
     setDeletedDocInfo(null);
   }, []);
@@ -1384,6 +1414,7 @@ export default function App() {
 
         localStorage.setItem("words_local_backup_docs", JSON.stringify(docs));
         localStorage.setItem("words_local_backup_groups", JSON.stringify(groups));
+        localStorage.setItem("words_local_backup_trash", JSON.stringify(trashedDocsRef.current));
         if (lockPasscode) {
           localStorage.setItem("words_local_backup_passcode", lockPasscode);
         } else {
@@ -1399,6 +1430,7 @@ export default function App() {
         const savedDocs = localStorage.getItem("words_local_backup_docs");
         const savedGroups = localStorage.getItem("words_local_backup_groups");
         const savedPasscode = localStorage.getItem("words_local_backup_passcode");
+        const savedTrash = localStorage.getItem("words_local_backup_trash");
 
         const parsedDocs = savedDocs ? JSON.parse(savedDocs) : [];
         const finalDocs = parsedDocs.length > 0 ? parsedDocs : [
@@ -1407,15 +1439,18 @@ export default function App() {
 
         const parsedGroups = savedGroups ? JSON.parse(savedGroups) : [];
         const nextId = finalDocs[0]?.id || "1";
+        const restoredTrash = savedTrash ? JSON.parse(savedTrash) : [];
 
         // 3. Set standard React state and synchronous refs to prevent flush race conditions
         docsRef.current = finalDocs;
         prevActiveDocIdRef.current = nextId;
+        trashedDocsRef.current = restoredTrash;
 
         setDocs(finalDocs);
         setGroups(parsedGroups);
         setLockPasscode(savedPasscode || null);
         setActiveDocId(nextId);
+        setTrashedDocs(restoredTrash);
 
         // Instantly force the DOM to match the loaded state for snappiness
         const docToLoad = finalDocs.find(d => d.id === nextId);
@@ -1490,6 +1525,13 @@ export default function App() {
 
           setLockPasscode(data.lockPasscode || null);
 
+          if (data.trashedDocs) {
+            const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+            const freshTrash = data.trashedDocs.filter(d => d.deletedAt > cutoff);
+            trashedDocsRef.current = freshTrash;
+            setTrashedDocs(freshTrash);
+          }
+
           if (data.docs) {
             let nextActiveId = data.activeDocId;
             if (nextActiveId && data.docs.some(d => d.id === nextActiveId)) {
@@ -1541,6 +1583,7 @@ export default function App() {
           groups: localGroups,
           activeDocId: actId || activeDocId,
           lockPasscode: lp || lockPasscode,
+          trashedDocs: trashedDocsRef.current,
           lastUpdated: new Date().toISOString()
         }).then(() => {
           skipSyncRef.current = false;
@@ -1565,6 +1608,7 @@ export default function App() {
           groups,
           activeDocId,
           lockPasscode,
+          trashedDocs: trashedDocsRef.current,
           lastUpdated: new Date().toISOString()
         });
       } catch (e) {
@@ -1576,7 +1620,7 @@ export default function App() {
 
     const timeout = setTimeout(syncData, 500); // debounce sync
     return () => clearTimeout(timeout);
-  }, [docs, groups, activeDocId, lockPasscode, user]);
+  }, [docs, groups, activeDocId, lockPasscode, trashedDocs, user]);
 
   // Auto-name "New Folder" groups once they accumulate 2+ docs
   useEffect(() => {
@@ -2493,7 +2537,17 @@ export default function App() {
 
   const deleteDoc = (e, id) => {
     e.stopPropagation();
-    const snapshot = { prevDocs: docsRef.current, prevActiveDocId: activeDocId };
+    const docToDelete = docsRef.current.find(d => d.id === id);
+    const isEmpty = !docToDelete?.title?.trim() && !getTextPreview(docToDelete?.content || '');
+    let trashedId = null;
+    if (docToDelete && !isEmpty) {
+      trashedId = id;
+      const trashedDoc = { ...docToDelete, deletedAt: Date.now() };
+      const nextTrash = [trashedDoc, ...trashedDocsRef.current];
+      trashedDocsRef.current = nextTrash;
+      setTrashedDocs(nextTrash);
+    }
+    const snapshot = { prevDocs: docsRef.current, prevActiveDocId: activeDocId, trashedId };
     deletedDocInfoRef.current = snapshot;
     setDeletedDocInfo(snapshot);
     setDocs((prev) => {
@@ -2521,6 +2575,30 @@ export default function App() {
       return newDocs;
     });
     setSelectedDocIds(prev => prev.filter(selectedId => selectedId !== id));
+  };
+
+  const restoreFromTrash = (id) => {
+    const trashedDoc = trashedDocsRef.current.find(d => d.id === id);
+    if (!trashedDoc) return;
+    const { deletedAt, ...restoredDoc } = trashedDoc;
+    const newDocs = [restoredDoc, ...docsRef.current];
+    docsRef.current = newDocs;
+    setDocs(newDocs);
+    setActiveDocId(restoredDoc.id);
+    const nextTrash = trashedDocsRef.current.filter(d => d.id !== id);
+    trashedDocsRef.current = nextTrash;
+    setTrashedDocs(nextTrash);
+  };
+
+  const permanentlyDeleteFromTrash = (id) => {
+    const nextTrash = trashedDocsRef.current.filter(d => d.id !== id);
+    trashedDocsRef.current = nextTrash;
+    setTrashedDocs(nextTrash);
+  };
+
+  const emptyTrash = () => {
+    trashedDocsRef.current = [];
+    setTrashedDocs([]);
   };
 
   const togglePinDoc = (e, id) => {
@@ -4064,6 +4142,8 @@ export default function App() {
         setGroupMenuOpen(null);
         setShareMenuOpen(false);
         setUserMenuOpen(false);
+        setTrashViewOpen(false);
+        setTrashHoverDocId(null);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -5221,23 +5301,114 @@ export default function App() {
             </button>
 
             {userMenuOpen && user && (
-              <>
-                <div className="words-context-menu absolute left-0 bottom-full mb-1 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-2 z-[60] min-w-[180px] animate-in fade-in zoom-in-95 duration-100">
-                  <div className="px-3 py-1.5 mb-1 border-b border-[var(--color-border-primary)]">
-                    <p className="text-[11px] font-semibold text-[var(--color-text-faint)] uppercase tracking-wider mb-0.5">Signed in as</p>
-                    <p className="text-[13px] text-[var(--color-text-primary)] truncate" title={user.email}>{user.email}</p>
-                  </div>
-                  <button
-                    className="w-full text-left px-3 py-1.5 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-black/5 transition-colors"
-                    onClick={() => {
-                      handleLogout();
-                      setUserMenuOpen(false);
-                    }}
+              <div className="words-context-menu absolute left-0 bottom-full mb-1.5 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl z-[60] w-[230px] overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-bottom-left">
+
+                {/* User row */}
+                <div className="flex items-center gap-2.5 px-3 pt-3 pb-2.5">
+                  <div
+                    className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-[11px] font-semibold text-white select-none"
+                    style={{ backgroundColor: `hsl(${(user.email.charCodeAt(0) * 47 + user.email.charCodeAt(1) * 13) % 360}, 40%, 58%)` }}
                   >
-                    <LogOut size={14} /> Log out
+                    {user.email[0].toUpperCase()}
+                  </div>
+                  <p className="text-[12px] text-[var(--color-text-muted)] truncate flex-1 min-w-0" title={user.email}>{user.email}</p>
+                </div>
+
+                {/* Trash collapsible section */}
+                <div className="border-t border-[var(--color-border-primary)]">
+                  <button
+                    className="w-full text-left px-3 py-2 flex items-center justify-between text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                    onClick={() => setTrashViewOpen(v => !v)}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Trash2 size={14} className="text-[var(--color-text-muted)]" />
+                      Trash
+                      {trashedDocs.length > 0 && (
+                        <span className="text-[11px] text-[var(--color-text-faint)]">{trashedDocs.length}</span>
+                      )}
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform duration-200 text-[var(--color-text-muted)] ${trashViewOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  <AnimatePresence>
+                    {trashViewOpen && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        {trashedDocs.length === 0 ? (
+                          <p className="px-3 pb-3 text-[12px] text-[var(--color-text-faint)] italic">Nothing in trash</p>
+                        ) : (
+                          <div className="pb-1">
+                            <div className="max-h-[180px] overflow-y-auto">
+                              {trashedDocs.map(d => (
+                                <div
+                                  key={d.id}
+                                  className="group/ti mx-1 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors"
+                                  onMouseEnter={(e) => {
+                                    clearTimeout(trashHoverTimeoutRef.current);
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    trashHoverTimeoutRef.current = setTimeout(() => {
+                                      setTrashHoverPos({ top: rect.top, left: rect.right + 10 });
+                                      setTrashHoverDocId(d.id);
+                                    }, 350);
+                                  }}
+                                  onMouseLeave={() => {
+                                    clearTimeout(trashHoverTimeoutRef.current);
+                                    trashHoverTimeoutRef.current = setTimeout(() => setTrashHoverDocId(null), 200);
+                                  }}
+                                >
+                                  <span className="text-[var(--color-icon-muted)] flex-shrink-0">
+                                    {d.emoji ? <span className="text-[13px]">{d.emoji}</span> : <File size={12} />}
+                                  </span>
+                                  <span className="text-[12px] text-[var(--color-text-muted)] truncate flex-1 min-w-0 group-hover/ti:text-[var(--color-text-primary)] transition-colors">
+                                    {d.title || 'Untitled'}
+                                  </span>
+                                  <div className="flex items-center gap-0.5 opacity-0 group-hover/ti:opacity-100 transition-opacity flex-shrink-0">
+                                    <button
+                                      onClick={() => { restoreFromTrash(d.id); setUserMenuOpen(false); setTrashViewOpen(false); setTrashHoverDocId(null); }}
+                                      className="p-1 rounded text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                                      title="Restore"
+                                    >
+                                      <RotateCcw size={12} />
+                                    </button>
+                                    <button
+                                      onClick={() => { permanentlyDeleteFromTrash(d.id); setTrashHoverDocId(null); }}
+                                      className="p-1 rounded text-[var(--color-icon-muted)] hover:text-red-500 transition-colors"
+                                      title="Delete forever"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <button
+                              onClick={emptyTrash}
+                              className="w-full text-center text-[11px] text-[var(--color-text-faint)] hover:text-red-400 transition-colors py-1.5 mt-0.5 border-t border-[var(--color-border-primary)]"
+                            >
+                              Empty Trash
+                            </button>
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Sign out */}
+                <div className="border-t border-[var(--color-border-primary)]">
+                  <button
+                    className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+                    onClick={() => { handleLogout(); setUserMenuOpen(false); setTrashViewOpen(false); setTrashHoverDocId(null); }}
+                  >
+                    <LogOut size={14} /> Sign out
                   </button>
                 </div>
-              </>
+
+              </div>
             )}
           </div>
         </div>
@@ -5972,6 +6143,35 @@ export default function App() {
                     </div>
                   ))
                 )}
+              </div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+      {/* Trash Hover Preview */}
+      <AnimatePresence>
+        {trashHoverDocId && (() => {
+          const previewDoc = trashedDocs.find(d => d.id === trashHoverDocId);
+          if (!previewDoc) return null;
+          return (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              transition={{ type: "spring", stiffness: 450, damping: 30 }}
+              className="fixed z-[100] w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-3 pointer-events-none before:content-[''] before:absolute before:left-[-7px] before:top-4 before:w-3.5 before:h-3.5 before:bg-[var(--color-bg-primary)] before:border-l before:border-b before:border-[var(--color-border-primary)] before:rotate-45 before:rounded-bl-[3px]"
+              style={{ top: trashHoverPos.top, left: trashHoverPos.left, transformOrigin: "-16px 20px" }}
+            >
+              <h3 className="font-semibold text-[13px] text-[var(--color-text-primary)] mb-1.5 break-words">
+                {previewDoc.emoji && <span className="mr-1.5">{previewDoc.emoji}</span>}
+                {previewDoc.title || 'Untitled'}
+              </h3>
+              <div className="leading-relaxed relative overflow-hidden" style={{ maxHeight: '140px' }}>
+                <div
+                  className="editor-content !pb-0 scale-[0.6] origin-top-left w-[166.666%] pointer-events-none text-[22px] [&_p]:!text-[22px] [&_li]:!text-[22px] [&_h3]:!text-[22px] [&_blockquote]:!text-[22px] [&_span]:!text-[22px] [&>div]:!text-[22px] [&_a]:!text-[22px] [&>*:first-child]:!mt-0 [&>p:first-child:empty]:!hidden"
+                  dangerouslySetInnerHTML={{ __html: (previewDoc.content || '').replace(/^(<p><br><\/p>|<p>\s*<\/p>)+/gi, '') || '<p style="opacity:0.4">No content</p>' }}
+                />
+                <div className="absolute left-0 right-0 bottom-0 h-10 bg-gradient-to-t from-[var(--color-bg-primary)] to-transparent pointer-events-none" />
               </div>
             </motion.div>
           );
