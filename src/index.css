@@ -66,6 +66,7 @@
 }
 
 @utility border-shape-squircle {
+  border-radius: var(--r);
   border-shape: shape(
     from calc(1.6 * var(--r)) 0,
     hline to calc(100% - 1.6 * var(--r)),
