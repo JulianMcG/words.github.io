@@ -27,6 +27,11 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [isViewingChanges, setIsViewingChanges] = useState(false);
 
   const [blinkState, setBlinkState] = useState("");
+  const [magnetOffset, setMagnetOffset] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    if (!isHovered) setMagnetOffset({ x: 0, y: 0 });
+  }, [isHovered]);
 
   const isMounted = useRef(false);
   const hoverSequenceStartedRef = useRef(false);
@@ -454,7 +459,19 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             right: 15 
           }}
           onMouseEnter={() => setIsHovered(true)}
-          onMouseLeave={() => { setIsHovered(false); setIsClicked(false); }}
+          onMouseMove={(e) => {
+            const hitboxSize = restingWidth + 40;
+            const centerX = window.innerWidth - 15 - hitboxSize / 2;
+            const centerY = window.innerHeight - hitboxSize / 2;
+            const dx = e.clientX - centerX;
+            const dy = e.clientY - centerY;
+            const cap = 8;
+            setMagnetOffset({
+              x: Math.max(-cap, Math.min(cap, dx * 0.22)),
+              y: Math.max(-cap, Math.min(cap, dy * 0.22)),
+            });
+          }}
+          onMouseLeave={() => { setIsHovered(false); setIsClicked(false); setMagnetOffset({ x: 0, y: 0 }); }}
           onMouseDown={(e) => {
              e.preventDefault();
              setIsClicked(true);
@@ -476,15 +493,17 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         layout="position"
         initial={{ y: 150, opacity: 0, width: restingWidth, height: restingWidth }}
         animate={{
-          y: 0,
+          x: !isOpen ? magnetOffset.x : 0,
+          y: !isOpen ? magnetOffset.y : 0,
           opacity: 1,
           width: isOpen ? activeWidth : restingWidth,
           height: isOpen ? "auto" : restingWidth,
           filter: isOpeningTransition ? "blur(3px)" : "blur(0px)",
         }}
-        transition={{ 
+        transition={{
           type: "spring", stiffness: 350, damping: 25, mass: 0.5,
-          y: { type: "spring", stiffness: 150, damping: 20, mass: 0.8 },
+          x: { type: "spring", stiffness: 250, damping: 22, mass: 0.4 },
+          y: { type: "spring", stiffness: 250, damping: 22, mass: 0.4 },
           opacity: { duration: 0.4, ease: "easeOut" }
         }}
         className={`fixed z-[100] transition-colors duration-200 print:hidden border-shape-squircle ${
