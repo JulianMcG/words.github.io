@@ -5493,14 +5493,6 @@ export default function App() {
             <span className="font-semibold text-[13px] text-[var(--color-text-muted)]">usewords.app</span>
           </div>
           {" "}
-          {/* From chip for shared documents */}
-          {activeDoc?.sharedFrom && (
-            <div className="flex items-center mb-5 print:hidden">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-xs font-medium text-[var(--color-text-muted)]">
-                From {activeDoc.sharedFrom}
-              </span>
-            </div>
-          )}
           {/* Title Field / Header */}
           <>
           <div
@@ -5508,6 +5500,28 @@ export default function App() {
             className={`relative group print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}
             style={{ display: activeDoc.hideTitle ? 'none' : 'block', marginBottom: '2rem' }}
           >
+            {/* From chip — zero-height, floats above title without shifting layout */}
+            {activeDoc?.sharedFrom && (
+              <div className="relative h-0 print:hidden">
+                <div className="absolute left-0 bottom-9 group/chip">
+                  <div className="squircle-pill-box">
+                    <div className="squircle-pill inline-flex items-center gap-1.5 px-3 py-[5px] bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-xs font-medium text-[var(--color-text-muted)] cursor-default select-none whitespace-nowrap">
+                      <span>From {activeDoc.sharedFrom}</span>
+                      <button
+                        onClick={() => {
+                          setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, sharedFrom: null } : d));
+                          docsRef.current = docsRef.current.map(d => d.id === activeDocId ? { ...d, sharedFrom: null } : d);
+                        }}
+                        className="opacity-0 group-hover/chip:opacity-100 transition-opacity text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] -mr-0.5"
+                        title="Dismiss"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {/* "Add icon" button — zero-height, absolutely floats above title on hover */}
             {!activeDoc.emoji && (
               <div className="relative h-0 print:hidden">
