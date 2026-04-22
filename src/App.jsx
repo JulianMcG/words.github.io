@@ -5496,7 +5496,7 @@ export default function App() {
           {/* From chip — zero-height so it doesn't shift the title position */}
           {activeDoc?.sharedFrom && (
             <div className="relative h-0 print:hidden">
-              <div className="absolute left-0 bottom-3.5 group/chip inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-xs font-medium text-[var(--color-text-muted)] select-none whitespace-nowrap cursor-default">
+              <div className="absolute left-0 bottom-3.5 group/chip inline-flex items-center px-2.5 py-1 rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-xs font-medium text-[var(--color-text-muted)] select-none whitespace-nowrap cursor-default">
                 From {activeDoc.sharedFrom}
                 <button
                   onClick={() => {
@@ -5504,7 +5504,7 @@ export default function App() {
                     docsRef.current = updated;
                     setDocs(updated);
                   }}
-                  className="opacity-0 group-hover/chip:opacity-100 transition-opacity ml-0.5 text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)]"
+                  className="max-w-0 overflow-hidden group-hover/chip:max-w-[16px] ml-0 group-hover/chip:ml-1.5 transition-all duration-200 text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] flex-shrink-0 flex items-center"
                   title="Dismiss"
                 >
                   <X size={10} />
