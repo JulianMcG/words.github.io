@@ -54,7 +54,9 @@ import {
   Minimize2,
   AlignJustify,
   Undo2,
-  Smile
+  Smile,
+  Clock,
+  RotateCcw
 } from "lucide-react";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate as animateMV } from "framer-motion";
@@ -65,6 +67,129 @@ import BuddyWidget from "./components/BuddyWidget";
 import { getEmojiForTitle } from "./utils/emojiMap";
 import EmojiPickerPanel from "./components/EmojiPicker";
 import { generateFolderName } from "./utils/gemini";
+
+function formatVersionTime(timestamp) {
+  return new Date(timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function historyDayLabel(timestamp) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const entryDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today - entryDay) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return date.toLocaleDateString('en-US', { weekday: 'long' });
+  if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function getTextPreview(html) {
+  if (!html) return '';
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return (div.innerText || div.textContent || '').trim();
+}
+
+function wordDiff(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Int16Array(n + 1));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+  const ops = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i-1] === b[j-1]) { ops.unshift(['=', b[j-1]]); i--; j--; }
+    else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { ops.unshift(['+', b[j-1]]); j--; }
+    else { ops.unshift(['-', a[i-1]]); i--; }
+  }
+  // Consolidate consecutive same-type runs
+  return ops.reduce((acc, [t, v]) => {
+    if (acc.length && acc[acc.length-1][0] === t) acc[acc.length-1][1] += ' ' + v;
+    else acc.push([t, v]);
+    return acc;
+  }, []);
+}
+
+function buildDiffHtml(oldHtml, newHtml) {
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Extract block elements preserving tag
+  const getBlocks = (html) => {
+    const div = document.createElement('div');
+    div.innerHTML = html || '';
+    const blocks = [];
+    const blockTags = new Set(['p','h1','h2','h3','h4','li','blockquote','pre']);
+    const walk = (el) => {
+      const tag = el.tagName?.toLowerCase();
+      if (blockTags.has(tag)) {
+        const text = (el.innerText || el.textContent || '').trim();
+        if (text) blocks.push({ tag, text });
+      } else {
+        Array.from(el.childNodes).forEach(c => { if (c.nodeType === 1) walk(c); });
+      }
+    };
+    Array.from(div.children).forEach(walk);
+    if (!blocks.length) {
+      const text = (div.innerText || div.textContent || '').trim();
+      if (text) text.split(/\n+/).filter(Boolean).forEach(t => blocks.push({ tag: 'p', text: t }));
+    }
+    return blocks;
+  };
+
+  const oldBlocks = getBlocks(oldHtml);
+  const newBlocks = getBlocks(newHtml);
+
+  if (!newBlocks.length) return '<p><br></p>';
+  if (!oldBlocks.length) return newBlocks.map(b => `<${b.tag}><mark class="hdiff-add">${esc(b.text)}</mark></${b.tag}>`).join('');
+
+  // Paragraph-level LCS to align blocks
+  const pOps = wordDiff(oldBlocks.map(b => b.text), newBlocks.map(b => b.text));
+  let oi = 0, ni = 0;
+  const result = [];
+  for (const [type, _] of pOps) {
+    if (type === '=') {
+      // Same paragraph — do inline word diff
+      const oB = oldBlocks[oi++], nB = newBlocks[ni++];
+      const tag = nB.tag;
+      const wOps = wordDiff(oB.text.split(/\s+/), nB.text.split(/\s+/));
+      const inner = wOps.map(([t, v]) => {
+        const e = esc(v);
+        if (t === '=') return e;
+        if (t === '+') return `<mark class="hdiff-add">${e}</mark>`;
+        return `<del class="hdiff-del">${e}</del>`;
+      }).join(' ');
+      result.push(`<${tag}>${inner}</${tag}>`);
+    } else if (type === '+') {
+      const nB = newBlocks[ni++];
+      result.push(`<${nB.tag}><mark class="hdiff-add">${esc(nB.text)}</mark></${nB.tag}>`);
+    } else {
+      const oB = oldBlocks[oi++];
+      result.push(`<${oB.tag}><del class="hdiff-del">${esc(oB.text)}</del></${oB.tag}>`);
+    }
+  }
+  return result.join('') || '<p><br></p>';
+}
+
+// Groups newest-first entries into version groups (buddy/title always isolated; user edits within 10-min windows)
+function groupHistoryVersions(entries) {
+  const groups = [];
+  for (const entry of entries) {
+    if (entry.type === 'buddy' || entry.type === 'title') {
+      groups.push({ id: entry.id, type: entry.type, label: entry.label, timestamp: entry.timestamp, versions: [entry] });
+    } else {
+      const last = groups[groups.length - 1];
+      if (last && last.type === 'user' && new Date(last.timestamp) - new Date(entry.timestamp) < 10 * 60 * 1000) {
+        last.versions.push(entry);
+      } else {
+        groups.push({ id: entry.id, type: 'user', label: entry.label, timestamp: entry.timestamp, versions: [entry] });
+      }
+    }
+  }
+  if (groups.length > 0) groups[0].isFirst = true;
+  return groups;
+}
 
 // Squircle helper for CSS-in-JS/pseudo-elements where Tailwind utilities can't reach
 const SQUIRCLE_SHAPE = 'shape(from calc(1.6 * var(--r)) 0, hline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.546 * var(--r)) calc(0.109 * var(--r)) with calc(100% - 1.04 * var(--r)) 0 / calc(100% - 0.76 * var(--r)) 0, arc to calc(100% - 0.109 * var(--r)) calc(0.546 * var(--r)) of var(--r) cw, curve to 100% calc(1.6 * var(--r)) with 100% calc(0.76 * var(--r)) / 100% calc(1.04 * var(--r)), vline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.109 * var(--r)) calc(100% - 0.546 * var(--r)) with 100% calc(100% - 1.04 * var(--r)) / 100% calc(100% - 0.76 * var(--r)), arc to calc(100% - 0.546 * var(--r)) calc(100% - 0.109 * var(--r)) of var(--r) cw, curve to calc(100% - 1.6 * var(--r)) 100% with calc(100% - 1.04 * var(--r)) 100% / calc(100% - 0.76 * var(--r)) 100%, hline to calc(1.6 * var(--r)), curve to calc(0.546 * var(--r)) calc(100% - 0.109 * var(--r)) with calc(1.04 * var(--r)) 100% / calc(0.76 * var(--r)) 100%, arc to calc(0.109 * var(--r)) calc(100% - 0.546 * var(--r)) of var(--r) cw, curve to 0 calc(100% - 1.6 * var(--r)) with 0 calc(100% - 0.76 * var(--r)) / 0 calc(100% - 1.04 * var(--r)), vline to calc(1.6 * var(--r)), curve to calc(0.109 * var(--r)) calc(0.546 * var(--r)) with 0 calc(1.04 * var(--r)) / 0 calc(0.76 * var(--r)), arc to calc(0.546 * var(--r)) calc(0.109 * var(--r)) of var(--r) cw, curve to calc(1.6 * var(--r)) 0 with calc(0.76 * var(--r)) 0 / calc(1.04 * var(--r)) 0)';
@@ -754,6 +879,8 @@ export default function App() {
   const [sidebarContextMenu, setSidebarContextMenu] = useState({ isOpen: false, x: 0, y: 0 });
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [styleAccordionOpen, setStyleAccordionOpen] = useState(false);
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
   const [docs, setDocs] = useState(() => {
     const saved = localStorage.getItem("words_docs");
     if (saved) {
@@ -974,6 +1101,10 @@ export default function App() {
   const newlyNamedGroupsRef = useRef(new Set());
   const aiNamingInitiatedRef = useRef(new Set());
   const lastFolderColorRef = useRef(null);
+  const historySnapshotTimerRef = useRef(null);
+  const titleHistoryTimerRef = useRef(null);
+  const periodicHistoryRef = useRef(null);
+  const historyPreviewSavedRef = useRef(null);
 
   const undoDeleteDoc = useCallback(() => {
     const info = deletedDocInfoRef.current;
@@ -1197,16 +1328,26 @@ export default function App() {
         const sharedSnap = await getDoc(doc(db, "shared_documents", pendingShareId));
         if (sharedSnap.exists()) {
           const data = sharedSnap.data();
+          const docTitle = data.title || 'New Page';
+
+          // Set page title and OG meta for accurate embedding (Google Classroom, etc.)
+          document.title = docTitle;
+          const ogTitle = document.querySelector('meta[property="og:title"]');
+          if (ogTitle) ogTitle.setAttribute('content', docTitle);
+          const ogDesc = document.querySelector('meta[property="og:description"]');
+          if (ogDesc) ogDesc.setAttribute('content', data.content ? data.content.replace(/<[^>]+>/g, '').slice(0, 150) : '');
+
           const newDocId = crypto.randomUUID();
           const newDoc = {
             id: newDocId,
-            title: (data.title || "New Page") + " (Shared Copy)",
+            title: docTitle + " (Shared Copy)",
             content: data.content,
             isPinned: false,
             emoji: data.emoji || null,
             hasCustomEmoji: data.hasCustomEmoji || false,
             groupId: null,
-            isLocked: false
+            isLocked: false,
+            editHistory: data.editHistory || [],
           };
 
           setDocs(prev => {
@@ -1971,6 +2112,11 @@ export default function App() {
         })
       );
     }, 800);
+
+    if (titleHistoryTimerRef.current) clearTimeout(titleHistoryTimerRef.current);
+    titleHistoryTimerRef.current = setTimeout(() => {
+      captureHistorySnapshot('title', `Renamed to "${newTitle}"`);
+    }, 5000);
   };
 
   const syncContentToState = useCallback(() => {
@@ -1997,9 +2143,96 @@ export default function App() {
     });
   }, [activeDocId]);
 
+  useEffect(() => {
+    if (periodicHistoryRef.current) {
+      clearInterval(periodicHistoryRef.current);
+      periodicHistoryRef.current = null;
+    }
+  }, [activeDocId]);
+
+  // Exit diff preview whenever the history panel closes
+  useEffect(() => {
+    if (!historyPanelOpen) exitHistoryPreview();
+  }, [historyPanelOpen]); // eslint-disable-line
+
+  const captureHistorySnapshot = useCallback((type, label) => {
+    const content = editorRef.current?.innerHTML || "";
+    const title = titleRef.current?.textContent || "";
+    // Robust empty check — strip all tags and see if any real text remains
+    const textContent = content.replace(/<[^>]+>/g, '').trim();
+    if (!textContent) return;
+
+    setDocs(prev => {
+      const docId = activeDocId;
+      const docEntry = prev.find(d => d.id === docId);
+      if (!docEntry) return prev;
+      const history = docEntry.editHistory || [];
+      const last = history[history.length - 1];
+      // Skip if content and title are identical to the last snapshot
+      if (last && last.snapshot.content === content && last.snapshot.title === title) return prev;
+      const entry = {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        type,
+        label,
+        snapshot: { content, title },
+        authorName: null,
+      };
+      const updated = prev.map(d => {
+        if (d.id !== docId) return d;
+        return { ...d, editHistory: [...history, entry].slice(-150) };
+      });
+      docsRef.current = updated;
+      return updated;
+    });
+  }, [activeDocId]);
+
+  const restoreHistorySnapshot = useCallback((entry) => {
+    if (!editorRef.current || !titleRef.current) return;
+    // Exit any active preview first
+    if (historyPreviewSavedRef.current !== null) {
+      editorRef.current.innerHTML = historyPreviewSavedRef.current;
+      historyPreviewSavedRef.current = null;
+    }
+    captureHistorySnapshot('user', 'Before restore');
+    editorRef.current.innerHTML = entry.snapshot.content || "<p><br></p>";
+    titleRef.current.textContent = entry.snapshot.title || "";
+    const restored = { content: entry.snapshot.content || "<p><br></p>", title: entry.snapshot.title || "" };
+    setDocs(prev => {
+      const docId = activeDocId;
+      const updated = prev.map(d => d.id === docId ? { ...d, ...restored } : d);
+      docsRef.current = updated;
+      return updated;
+    });
+    setHistoryPanelOpen(false);
+  }, [activeDocId, captureHistorySnapshot]);
+
+  const enterHistoryPreview = useCallback((prevHtml, currHtml) => {
+    if (!editorRef.current) return;
+    if (historyPreviewSavedRef.current === null) {
+      historyPreviewSavedRef.current = editorRef.current.innerHTML;
+    }
+    editorRef.current.innerHTML = buildDiffHtml(prevHtml, currHtml);
+  }, []);
+
+  const exitHistoryPreview = useCallback(() => {
+    if (!editorRef.current || historyPreviewSavedRef.current === null) return;
+    editorRef.current.innerHTML = historyPreviewSavedRef.current;
+    historyPreviewSavedRef.current = null;
+  }, []);
+
   const handleEditorInput = useCallback(() => {
     if (isInternalEdit.current) return;
+    if (historyPreviewSavedRef.current !== null) return; // ignore input during diff preview
     syncContentToState();
+
+    if (historySnapshotTimerRef.current) clearTimeout(historySnapshotTimerRef.current);
+    historySnapshotTimerRef.current = setTimeout(() => captureHistorySnapshot('user', 'Edited'), 15000);
+
+    // Periodic snapshot every 3 minutes while actively editing
+    if (!periodicHistoryRef.current) {
+      periodicHistoryRef.current = setInterval(() => captureHistorySnapshot('user', 'Edited'), 180000);
+    }
 
     // Check selection natively
     const selection = window.getSelection();
@@ -2007,6 +2240,12 @@ export default function App() {
 
     const node = selection.focusNode;
     const text = node.textContent.substring(0, selection.focusOffset);
+
+    // Sentence-end detection: tighter 2s snapshot on sentence boundary
+    if (/[.!?]\s$/.test(text)) {
+      if (historySnapshotTimerRef.current) clearTimeout(historySnapshotTimerRef.current);
+      historySnapshotTimerRef.current = setTimeout(() => captureHistorySnapshot('user', 'Edited'), 2000);
+    }
 
     // --- Clean Stale Math Previews ---
     const stalePreviews = editorRef.current.querySelectorAll(".math-preview");
@@ -2147,7 +2386,7 @@ export default function App() {
         return { ...prev, isOpen: false };
       });
     }
-  }, [syncContentToState]);
+  }, [syncContentToState, captureHistorySnapshot]);
 
   const createNewDoc = (e, targetGroupId = null) => {
     if (e) e.stopPropagation();
@@ -2400,7 +2639,8 @@ export default function App() {
           sharedAt: new Date().toISOString()
         });
       }
-      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${docId}`;
+      const docTitle = docToShare.title || 'New Page';
+      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${docId}&title=${encodeURIComponent(docTitle)}`;
       await navigator.clipboard.writeText(shareUrl);
       setSharePopupInfo({ url: shareUrl });
     } catch (e) {
@@ -2795,6 +3035,9 @@ export default function App() {
       typeof newText === "object" && newText !== null ? newText.generated_html : newText;
     if (typeof rawHtml !== "string" || !rawHtml.trim()) return;
 
+    captureHistorySnapshot('user', 'Before Buddy edit');
+    const buddyDone = () => setTimeout(() => captureHistorySnapshot('buddy', 'Buddy edit'), 300);
+
     const scrollY = window.scrollY;
 
     // Walk up from a DOM node to find its direct-child-of-editor ancestor
@@ -2811,6 +3054,7 @@ export default function App() {
       editorRef.current.innerHTML = html || "<p><br></p>";
       window.scrollTo({ top: scrollY, behavior: "instant" });
       syncContentToState();
+      buddyDone();
       return;
     }
 
@@ -2833,6 +3077,7 @@ export default function App() {
       document.execCommand("insertHTML", false, hasBlockRoot ? html : `&nbsp;${html}` || "<p><br></p>");
       window.scrollTo({ top: scrollY, behavior: "instant" });
       syncContentToState();
+      buddyDone();
       return;
     }
 
@@ -2855,6 +3100,7 @@ export default function App() {
       document.execCommand("insertHTML", false, html || "<p><br></p>");
       window.scrollTo({ top: scrollY, behavior: "instant" });
       syncContentToState();
+      buddyDone();
       return;
     }
 
@@ -2899,6 +3145,7 @@ export default function App() {
 
       window.scrollTo({ top: scrollY, behavior: "instant" });
       syncContentToState();
+      buddyDone();
       return;
     }
 
@@ -2914,6 +3161,7 @@ export default function App() {
     document.execCommand("insertHTML", false, html || "<p><br></p>");
     window.scrollTo({ top: scrollY, behavior: "instant" });
     syncContentToState();
+    buddyDone();
   };
 
   const formatText = (e, format, value = null) => {
@@ -3331,6 +3579,12 @@ export default function App() {
 
   const handleKeyDown = useCallback(
     (e) => {
+      // Paragraph-break snapshot: 1 second after Enter key pressed
+      if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        if (historySnapshotTimerRef.current) clearTimeout(historySnapshotTimerRef.current);
+        historySnapshotTimerRef.current = setTimeout(() => captureHistorySnapshot('user', 'Edited'), 1000);
+      }
+
       // --- Table Highlight Deletion ---
       if ((e.key === "Backspace" || e.key === "Delete") && window.getSelection() && !window.getSelection().isCollapsed) {
         const sel = window.getSelection();
@@ -3788,7 +4042,7 @@ export default function App() {
         }
       }
     },
-    [slashState, filteredCommands, syncContentToState],
+    [slashState, filteredCommands, syncContentToState, captureHistorySnapshot],
   );
 
   useEffect(() => {
@@ -3965,8 +4219,12 @@ export default function App() {
       {/* Dynamic Editor Typography */}
       <style
         dangerouslySetInnerHTML={{
-          __html: ` .editor-content { outline: none; padding-bottom: 30vh; color: var(--color-text-primary); ${isSpacingAnimating ? 'transition: line-height 0.3s cubic-bezier(0.16, 1, 0.3, 1);' : ''} } 
-              .editor-content::after { content: "" ; display: table; clear: both; } 
+          __html: ` .editor-content { outline: none; padding-bottom: 30vh; color: var(--color-text-primary); ${isSpacingAnimating ? 'transition: line-height 0.3s cubic-bezier(0.16, 1, 0.3, 1);' : ''} }
+              .editor-content::after { content: "" ; display: table; clear: both; }
+              .hdiff-add { background: rgba(52,211,153,0.18); color: #059669; border-radius: 2px; }
+              @media (prefers-color-scheme: dark) { .hdiff-add { background: rgba(52,211,153,0.2); color: #34d399; } }
+              .hdiff-del { text-decoration: line-through; color: #dc2626; opacity: 0.75; background: rgba(220,60,60,0.1); border-radius: 2px; }
+              @media (prefers-color-scheme: dark) { .hdiff-del { color: #f87171; background: rgba(248,113,113,0.12); } } 
               .editor-content > * {
                 margin-top: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
                 margin-bottom: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
@@ -4329,14 +4587,14 @@ export default function App() {
         }}
       />{" "}
       {/* Sidebar Hover Trigger Zone (Active when closed) */}
-      {!isSidebarOpen && !isSidebarPeeking && (
+      {!isSidebarOpen && !isSidebarPeeking && !historyPanelOpen && (
         <div
           className="absolute left-0 top-0 bottom-0 w-4 z-40"
           onMouseEnter={() => setIsSidebarPeeking(true)}
         />
       )}
       {/* Options Menu */}
-      <div className="absolute top-4 right-4 z-30 print:hidden">
+      <div className={`absolute top-4 right-4 z-30 print:hidden transition-opacity duration-300 ${historyPanelOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <div className="relative">
           <button
             onClick={() => setShareMenuOpen(!shareMenuOpen)}
@@ -4352,21 +4610,21 @@ export default function App() {
                   <div className="flex items-center justify-between gap-1.5">
                     <button 
                       className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
-                      onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'sans' } : d))}
+                      onClick={() => { captureHistorySnapshot('user', 'Changed to Default font'); setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'sans' } : d)); }}
                     >
                       <span className={`text-[22px] leading-none mb-1 ${docFont === 'sans' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
                       <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Default</span>
                     </button>
                     <button 
                       className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
-                      onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'serif' } : d))}
+                      onClick={() => { captureHistorySnapshot('user', 'Changed to Serif font'); setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'serif' } : d)); }}
                     >
                       <span className={`text-[22px] leading-none mb-1 font-serif ${docFont === 'serif' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
                       <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Serif</span>
                     </button>
                     <button 
                       className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
-                      onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'mono' } : d))}
+                      onClick={() => { captureHistorySnapshot('user', 'Changed to Mono font'); setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'mono' } : d)); }}
                     >
                       <span className={`text-[22px] leading-none mb-1 font-mono ${docFont === 'mono' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
                       <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Mono</span>
@@ -4401,6 +4659,7 @@ export default function App() {
                               <button
                                 key={align}
                                 onClick={() => {
+                                  captureHistorySnapshot('user', `Aligned ${align}`);
                                   setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: align } : d));
                                   if (editorRef.current) {
                                     editorRef.current.querySelectorAll('*').forEach(el => {
@@ -4429,6 +4688,7 @@ export default function App() {
                                   <button
                                     key={space}
                                     onClick={() => {
+                                      captureHistorySnapshot('user', `Changed spacing to ${lbl}`);
                                       setIsSpacingAnimating(true);
                                       setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, lineSpacing: space } : d));
                                       setTimeout(() => setIsSpacingAnimating(false), 350);
@@ -4477,6 +4737,16 @@ export default function App() {
                   className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => {
                     setShareMenuOpen(false);
+                    setHistoryPanelOpen(true);
+                  }}
+                >
+                  <Clock size={14} /> Edit history
+                </button>
+                <div className="h-px bg-[var(--color-border-primary)] my-1" />
+                <button
+                  className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => {
+                    setShareMenuOpen(false);
                     handleShareDoc(activeDocId);
                   }}
                 >
@@ -4508,12 +4778,10 @@ export default function App() {
       </div>
       {/* Hamburger Menu */}
       <div
-        className={`absolute top-4 left-4 z-30 transition-opacity duration-300 ${!isSidebarOpen && !isSidebarPeeking
+        className={`absolute top-4 left-4 z-30 transition-opacity duration-300 ${!isSidebarOpen && !isSidebarPeeking && !historyPanelOpen
           ? "opacity-100"
           : "opacity-0 pointer-events-none"
-          }
-
-                `}
+          }`}
       >
         <button
           onClick={() => setIsSidebarOpen(true)}
@@ -4524,17 +4792,13 @@ export default function App() {
       </div>{" "}
       {/* Collapsible Sidebar */}
       <div
-        className={`absolute top-0 bottom-0 left-0 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border-primary)] flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] z-50 overflow-hidden w-64 ${isSidebarOpen || isSidebarPeeking
+        className={`absolute top-0 bottom-0 left-0 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border-primary)] flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] z-50 overflow-hidden w-64 ${(isSidebarOpen || isSidebarPeeking) && !historyPanelOpen
           ? "translate-x-0"
           : "-translate-x-full"
-          }
-
-                ${isSidebarPeeking && !isSidebarOpen
+          } ${isSidebarPeeking && !isSidebarOpen && !historyPanelOpen
             ? "shadow-[4px_0_24px_rgba(0,0,0,0.1)]"
             : "shadow-none"
-          }
-
-                `}
+          }`}
       >
         <div className="w-64 h-full flex flex-col">
           {" "}
@@ -4980,10 +5244,7 @@ export default function App() {
       </div>
       {/* Main Content Area */}
       <div
-        className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${isSidebarOpen ? "ml-64 print:ml-0" : "ml-0"
-          }
-
-                `}
+        className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] ${historyPanelOpen ? "ml-0 mr-[280px]" : isSidebarOpen ? "ml-64 print:ml-0" : "ml-0"}`}
         onClick={() => {
           if (isSidebarPeeking && !isSidebarOpen) {
             setIsSidebarPeeking(false);
@@ -6068,8 +6329,198 @@ export default function App() {
         </div>
       )}
 
-      {user && (
-        <BuddyWidget 
+      {/* Version History Panel */}
+      <AnimatePresence>
+        {historyPanelOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="fixed inset-0 z-[119] print:hidden"
+              onClick={() => setHistoryPanelOpen(false)}
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed top-0 right-0 bottom-0 w-[280px] bg-[var(--color-bg-primary)] border-l border-[var(--color-border-primary)] shadow-2xl z-[120] flex flex-col print:hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--color-border-primary)] flex-shrink-0">
+                <span className="text-[13px] font-semibold text-[var(--color-text-primary)] tracking-[-0.01em]">Version history</span>
+                <button
+                  onClick={() => setHistoryPanelOpen(false)}
+                  className="w-6 h-6 flex items-center justify-center rounded-md text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+
+              {/* List */}
+              <div className="flex-1 overflow-y-auto">
+                {(() => {
+                  const activeDoc = docs.find(d => d.id === activeDocId);
+                  const rawEntries = [...(activeDoc?.editHistory || [])].reverse();
+                  const versionGroups = groupHistoryVersions(rawEntries);
+
+                  if (versionGroups.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+                        <div className="w-9 h-9 rounded-full bg-[var(--color-bg-hover)] flex items-center justify-center mb-1">
+                          <Clock size={16} className="text-[var(--color-text-faint)]" />
+                        </div>
+                        <p className="text-[13px] font-medium text-[var(--color-text-primary)]">No version history yet</p>
+                        <p className="text-[12px] text-[var(--color-text-faint)] leading-relaxed">History saves automatically as you write.</p>
+                      </div>
+                    );
+                  }
+
+                  // Attach prevSnapshot for diff comparison (next group = older version)
+                  versionGroups.forEach((vg, i) => {
+                    const older = versionGroups[i + 1];
+                    vg.prevSnapshot = older ? older.versions[older.versions.length - 1].snapshot : null;
+                  });
+
+                  // Group version groups by calendar day
+                  const dayGroups = [];
+                  const dayMap = {};
+                  versionGroups.forEach(vg => {
+                    const label = historyDayLabel(vg.timestamp);
+                    if (!dayMap[label]) {
+                      dayMap[label] = { label, groups: [] };
+                      dayGroups.push(dayMap[label]);
+                    }
+                    dayMap[label].groups.push(vg);
+                  });
+
+                  const RestoreBtn = ({ onClick }) => (
+                    <button
+                      onClick={onClick}
+                      className="px-2 py-[3px] rounded-md text-[10px] font-semibold bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] hover:opacity-80 transition-opacity whitespace-nowrap opacity-0 group-hover/row:opacity-100"
+                    >
+                      Restore
+                    </button>
+                  );
+
+                  return (
+                    <div className="pb-4">
+                      {dayGroups.map(day => (
+                        <div key={day.label}>
+                          {/* Day header */}
+                          <div className="px-4 pt-5 pb-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-faint)]">
+                              {day.label}
+                            </span>
+                          </div>
+
+                          {/* Version groups */}
+                          <div className="flex flex-col px-2">
+                            {day.groups.map(vg => {
+                              const isExpanded = expandedGroups.has(vg.id);
+                              const hasSubVersions = vg.versions.length > 1;
+
+                              return (
+                                <div key={vg.id}>
+                                  {/* Main group row */}
+                                  <div
+                                    className={`group/row relative flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-colors ${
+                                      vg.isFirst ? 'bg-[var(--color-bg-secondary)]' : 'hover:bg-[var(--color-bg-hover)]'
+                                    } ${hasSubVersions ? 'cursor-pointer' : ''}`}
+                                    onClick={hasSubVersions ? () => setExpandedGroups(prev => { const next = new Set(prev); next.has(vg.id) ? next.delete(vg.id) : next.add(vg.id); return next; }) : undefined}
+                                    onMouseEnter={() => { if (!vg.isFirst) enterHistoryPreview(vg.prevSnapshot?.content || '', vg.versions[0].snapshot.content); }}
+                                    onMouseLeave={exitHistoryPreview}
+                                  >
+                                    {/* Icon */}
+                                    <div className="flex-shrink-0 w-[18px] flex items-center justify-center">
+                                      {vg.type === 'buddy'
+                                        ? <BuddyIcon size={15} />
+                                        : <div className={`w-[7px] h-[7px] rounded-full ${vg.isFirst ? 'bg-[#E8572A]' : 'bg-[var(--color-text-faint)]'}`} />
+                                      }
+                                    </div>
+
+                                    {/* Text */}
+                                    <div className="flex-1 min-w-0">
+                                      <span className="text-[12.5px] font-semibold text-[var(--color-text-primary)] leading-snug block">
+                                        {formatVersionTime(vg.timestamp)}
+                                      </span>
+                                      <span className="text-[11px] text-[var(--color-text-muted)] leading-tight">
+                                        {vg.isFirst ? 'Current version'
+                                          : vg.type === 'buddy' ? 'Buddy edit'
+                                          : vg.type === 'title' ? vg.label
+                                          : hasSubVersions ? `${vg.versions.length} edits`
+                                          : vg.label}
+                                      </span>
+                                    </div>
+
+                                    {/* Right: restore (single) or plain caret (grouped) */}
+                                    <div className="flex-shrink-0">
+                                      {!vg.isFirst && !hasSubVersions && (
+                                        <RestoreBtn onClick={(e) => { e.stopPropagation(); restoreHistorySnapshot(vg.versions[0]); }} />
+                                      )}
+                                      {hasSubVersions && (
+                                        <ChevronDown
+                                          size={15}
+                                          className={`text-[var(--color-text-faint)] group-hover/row:text-[var(--color-text-secondary)] transition-all duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Sub-versions */}
+                                  <AnimatePresence>
+                                    {isExpanded && (
+                                      <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                                        className="overflow-hidden"
+                                      >
+                                        <div className="flex flex-col pl-[29px] pr-2 pb-1">
+                                          {vg.versions.map((version, vi) => {
+                                            const prevContent = vi < vg.versions.length - 1 ? vg.versions[vi + 1].snapshot.content : vg.prevSnapshot?.content || '';
+                                            return (
+                                              <div
+                                                key={version.id}
+                                                className="group/row group/sv relative flex items-center gap-2 px-3 py-[7px] rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors"
+                                                onMouseEnter={() => { if (!(vi === 0 && vg.isFirst)) enterHistoryPreview(prevContent, version.snapshot.content); }}
+                                                onMouseLeave={exitHistoryPreview}
+                                              >
+                                                <div className={`w-[5px] h-[5px] rounded-full flex-shrink-0 ${vi === 0 && vg.isFirst ? 'bg-[#E8572A]' : 'bg-[var(--color-text-faint)] opacity-50'}`} />
+                                                <span className="text-[12px] font-medium text-[var(--color-text-primary)] flex-1">
+                                                  {formatVersionTime(version.timestamp)}
+                                                </span>
+                                                {!(vi === 0 && vg.isFirst) && (
+                                                  <RestoreBtn onClick={() => restoreHistorySnapshot(version)} />
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+
+      {user && !historyPanelOpen && (
+        <BuddyWidget
           isOpen={buddyState.show}
           position={{ x: Math.min(Math.max(buddyState.x || window.innerWidth / 2, 0), window.innerWidth - 380), y: Math.max(buddyState.y || 100, 0) + 16 }}
           onClose={() => setBuddyState(p => ({ ...p, show: false }))}
