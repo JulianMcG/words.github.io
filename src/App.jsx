@@ -1370,7 +1370,7 @@ export default function App() {
           const newDocId = crypto.randomUUID();
           const newDoc = {
             id: newDocId,
-            title: docTitle + " (Shared Copy)",
+            title: docTitle,
             content: data.content,
             isPinned: false,
             emoji: data.emoji || null,
@@ -1378,6 +1378,7 @@ export default function App() {
             groupId: null,
             isLocked: false,
             editHistory: data.editHistory || [],
+            sharedFrom: data.sharedByName || null,
           };
 
           setDocs(prev => {
@@ -2706,19 +2707,25 @@ export default function App() {
   };
 
   const handleShareDoc = async (docId) => {
+    if (!user) {
+      setAuthModal('login');
+      setContextMenu(null);
+      setShareMenuOpen(false);
+      return;
+    }
+
     const docToShare = docsRef.current.find(d => d.id === docId);
     if (!docToShare) return;
 
     try {
-      if (user) {
-        await setDoc(doc(db, "shared_documents", docId), {
-          ...docToShare,
-          sharedBy: user.uid,
-          sharedAt: new Date().toISOString()
-        });
-      }
-      const docTitle = docToShare.title || 'New Page';
-      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${docId}&title=${encodeURIComponent(docTitle)}`;
+      const sharedByName = user.displayName || user.email || '';
+      await setDoc(doc(db, "shared_documents", docId), {
+        ...docToShare,
+        sharedBy: user.uid,
+        sharedByName,
+        sharedAt: new Date().toISOString()
+      });
+      const shareUrl = `${window.location.origin}/api/share?id=${docId}`;
       await navigator.clipboard.writeText(shareUrl);
       setSharePopupInfo({ url: shareUrl });
     } catch (e) {
@@ -5486,6 +5493,14 @@ export default function App() {
             <span className="font-semibold text-[13px] text-[var(--color-text-muted)]">usewords.app</span>
           </div>
           {" "}
+          {/* From chip for shared documents */}
+          {activeDoc?.sharedFrom && (
+            <div className="flex items-center mb-5 print:hidden">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-xs font-medium text-[var(--color-text-muted)]">
+                From {activeDoc.sharedFrom}
+              </span>
+            </div>
+          )}
           {/* Title Field / Header */}
           <>
           <div
