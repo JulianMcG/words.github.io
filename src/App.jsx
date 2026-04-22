@@ -4141,7 +4141,7 @@ export default function App() {
               {doc.isLocked ? (
                 <Lock
                   size={16}
-                  className="text-[var(--color-icon-muted)]"
+                  className={isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"}
                 />
               ) : doc.emoji ? (
                 <span
