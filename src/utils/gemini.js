@@ -1,3 +1,37 @@
+export const generateDocTitle = async (contentText) => {
+  const endpoint = `/api/buddy`;
+  const snippet = contentText.slice(0, 600);
+
+  const payload = {
+    contents: [
+      {
+        role: "user",
+        parts: [{
+          text: `Give this document a short title (2-5 words). Content: "${snippet}". Reply with ONLY the title, nothing else.`
+        }]
+      }
+    ],
+    generationConfig: {
+      maxOutputTokens: 12,
+    }
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    return text || null;
+  } catch (err) {
+    console.error("Doc title generation failed:", err);
+    return null;
+  }
+};
+
 export const generateFolderName = async (docTitles) => {
   const endpoint = `/api/buddy`;
   const titlesText = docTitles.filter(Boolean).join(', ') || 'misc';
