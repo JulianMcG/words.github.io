@@ -871,6 +871,7 @@ export default function App() {
   const [isSidebarScrolled, setIsSidebarScrolled] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [animatingEmojiDocId, setAnimatingEmojiDocId] = useState(null);
+  const [autoNamingDocId, setAutoNamingDocId] = useState(null);
   const [previewHoverDocId, setPreviewHoverDocId] = useState(null);
   const [previewHoverGroupId, setPreviewHoverGroupId] = useState(null);
   const hoverTimeoutRef = useRef(null);
@@ -1126,6 +1127,7 @@ export default function App() {
   const newlyNamedGroupsRef = useRef(new Set());
   const aiNamingInitiatedRef = useRef(new Set());
   const autoTitledDocsRef = useRef(new Set());
+  const newlyAutoTitledDocsRef = useRef(new Set());
   const lastFolderColorRef = useRef(null);
   const historySnapshotTimerRef = useRef(null);
   const titleHistoryTimerRef = useRef(null);
@@ -2292,11 +2294,14 @@ export default function App() {
       if (plainText.length >= 100) {
         autoTitledDocsRef.current.add(activeDocId);
         const docIdToName = activeDocId;
+        setAutoNamingDocId(docIdToName);
         generateDocTitle(plainText).then(aiTitle => {
+          setAutoNamingDocId(prev => prev === docIdToName ? null : prev);
           if (!aiTitle) {
             autoTitledDocsRef.current.delete(docIdToName);
             return;
           }
+          newlyAutoTitledDocsRef.current.add(docIdToName);
           setDocs(prev => prev.map(d => {
             if (d.id !== docIdToName) return d;
             if (d.title.trim()) return d; // user typed a title while AI was working
@@ -4295,10 +4300,28 @@ export default function App() {
                 onClick={(e) => e.stopPropagation()}
                 onDoubleClick={(e) => e.stopPropagation()}
               />
+            ) : autoNamingDocId === doc.id ? (
+              <div className="flex-1 overflow-hidden flex items-center">
+                <div className="relative h-[11px] w-[80px] rounded-[4px] overflow-hidden bg-[var(--color-border-primary)]">
+                  <motion.div
+                    className="absolute inset-y-0 w-[55%]"
+                    style={{ background: 'linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-text-primary) 18%, transparent) 50%, transparent 100%)' }}
+                    animate={{ x: ['-100%', '280%'] }}
+                    transition={{ duration: 1.3, repeat: Infinity, ease: [0.4, 0, 0.6, 1] }}
+                  />
+                </div>
+              </div>
             ) : (
-              <span className="text-[14px] select-none whitespace-nowrap">
+              <motion.span
+                key={doc.id + '-title'}
+                className="text-[14px] select-none whitespace-nowrap"
+                initial={newlyAutoTitledDocsRef.current.has(doc.id) ? { clipPath: 'inset(0 100% 0 0)', opacity: 0.5 } : false}
+                animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
+                transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                onAnimationComplete={() => newlyAutoTitledDocsRef.current.delete(doc.id)}
+              >
                 {doc.title || "New Page"}
-              </span>
+              </motion.span>
             )}
           </div>
           <div
