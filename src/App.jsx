@@ -66,7 +66,7 @@ import BuddyIcon from "./components/BuddyIcon";
 import BuddyWidget from "./components/BuddyWidget";
 import { getEmojiForTitle } from "./utils/emojiMap";
 import EmojiPickerPanel from "./components/EmojiPicker";
-import { generateFolderName } from "./utils/gemini";
+import { generateFolderName, generateDocTitle } from "./utils/gemini";
 
 function formatVersionTime(timestamp) {
   return new Date(timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
@@ -1125,6 +1125,7 @@ export default function App() {
   const dragCursorRef = useRef(null);
   const newlyNamedGroupsRef = useRef(new Set());
   const aiNamingInitiatedRef = useRef(new Set());
+  const autoTitledDocsRef = useRef(new Set());
   const lastFolderColorRef = useRef(null);
   const historySnapshotTimerRef = useRef(null);
   const titleHistoryTimerRef = useRef(null);
@@ -1379,6 +1380,11 @@ export default function App() {
             isLocked: false,
             editHistory: data.editHistory || [],
             sharedFrom: data.sharedByName || null,
+            docFont: data.docFont || null,
+            lineSpacing: data.lineSpacing || null,
+            hideTitle: data.hideTitle || false,
+            fullWidth: data.fullWidth || false,
+            textAlign: data.textAlign || null,
           };
 
           setDocs(prev => {
@@ -2279,6 +2285,35 @@ export default function App() {
       periodicHistoryRef.current = setInterval(() => captureHistorySnapshot('user', 'Edited'), 180000);
     }
 
+    // Auto-title unnamed documents once enough content has been typed
+    const activeDoc = docsRef.current.find(d => d.id === activeDocId);
+    if (activeDoc && !activeDoc.title.trim() && !autoTitledDocsRef.current.has(activeDocId)) {
+      const plainText = (editorRef.current?.innerText || '').trim();
+      if (plainText.length >= 100) {
+        autoTitledDocsRef.current.add(activeDocId);
+        const docIdToName = activeDocId;
+        generateDocTitle(plainText).then(aiTitle => {
+          if (!aiTitle) {
+            autoTitledDocsRef.current.delete(docIdToName);
+            return;
+          }
+          setDocs(prev => prev.map(d => {
+            if (d.id !== docIdToName) return d;
+            if (d.title.trim()) return d; // user typed a title while AI was working
+            const autoEmoji = d.hasCustomEmoji ? d.emoji : (getEmojiForTitle(aiTitle) || d.emoji);
+            if (autoEmoji !== d.emoji) {
+              setAnimatingEmojiDocId(d.id);
+              setTimeout(() => setAnimatingEmojiDocId(p => p === d.id ? null : p), 200);
+            }
+            return { ...d, title: aiTitle, emoji: autoEmoji };
+          }));
+          if (titleRef.current && !titleRef.current.textContent.trim()) {
+            titleRef.current.textContent = aiTitle;
+          }
+        });
+      }
+    }
+
     // Check selection natively
     const selection = window.getSelection();
     if (!selection || !selection.focusNode) return;
@@ -2431,7 +2466,7 @@ export default function App() {
         return { ...prev, isOpen: false };
       });
     }
-  }, [syncContentToState, captureHistorySnapshot]);
+  }, [syncContentToState, captureHistorySnapshot, activeDocId]);
 
   const createNewDoc = (e, targetGroupId = null) => {
     if (e) e.stopPropagation();
@@ -2725,7 +2760,7 @@ export default function App() {
         sharedByName,
         sharedAt: new Date().toISOString()
       });
-      const shareUrl = `${window.location.origin}/api/share?id=${docId}`;
+      const shareUrl = `${window.location.origin}/share/${docId}`;
       await navigator.clipboard.writeText(shareUrl);
       setSharePopupInfo({ url: shareUrl });
     } catch (e) {
@@ -4837,7 +4872,7 @@ export default function App() {
                     handleShareDoc(activeDocId);
                   }}
                 >
-                  <Link size={14} /> Share via link
+                  <Link size={14} /> Share a copy
                 </button>
                 <div className="h-px bg-[var(--color-border-primary)] my-1" />
                 <button
@@ -6519,37 +6554,32 @@ export default function App() {
 
       {/* Custom Share UI Popup */}
       {sharePopupInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[200] animate-slide-in-right flex flex-col gap-3">
-          <div className="flex justify-between items-start">
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3">
+          <div className="flex justify-between items-center">
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
-              <Share size={16} className="text-[var(--color-text-faint)]" /> Link Copied
+              <Link size={15} className="text-[var(--color-text-faint)]" />
+              Link Copied
             </div>
             <button
               onClick={() => setSharePopupInfo(null)}
-              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors mt-1"
+              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors rounded p-0.5"
             >
-              <X size={14} />
+              <X size={13} />
             </button>
           </div>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2">
             <input
               type="text"
               readOnly
-              value={sharePopupInfo.url}
-              className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] outline-none selection:bg-[var(--color-border-primary)]"
-              onClick={(e) => {
-                e.target.select();
-                navigator.clipboard.writeText(sharePopupInfo.url);
-              }}
+              value={sharePopupInfo.url.replace(/^https?:\/\//, '')}
+              className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] outline-none selection:bg-[var(--color-border-primary)]"
+              onClick={(e) => { e.target.select(); navigator.clipboard.writeText(sharePopupInfo.url); }}
             />
             <button
-              onClick={async () => {
-                await navigator.clipboard.writeText(sharePopupInfo.url);
-              }}
-              className="flex-shrink-0 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] shadow-sm text-[var(--color-text-primary)] p-1.5 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors"
-              title="Copy link"
+              onClick={async () => { await navigator.clipboard.writeText(sharePopupInfo.url); }}
+              className="flex-shrink-0 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] px-3 py-1.5 rounded-lg text-xs font-semibold hover:opacity-80 transition-opacity"
             >
-              <Copy size={14} />
+              Copy
             </button>
           </div>
         </div>
