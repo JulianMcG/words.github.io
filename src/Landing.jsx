@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion';
+import { motion, useScroll, useTransform, AnimatePresence, useMotionValue, animate as animateMV } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
   Heading1,
@@ -7,7 +7,7 @@ import {
   Layers,
   Cloud,
   Share2,
-  Zap,
+  Sparkles,
   Command,
   CheckSquare,
   List,
@@ -21,7 +21,8 @@ import {
   Shield,
   Eye,
   Keyboard,
-  Heart
+  Heart,
+  RotateCcw
 } from 'lucide-react';
 import GradualBlur from './components/GradualBlur';
 
@@ -56,25 +57,26 @@ function useTypewriter(text, { startDelay = 800, baseSpeed = 70, variance = 50, 
   const [started, setStarted] = useState(false);
   const onCompleteRef = useRef(onComplete);
   const ranRef = useRef(false);
+  const skippedRef = useRef(false);
   const indexRef = useRef(0);
+  const timeoutRef = useRef(null);
+  const startTimerRef = useRef(null);
 
   // Keep callback ref fresh without triggering effects
   useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
 
   useEffect(() => {
-    const t = setTimeout(() => setStarted(true), startDelay);
-    return () => clearTimeout(t);
+    startTimerRef.current = setTimeout(() => setStarted(true), startDelay);
+    return () => clearTimeout(startTimerRef.current);
   }, [startDelay]);
 
   useEffect(() => {
-    if (!started || ranRef.current) return;
+    if (!started || ranRef.current || skippedRef.current) return;
     ranRef.current = true;
     indexRef.current = 0;
-    let timeout;
-    let cancelled = false;
 
     const type = () => {
-      if (cancelled) return;
+      if (skippedRef.current) return;
       if (indexRef.current < text.length) {
         indexRef.current++;
         const i = indexRef.current;
@@ -91,7 +93,7 @@ function useTypewriter(text, { startDelay = 800, baseSpeed = 70, variance = 50, 
         // Burst speed for vowels
         if (i > 1 && 'aeiou'.includes(char)) delay *= 0.75;
 
-        timeout = setTimeout(type, Math.max(30, delay));
+        timeoutRef.current = setTimeout(type, Math.max(30, delay));
       } else {
         setDone(true);
         onCompleteRef.current?.();
@@ -99,21 +101,31 @@ function useTypewriter(text, { startDelay = 800, baseSpeed = 70, variance = 50, 
     };
 
     type();
-    return () => { cancelled = true; clearTimeout(timeout); };
+    return () => { skippedRef.current = true; clearTimeout(timeoutRef.current); };
   }, [started, text, baseSpeed, variance]);
 
-  return { displayed, done, started };
+  const skip = useCallback(() => {
+    if (done) return;
+    skippedRef.current = true;
+    clearTimeout(startTimerRef.current);
+    clearTimeout(timeoutRef.current);
+    setDisplayed(text);
+    setDone(true);
+    onCompleteRef.current?.();
+  }, [done, text]);
+
+  return { displayed, done, started, skip };
 }
 
 /* ════════════════════════════════════════════════
    STICKY HEADER — logo centered→left, button fades in
    ════════════════════════════════════════════════ */
-const StickyHeader = ({ navigate, scrolled }) => {
+const StickyHeader = ({ navigate, scrolled, instant }) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+      transition={instant ? { duration: 0.2, ease: [0.22, 1, 0.36, 1] } : { duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       className="fixed top-0 left-0 right-0 z-50"
     >
       {/* Content */}
@@ -318,6 +330,12 @@ const AppPreview = () => {
           )}
         </main>
 
+        {/* Buddy resting in corner */}
+        <div className="absolute bottom-3 right-4 z-20 pointer-events-none">
+          <img src="/buddy expressions/buddylight.png" alt="Buddy" className="w-8 h-8 object-contain opacity-50 dark:hidden" draggable="false" />
+          <img src="/buddy expressions/buddydark.png" alt="Buddy" className="w-8 h-8 object-contain opacity-50 hidden dark:block" draggable="false" />
+        </div>
+
         {/* Slash menu overlay */}
         <AnimatePresence>
           {showSlash && (
@@ -365,6 +383,248 @@ const FeatureCard = ({ icon, title, description, index }) => (
 );
 
 /* ════════════════════════════════════════════════
+   BUDDY SHOWCASE — full blink engine, 0g drag physics
+   ════════════════════════════════════════════════ */
+const BuddyShowcase = () => {
+  const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [expression, setExpression] = useState('idle');
+  const [blinkState, setBlinkState] = useState('');
+  const [isHovered, setIsHovered] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
+  const hoverStartedRef = useRef(false);
+  const hoverTimers = useRef([]);
+  const isHoveredRef = useRef(false);
+
+  const dragX = useMotionValue(0);
+  const dragY = useMotionValue(0);
+  // Super bouncy 0g snap-back
+  const SNAP = { type: 'spring', stiffness: 650, damping: 11, mass: 0.4 };
+
+  const getUrl = (key) => `/buddy expressions/buddy${isDark ? 'dark' : 'light'}${key === 'idle' ? '' : key}.png`;
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const h = e => setIsDark(e.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
+
+  useEffect(() => {
+    ['', 'blink', 'smile', 'smilebetween', 'smileblink', 'click', 'error'].forEach(k => {
+      new Image().src = `/buddy expressions/buddy${isDark ? 'dark' : 'light'}${k}.png`;
+    });
+  }, [isDark]);
+
+  // Always-on blink engine
+  useEffect(() => {
+    let tid;
+    let bts = [];
+    const clearBlinks = () => { bts.forEach(clearTimeout); bts = []; };
+    const fire = () => {
+      clearBlinks();
+      setBlinkState('blink');
+      if (Math.random() < 0.25) {
+        bts.push(setTimeout(() => {
+          setBlinkState('');
+          bts.push(setTimeout(() => {
+            setBlinkState('blink');
+            bts.push(setTimeout(() => setBlinkState(''), 120));
+          }, 100));
+        }, 150));
+      } else {
+        bts.push(setTimeout(() => setBlinkState(''), 150));
+      }
+      tid = setTimeout(fire, Math.random() * 3500 + 2500);
+    };
+    tid = setTimeout(fire, Math.random() * 600 + 600);
+    return () => { clearTimeout(tid); clearBlinks(); };
+  }, []);
+
+  const clearHover = () => { hoverTimers.current.forEach(clearTimeout); hoverTimers.current = []; };
+  const push = (fn, d) => { hoverTimers.current.push(setTimeout(fn, d)); };
+
+  const handleHoverIn = () => {
+    isHoveredRef.current = true;
+    setIsHovered(true);
+    clearHover();
+    hoverStartedRef.current = true;
+    push(() => setExpression('smilebetween'), 0);
+    push(() => setExpression('smileblink'), 50);
+    push(() => setExpression('smile'), 130);
+    push(() => setExpression('smileblink'), 200);
+    push(() => setExpression('smile'), 280);
+  };
+
+  const handleHoverOut = () => {
+    isHoveredRef.current = false;
+    setIsHovered(false);
+    clearHover();
+    if (hoverStartedRef.current) {
+      hoverStartedRef.current = false;
+      setExpression('smilebetween');
+      push(() => setExpression('idle'), 80);
+    } else {
+      setExpression('idle');
+    }
+  };
+
+  // onTapStart: squish + click face (fires for both tap and drag)
+  const handleTapStart = () => {
+    setIsPressed(true);
+    clearHover();
+    hoverStartedRef.current = false;
+    setExpression('click');
+  };
+
+  // onTap: successful click (no drag) — bounce back
+  const handleTap = () => {
+    setIsPressed(false);
+    push(() => setExpression('smilebetween'), 280);
+    push(() => setExpression(isHoveredRef.current ? 'smile' : 'idle'), 360);
+  };
+
+  // onTapCancel: drag started — keep click face while flying
+  const handleTapCancel = () => {
+    setIsPressed(false);
+  };
+
+  // Drag end: happy snap-back
+  const handleDragEnd = () => {
+    setIsPressed(false);
+    setExpression('smilebetween');
+    push(() => setExpression('smile'), 80);
+    push(() => {
+      if (!isHoveredRef.current) {
+        setExpression('smilebetween');
+        push(() => setExpression('idle'), 80);
+      }
+    }, 1800);
+    animateMV(dragX, 0, SNAP);
+    animateMV(dragY, 0, SNAP);
+  };
+
+  const displayExpr = (expression === 'idle' || expression === 'smile') && blinkState === 'blink'
+    ? (expression === 'idle' ? 'blink' : 'smileblink')
+    : expression;
+
+  return (
+    <section className="px-6 py-24 sm:py-32 border-t border-[var(--color-border-primary)]">
+      <div className="max-w-6xl mx-auto">
+        <div className="grid lg:grid-cols-2 gap-16 items-center">
+
+          {/* ── Left: text ── */}
+          <Reveal delay={0.1}>
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[13px] font-semibold text-[var(--color-text-muted)] mb-6">
+                <span className="text-[var(--color-accent)] font-bold text-[15px] leading-none -mt-px">/</span>
+                <img src="/buddy expressions/buddyicon.png" alt="" className="w-4 h-4 object-contain" draggable="false" />
+                Buddy
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4" style={{ fontFamily: '"Gowun Batang", serif' }}>
+                Your AI writing<br />companion.
+              </h2>
+              <p className="text-[var(--color-text-muted)] text-lg leading-relaxed mb-8">
+                Buddy lives quietly in the corner of your screen. Highlight any text, ask for an edit, and watch it happen — without ever leaving your flow.
+              </p>
+              <div className="space-y-3">
+                {[
+                  'Rewrite and polish your prose',
+                  'Explain or summarize any passage',
+                  'Reference other docs with @mentions',
+                  'Insert new content right where you need it',
+                ].map(cap => (
+                  <motion.div key={cap} whileHover={{ x: 4 }} transition={{ duration: 0.15 }} className="flex items-center gap-3">
+                    <div className="w-5 h-5 shrink-0 rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] flex items-center justify-center">
+                      <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)]" />
+                    </div>
+                    <span className="text-[15px] text-[var(--color-text-muted)]">{cap}</span>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </Reveal>
+
+          {/* ── Right: Buddy + chat box ── */}
+          <Reveal>
+            <div className="flex flex-col items-center gap-6">
+
+              {/* Buddy — draggable, interactive */}
+              <div className="flex items-center justify-center" style={{ minHeight: '220px' }}>
+                <motion.div
+                  drag
+                  dragMomentum={false}
+                  style={{ x: dragX, y: dragY }}
+                  onTapStart={handleTapStart}
+                  onTap={handleTap}
+                  onTapCancel={handleTapCancel}
+                  onDragEnd={handleDragEnd}
+                  onMouseEnter={handleHoverIn}
+                  onMouseLeave={handleHoverOut}
+                  className="relative cursor-grab active:cursor-grabbing"
+                >
+                  {/* Subtle hover glow */}
+                  <motion.div
+                    animate={{ opacity: isHovered && !isPressed ? 0.18 : 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="absolute pointer-events-none"
+                    style={{
+                      inset: '-32px',
+                      background: 'radial-gradient(ellipse at center, #E8572A 0%, transparent 65%)',
+                      filter: 'blur(20px)',
+                    }}
+                  />
+                  <motion.img
+                    src={getUrl(displayExpr)}
+                    alt="Buddy"
+                    animate={{
+                      y: isPressed ? 2 : [0, -12, 0],
+                      scale: isPressed ? 0.8 : isHovered ? 1.18 : 1,
+                    }}
+                    transition={{
+                      y: isPressed
+                        ? { type: 'spring', stiffness: 400, damping: 25 }
+                        : { repeat: Infinity, duration: 2.6, ease: 'easeInOut' },
+                      scale: { type: 'spring', stiffness: 550, damping: 20 },
+                    }}
+                    className="w-40 h-40 object-contain select-none relative z-10"
+                    draggable="false"
+                  />
+                </motion.div>
+              </div>
+
+              {/* Chat box mockup */}
+              <div className="w-full rounded-[var(--radius-xl)] border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] overflow-hidden shadow-lg">
+                <div className="p-4 border-b border-[var(--color-border-primary)] bg-[var(--color-bg-primary)]">
+                  <div className="text-[13px] leading-relaxed text-[var(--color-text-muted)] line-through opacity-50 mb-1.5">
+                    this is pretty good i think
+                  </div>
+                  <div className="text-[13px] leading-relaxed text-green-600 dark:text-green-400">
+                    This is genuinely impressive work.
+                  </div>
+                </div>
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-primary)]">
+                  <span className="text-[12px] text-[var(--color-text-muted)] flex items-center gap-1.5">
+                    <span className="text-green-500 font-bold">✓</span> Automatically changed
+                  </span>
+                  <span className="text-[12px] text-[var(--color-text-faint)] bg-[var(--color-bg-hover)] px-2.5 py-1 rounded-md border border-[var(--color-border-primary)] cursor-default">Done</span>
+                </div>
+                <div className="flex items-center gap-2.5 p-3">
+                  <img src={getUrl('smile')} alt="" className="w-5 h-5 object-contain flex-shrink-0" draggable="false" />
+                  <span className="text-[13px] text-[var(--color-text-faint)] flex-1">Tell Buddy what to change...</span>
+                  <ArrowRight size={13} className="text-[var(--color-text-faint)]" />
+                </div>
+              </div>
+
+            </div>
+          </Reveal>
+
+        </div>
+      </div>
+    </section>
+  );
+};
+
+/* ════════════════════════════════════════════════
    MAIN LANDING PAGE
    ════════════════════════════════════════════════ */
 export default function Landing() {
@@ -372,6 +632,8 @@ export default function Landing() {
   const [scrolled, setScrolled] = useState(false);
   const [hasScrolled, setHasScrolled] = useState(false);
   const [introComplete, setIntroComplete] = useState(false);
+  const [wasSkipped, setWasSkipped] = useState(false);
+  const wasSkippedRef = useRef(false);
 
   // Parallax
   const previewRef = useRef(null);
@@ -402,12 +664,18 @@ export default function Landing() {
 
   // Typewriter
   const fullText = "Write without\nthe clutter.";
-  const { displayed, done: typingDone, started } = useTypewriter(fullText, {
+  const { displayed, done: typingDone, started, skip } = useTypewriter(fullText, {
     startDelay: 600,
     baseSpeed: 75,
     variance: 45,
-    onComplete: () => setTimeout(() => setIntroComplete(true), 400),
+    onComplete: () => setTimeout(() => setIntroComplete(true), wasSkippedRef.current ? 0 : 400),
   });
+
+  const handleSkip = useCallback(() => {
+    wasSkippedRef.current = true;
+    setWasSkipped(true);
+    skip();
+  }, [skip]);
 
   // Parse displayed text into lines
   const lines = displayed.split('\n');
@@ -417,20 +685,23 @@ export default function Landing() {
   const features = [
     { icon: <Command size={20} />, title: 'Rich formatting', description: 'Type / to access headings, lists, quotes, tables, and more. No toolbar needed.' },
     { icon: <Eye size={20} />, title: 'Clutter-free', description: 'A clean canvas that gets out of your way. No buttons until you need them.' },
-    { icon: <Layers size={20} />, title: 'Simple organization', description: 'Folders, pinned documents, drag and drop. Everything where you expect it.' },
+    { icon: <Layers size={20} />, title: 'Simple organization', description: 'Folders, pinned docs, drag-and-drop reordering. Everything where you expect it.' },
     { icon: <Cloud size={20} />, title: 'Cloud sync', description: 'Sign in once, sync across every device. Entirely optional, always encrypted.' },
-    { icon: <Zap size={20} />, title: 'Instant', description: 'Opens in milliseconds. No spinners, no splash screens, no waiting.' },
-    { icon: <Shield size={20} />, title: 'Private by default', description: 'Your documents stay in your browser. Cloud sync is opt-in, never required.' },
+    { icon: <Sparkles size={20} />, title: 'AI writing assistant', description: 'Buddy lives in the corner, ready to rewrite, explain, or expand — just highlight and ask.' },
+    { icon: <RotateCcw size={20} />, title: 'Version history', description: 'Every edit is saved automatically. Jump back to any version of your document.' },
   ];
 
   return (
-    <div className={`min-h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans overflow-x-hidden ${!introComplete ? 'overflow-y-hidden max-h-screen' : ''}`}>
+    <div
+      className={`min-h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans overflow-x-hidden ${!introComplete ? 'overflow-y-hidden max-h-screen' : ''}`}
+      onClick={!introComplete ? handleSkip : undefined}
+    >
 
       {/* Orange glow behind preview area — appears after typing, fades on scroll */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: introComplete ? 1 : 0 }}
-        transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+        transition={wasSkipped ? { duration: 0.35, ease: [0.22, 1, 0.36, 1] } : { duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
         className="fixed bottom-[-800px] left-1/2 -translate-x-1/2 w-[200vw] h-[1200px] pointer-events-none z-10"
       >
         <motion.div style={{ opacity: glowOpacity }} className="w-full h-full">
@@ -446,7 +717,7 @@ export default function Landing() {
 
       {/* Header — only after intro is done */}
       <AnimatePresence>
-        {introComplete && <StickyHeader navigate={navigate} scrolled={scrolled} />}
+        {introComplete && <StickyHeader navigate={navigate} scrolled={scrolled} instant={wasSkipped} />}
       </AnimatePresence>
 
       {/* ─── Hero with typewriter ─── takes full viewport, content centered */}
@@ -499,7 +770,7 @@ export default function Landing() {
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: introComplete ? 1 : 0, y: introComplete ? 0 : 20, filter: introComplete ? 'blur(0px)' : 'blur(10px)' }}
-            transition={{ duration: 0.8, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+            transition={wasSkipped ? { duration: 0.3, ease: [0.22, 1, 0.36, 1] } : { duration: 0.8, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
             className="text-[clamp(1rem,2vw,1.2rem)] text-[var(--color-text-muted)] max-w-xl mx-auto leading-relaxed mb-10"
           >
             A distraction-free editor that lives in your browser.<br />
@@ -509,7 +780,7 @@ export default function Landing() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: introComplete ? 1 : 0, y: introComplete ? 0 : 20, scale: introComplete ? 1 : 0.95, filter: introComplete ? 'blur(0px)' : 'blur(8px)' }}
-            transition={{ duration: 0.7, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            transition={wasSkipped ? { duration: 0.3, delay: 0.05, ease: [0.22, 1, 0.36, 1] } : { duration: 0.7, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
             className="flex flex-col items-center gap-4 mb-4"
           >
             <button
@@ -532,7 +803,7 @@ export default function Landing() {
         <motion.div
           initial={{ opacity: 0, y: 80, filter: 'blur(10px)' }}
           animate={introComplete ? { opacity: 1, y: 0, filter: 'blur(0px)' } : {}}
-          transition={{ duration: 1, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          transition={wasSkipped ? { duration: 0.35, delay: 0.1, ease: [0.22, 1, 0.36, 1] } : { duration: 1, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
           className="relative max-w-[1000px] mx-auto z-20"
         >
           <AppPreview />
@@ -631,6 +902,9 @@ export default function Landing() {
           </div>
         </div>
       </section>
+
+      {/* ─── Buddy Showcase ─── */}
+      <BuddyShowcase />
 
       {/* ─── Bottom CTA ─── */}
       <section className="px-6 pt-8 pb-24 sm:pb-32">
