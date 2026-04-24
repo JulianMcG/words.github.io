@@ -390,7 +390,6 @@ const BuddyShowcase = () => {
   const [blinkState, setBlinkState] = useState('');
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
-  const [magnetOffset, setMagnetOffset] = useState({ x: 0, y: 0 });
   const hoverStartedRef = useRef(false);
   const hoverTimers = useRef([]);
   const isHoveredRef = useRef(false);
@@ -459,7 +458,6 @@ const BuddyShowcase = () => {
   const handleHoverOut = () => {
     isHoveredRef.current = false;
     setIsHovered(false);
-    setMagnetOffset({ x: 0, y: 0 });
     clearHover();
     if (hoverStartedRef.current) {
       hoverStartedRef.current = false;
@@ -469,18 +467,6 @@ const BuddyShowcase = () => {
       setExpression('idle');
     }
   };
-
-  const handleMouseMove = useCallback((e) => {
-    if (isDraggingRef.current) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const cap = 10;
-    setMagnetOffset({
-      x: Math.max(-cap, Math.min(cap, (e.clientX - cx) * 0.13)),
-      y: Math.max(-cap, Math.min(cap, (e.clientY - cy) * 0.08)),
-    });
-  }, []);
 
   const handleTapStart = () => {
     setIsPressed(true);
@@ -568,20 +554,17 @@ const BuddyShowcase = () => {
               style={{ paddingTop: '185px' }}
               onMouseEnter={handleHoverIn}
               onMouseLeave={handleHoverOut}
-              onMouseMove={handleMouseMove}
             >
               {/* Layer 1 — peek position + magnetic drift (no drag) */}
               <motion.div
                 className="absolute z-0"
                 style={{ top: '10px', left: '50%', marginLeft: '-80px' }}
                 animate={{
-                  y: (isHovered ? -10 : 85) + magnetOffset.y,
-                  x: magnetOffset.x,
+                  y: isHovered ? -10 : 85,
                   scale: isPressed ? 0.82 : isHovered ? 1.06 : 1,
                 }}
                 transition={{
                   y: { type: 'spring', stiffness: 190, damping: 22, mass: 0.85 },
-                  x: { type: 'spring', stiffness: 280, damping: 24, mass: 0.4 },
                   scale: { type: 'spring', stiffness: 500, damping: 22 },
                 }}
               >
