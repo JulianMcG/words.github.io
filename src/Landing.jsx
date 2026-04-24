@@ -7,7 +7,6 @@ import {
   Layers,
   Cloud,
   Share2,
-  Sparkles,
   Command,
   CheckSquare,
   List,
@@ -383,7 +382,7 @@ const FeatureCard = ({ icon, title, description, index }) => (
 );
 
 /* ════════════════════════════════════════════════
-   BUDDY SHOWCASE — full blink engine, 0g drag physics
+   BUDDY SHOWCASE — hides behind prompt box, peeks on hover
    ════════════════════════════════════════════════ */
 const BuddyShowcase = () => {
   const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -391,14 +390,16 @@ const BuddyShowcase = () => {
   const [blinkState, setBlinkState] = useState('');
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
+  const [magnetOffset, setMagnetOffset] = useState({ x: 0, y: 0 });
   const hoverStartedRef = useRef(false);
   const hoverTimers = useRef([]);
   const isHoveredRef = useRef(false);
+  const isDraggingRef = useRef(false);
 
   const dragX = useMotionValue(0);
   const dragY = useMotionValue(0);
-  // Super bouncy 0g snap-back
-  const SNAP = { type: 'spring', stiffness: 650, damping: 11, mass: 0.4 };
+  // 0g playful snap-back — low stiffness, low damping, bouncy overshoot
+  const BOUNCE = { type: 'spring', stiffness: 75, damping: 8, mass: 1.0 };
 
   const getUrl = (key) => `/buddy expressions/buddy${isDark ? 'dark' : 'light'}${key === 'idle' ? '' : key}.png`;
 
@@ -458,6 +459,7 @@ const BuddyShowcase = () => {
   const handleHoverOut = () => {
     isHoveredRef.current = false;
     setIsHovered(false);
+    setMagnetOffset({ x: 0, y: 0 });
     clearHover();
     if (hoverStartedRef.current) {
       hoverStartedRef.current = false;
@@ -468,7 +470,18 @@ const BuddyShowcase = () => {
     }
   };
 
-  // onTapStart: squish + click face (fires for both tap and drag)
+  const handleMouseMove = useCallback((e) => {
+    if (isDraggingRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const cap = 10;
+    setMagnetOffset({
+      x: Math.max(-cap, Math.min(cap, (e.clientX - cx) * 0.13)),
+      y: Math.max(-cap, Math.min(cap, (e.clientY - cy) * 0.08)),
+    });
+  }, []);
+
   const handleTapStart = () => {
     setIsPressed(true);
     clearHover();
@@ -476,20 +489,19 @@ const BuddyShowcase = () => {
     setExpression('click');
   };
 
-  // onTap: successful click (no drag) — bounce back
   const handleTap = () => {
     setIsPressed(false);
     push(() => setExpression('smilebetween'), 280);
     push(() => setExpression(isHoveredRef.current ? 'smile' : 'idle'), 360);
   };
 
-  // onTapCancel: drag started — keep click face while flying
   const handleTapCancel = () => {
     setIsPressed(false);
+    isDraggingRef.current = true;
   };
 
-  // Drag end: happy snap-back
   const handleDragEnd = () => {
+    isDraggingRef.current = false;
     setIsPressed(false);
     setExpression('smilebetween');
     push(() => setExpression('smile'), 80);
@@ -498,14 +510,20 @@ const BuddyShowcase = () => {
         setExpression('smilebetween');
         push(() => setExpression('idle'), 80);
       }
-    }, 1800);
-    animateMV(dragX, 0, SNAP);
-    animateMV(dragY, 0, SNAP);
+    }, 2200);
+    animateMV(dragX, 0, BOUNCE);
+    animateMV(dragY, 0, BOUNCE);
   };
 
   const displayExpr = (expression === 'idle' || expression === 'smile') && blinkState === 'blink'
     ? (expression === 'idle' ? 'blink' : 'smileblink')
     : expression;
+
+  // Layout math:
+  //   paddingTop = 185px, Buddy top offset = 10px, Buddy size = 160px (w-40)
+  //   Panel top = 185px from container top
+  //   peek shown (y=-10): Buddy fully above panel, 25px gap
+  //   peek hidden (y=172): Buddy top at 182px, only ~3px visible above panel
 
   return (
     <section className="px-6 py-24 sm:py-32 border-t border-[var(--color-border-primary)]">
@@ -516,7 +534,6 @@ const BuddyShowcase = () => {
           <Reveal delay={0.1}>
             <div>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[13px] font-semibold text-[var(--color-text-muted)] mb-6">
-                <span className="text-[var(--color-accent)] font-bold text-[15px] leading-none -mt-px">/</span>
                 <img src="/buddy expressions/buddyicon.png" alt="" className="w-4 h-4 object-contain" draggable="false" />
                 Buddy
               </div>
@@ -544,13 +561,33 @@ const BuddyShowcase = () => {
             </div>
           </Reveal>
 
-          {/* ── Right: Buddy + chat box ── */}
+          {/* ── Right: prompt panel with Buddy peeking behind ── */}
           <Reveal>
-            <div className="flex flex-col items-center gap-6">
-
-              {/* Buddy — draggable, interactive */}
-              <div className="flex items-center justify-center" style={{ minHeight: '220px' }}>
+            <div
+              className="relative w-full"
+              style={{ paddingTop: '185px' }}
+              onMouseEnter={handleHoverIn}
+              onMouseLeave={handleHoverOut}
+              onMouseMove={handleMouseMove}
+            >
+              {/* Layer 1 — peek position + magnetic drift (no drag) */}
+              <motion.div
+                className="absolute z-0"
+                style={{ top: '10px', left: '50%', marginLeft: '-80px' }}
+                animate={{
+                  y: (isHovered ? -10 : 85) + magnetOffset.y,
+                  x: magnetOffset.x,
+                  scale: isPressed ? 0.82 : isHovered ? 1.06 : 1,
+                }}
+                transition={{
+                  y: { type: 'spring', stiffness: 190, damping: 22, mass: 0.85 },
+                  x: { type: 'spring', stiffness: 280, damping: 24, mass: 0.4 },
+                  scale: { type: 'spring', stiffness: 500, damping: 22 },
+                }}
+              >
+                {/* Layer 2 — drag, bouncy snap-back */}
                 <motion.div
+                  className="cursor-grab active:cursor-grabbing"
                   drag
                   dragMomentum={false}
                   style={{ x: dragX, y: dragY }}
@@ -558,43 +595,48 @@ const BuddyShowcase = () => {
                   onTap={handleTap}
                   onTapCancel={handleTapCancel}
                   onDragEnd={handleDragEnd}
-                  onMouseEnter={handleHoverIn}
-                  onMouseLeave={handleHoverOut}
-                  className="relative cursor-grab active:cursor-grabbing"
                 >
-                  {/* Subtle hover glow */}
-                  <motion.div
-                    animate={{ opacity: isHovered && !isPressed ? 0.18 : 0 }}
-                    transition={{ duration: 0.5 }}
-                    className="absolute pointer-events-none"
-                    style={{
-                      inset: '-32px',
-                      background: 'radial-gradient(ellipse at center, #E8572A 0%, transparent 65%)',
-                      filter: 'blur(20px)',
-                    }}
-                  />
+                  {/* Layer 3 — bob + expression + fade when hidden */}
                   <motion.img
                     src={getUrl(displayExpr)}
                     alt="Buddy"
                     animate={{
-                      y: isPressed ? 2 : [0, -12, 0],
-                      scale: isPressed ? 0.8 : isHovered ? 1.18 : 1,
+                      y: isPressed ? 2 : [0, -10, 0],
+                      filter: isHovered ? 'grayscale(0%) brightness(1)' : 'grayscale(85%) brightness(0.8)',
+                      opacity: isHovered ? 1 : 0.45,
                     }}
                     transition={{
                       y: isPressed
                         ? { type: 'spring', stiffness: 400, damping: 25 }
                         : { repeat: Infinity, duration: 2.6, ease: 'easeInOut' },
-                      scale: { type: 'spring', stiffness: 550, damping: 20 },
+                      filter: { duration: 0.45 },
+                      opacity: { duration: 0.45 },
                     }}
-                    className="w-40 h-40 object-contain select-none relative z-10"
+                    className="w-40 h-40 object-contain select-none"
                     draggable="false"
                   />
                 </motion.div>
-              </div>
+              </motion.div>
 
-              {/* Chat box mockup */}
-              <div className="w-full rounded-[var(--radius-xl)] border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] overflow-hidden shadow-lg">
-                <div className="p-4 border-b border-[var(--color-border-primary)] bg-[var(--color-bg-primary)]">
+              {/* Orange glow — only when peeking, sits at panel top edge */}
+              <motion.div
+                animate={{ opacity: isHovered ? 0.32 : 0 }}
+                transition={{ duration: 0.7 }}
+                className="absolute pointer-events-none"
+                style={{
+                  zIndex: 5,
+                  top: '148px',
+                  left: '20%',
+                  right: '20%',
+                  height: '44px',
+                  background: 'radial-gradient(ellipse at center bottom, #E8572A 0%, transparent 65%)',
+                  filter: 'blur(18px)',
+                }}
+              />
+
+              {/* Prompt panel — z-10 covers Buddy's body */}
+              <div className="relative z-10 rounded-[var(--radius-xl)] border border-[var(--color-border-primary)] bg-[var(--color-bg-primary)] overflow-hidden shadow-xl">
+                <div className="p-4 border-b border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)]">
                   <div className="text-[13px] leading-relaxed text-[var(--color-text-muted)] line-through opacity-50 mb-1.5">
                     this is pretty good i think
                   </div>
@@ -687,7 +729,7 @@ export default function Landing() {
     { icon: <Eye size={20} />, title: 'Clutter-free', description: 'A clean canvas that gets out of your way. No buttons until you need them.' },
     { icon: <Layers size={20} />, title: 'Simple organization', description: 'Folders, pinned docs, drag-and-drop reordering. Everything where you expect it.' },
     { icon: <Cloud size={20} />, title: 'Cloud sync', description: 'Sign in once, sync across every device. Entirely optional, always encrypted.' },
-    { icon: <Sparkles size={20} />, title: 'AI writing assistant', description: 'Buddy lives in the corner, ready to rewrite, explain, or expand — just highlight and ask.' },
+    { icon: <img src="/buddy expressions/buddyicon.png" alt="" className="w-5 h-5 object-contain" draggable="false" />, title: 'AI writing assistant', description: 'Buddy lives in the corner, ready to rewrite, explain, or expand — just highlight and ask.' },
     { icon: <RotateCcw size={20} />, title: 'Version history', description: 'Every edit is saved automatically. Jump back to any version of your document.' },
   ];
 
