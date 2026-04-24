@@ -5359,10 +5359,16 @@ export default function App() {
           <div className="absolute bottom-4 left-4 z-40">
             <button
               onClick={() => user ? setUserMenuOpen(!userMenuOpen) : setAuthModal('login')}
-              className="words-context-menu group p-1.5 text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md transition-colors"
-              title={user ? "Cloud Sync Active" : "Enable Cloud Sync"}
+              className={`words-context-menu p-1.5 rounded-md transition-colors hover:bg-[var(--color-bg-hover-strong)] ${user ? "text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)]" : "flex items-center gap-1.5 text-[var(--color-text-primary)] bg-[var(--color-bg-hover)]"}`}
+              title={user ? "Cloud Sync Active" : "Sign up to sync your notes"}
             >
-              {user ? <Cloud size={16} className={userMenuOpen ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors"} /> : <CloudOff size={16} className={authModal ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors"} />}
+              {user
+                ? <Cloud size={16} />
+                : <>
+                    <CloudOff size={16} className="shrink-0" />
+                    <span className="text-xs font-medium whitespace-nowrap">Sign up to sync</span>
+                  </>
+              }
             </button>
 
             {userMenuOpen && user && (
