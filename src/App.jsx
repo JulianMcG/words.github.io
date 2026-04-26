@@ -5259,10 +5259,6 @@ export default function App() {
                                   animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
                                   transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
                                   onAnimationComplete={() => newlyNamedGroupsRef.current.delete(group.id)}
-                                  onDoubleClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingGroupId(group.id);
-                                  }}
                                 >
                                   {group.name}
                                 </motion.span>
