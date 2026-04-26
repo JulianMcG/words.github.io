@@ -1873,7 +1873,7 @@ export default function App() {
     });
   };
 
-  const FOLDER_COLORS = ['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
+  const FOLDER_COLORS = ['#9a9a97', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
 
   const getNextFolderColor = () => {
     const available = FOLDER_COLORS.filter(c => c !== lastFolderColorRef.current);
@@ -4319,6 +4319,11 @@ export default function App() {
                 animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
                 transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
                 onAnimationComplete={() => newlyAutoTitledDocsRef.current.delete(doc.id)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setEditingDocId(doc.id);
+                  setEditingDocTitle(doc.title || '');
+                }}
               >
                 {doc.title || "New Page"}
               </motion.span>
@@ -5212,7 +5217,7 @@ export default function App() {
                                 className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5 cursor-pointer transition-transform hover:scale-110"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  const FOLDER_COLORS = ['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'];
+                                  const FOLDER_COLORS = ['#9a9a97', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
                                   const nextColor = FOLDER_COLORS[(FOLDER_COLORS.indexOf(group.color) + 1) % FOLDER_COLORS.length] || FOLDER_COLORS[0];
                                   updateGroup(group.id, { color: nextColor });
                                 }}
@@ -5254,6 +5259,10 @@ export default function App() {
                                   animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
                                   transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
                                   onAnimationComplete={() => newlyNamedGroupsRef.current.delete(group.id)}
+                                  onDoubleClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingGroupId(group.id);
+                                  }}
                                 >
                                   {group.name}
                                 </motion.span>
