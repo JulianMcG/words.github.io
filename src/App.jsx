@@ -294,29 +294,7 @@ const COMMANDS = [
     description: "Add a resizable grid.",
     icon: Table,
     type: "insertHTML",
-    tag: `<div class="table-container" contenteditable="false" style="margin: 1.5em 0; clear: both;">
-  <div class="table-title" contenteditable="true" data-placeholder="Table Title"></div>
-  <div class="table-wrapper">
-    <div class="table-scroll">
-      <table contenteditable="true">
-        <tbody>
-          <tr>
-            <td><br></td>
-            <td><br></td>
-            <td><br></td>
-          </tr>
-          <tr>
-            <td><br></td>
-            <td><br></td>
-            <td><br></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="table-resize-handle" contenteditable="false" title="Drag to add/remove rows and columns"></div>
-  </div>
-</div>
-<p><br></p>`,
+    tag: `<div class="table-container" contenteditable="false" style="margin: 1.5em 0; clear: both;"><div class="table-title" contenteditable="true" data-placeholder="Table Title"></div><div class="table-wrapper"><div class="table-scroll"><table contenteditable="true"><tbody><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr></tbody></table></div><div class="table-resize-handle" contenteditable="false" title="Drag to add/remove rows and columns"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><line x1="3" y1="13.5" x2="13.5" y2="3" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="8.5" y1="13.5" x2="13.5" y2="8.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg></div><button class="table-delete-btn" contenteditable="false" title="Delete table"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button></div></div><p><br></p>`,
   },
 ];
 
@@ -864,6 +842,46 @@ const AnimatedFolder = ({ isOpen, color, fill }) => {
   );
 };
 
+// Image contrast helpers — run outside React to avoid re-creation on render
+const _avgLuminance = (data) => {
+  let sum = 0;
+  const n = data.length / 4;
+  for (let i = 0; i < data.length; i += 4) {
+    sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+  }
+  return n > 0 ? sum / n : 128;
+};
+
+const applyImageContrast = (img) => {
+  try {
+    const outer = img.closest('.image-outer');
+    if (!outer) return;
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    if (!nw || !nh) return;
+
+    // Rendered width from the outer container (inline style or offsetWidth)
+    const rw = outer.offsetWidth || parseInt(outer.style.width) || 320;
+    // Rendered height is proportional (height: auto)
+    const rh = rw * nh / nw;
+
+    // The resize handle sits at bottom:5px right:5px, 24×24px in rendered px.
+    // Map that exact patch back to source-image coordinates.
+    const handlePx = 29; // 5px margin + 24px handle
+    const sw = Math.max(8, Math.ceil(nw * handlePx / Math.max(rw, handlePx)));
+    const sh = Math.max(8, Math.ceil(nh * handlePx / Math.max(rh, handlePx)));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, nw - sw, nh - sh, sw, sh, 0, 0, sw, sh);
+
+    const lum = _avgLuminance(ctx.getImageData(0, 0, sw, sh));
+    outer.dataset.brDark = lum < 128 ? '1' : '0';
+  } catch (_) { /* tainted canvas or cross-origin — leave defaults */ }
+};
+
 export default function App() {
   const sidebarScrollRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -1238,6 +1256,35 @@ export default function App() {
       editorRef.current.innerHTML = activeDoc.content;
     }
   }, [activeDocId, flushCurrentDoc]);
+
+  // Re-apply contrast detection whenever a doc loads (restores data-br-dark robustly)
+  useEffect(() => {
+    if (!editorRef.current) return;
+    let cancelled = false;
+    const detect = (img) => {
+      if (img.naturalWidth) applyImageContrast(img);
+    };
+    const run = () => {
+      if (cancelled) return;
+      let pending = 0;
+      editorRef.current?.querySelectorAll('.image-wrapper img').forEach((img) => {
+        if (img.complete && img.naturalWidth) {
+          detect(img);
+        } else {
+          pending++;
+          const onLoad = () => { detect(img); pending--; };
+          img.addEventListener('load', onLoad, { once: true });
+          // Belt-and-suspenders: retry after decode even if load already fired
+          setTimeout(() => { if (img.naturalWidth) detect(img); }, 400);
+        }
+      });
+    };
+    // Two passes: first at 60ms (data URLs usually decode by then),
+    // second at 300ms as a safety net for slow decodes.
+    const t1 = setTimeout(run, 60);
+    const t2 = setTimeout(run, 300);
+    return () => { cancelled = true; clearTimeout(t1); clearTimeout(t2); };
+  }, [activeDocId]);
 
   useEffect(() => {
     const handleSelectionChange = () => {
@@ -3296,16 +3343,10 @@ export default function App() {
   };
 
   // --- Image Insertion Utilities ---
+  const RESIZE_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><line x1="3" y1="13.5" x2="13.5" y2="3" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="8.5" y1="13.5" x2="13.5" y2="8.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>`;
+  const DELETE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
   const createImgWrapperHTML = (src) => {
-    return `<div class="image-outer" contenteditable="false" style="display: block; max-width: 100%; width: 320px; min-width: 100px; margin: 0.75em 0; position: relative;"><span class="image-wrapper" style="display: block; overflow: hidden; resize: horizontal; min-height: 50px;"><img
-      src="${src}" style="width: 100%; height: auto; display: block; object-fit: cover; pointer-events: none;" /></span><button
-      class="image-delete-btn" contenteditable="false" title="Delete image"><svg xmlns="http://www.w3.org/2000/svg"
-        width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-        stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 6h18" />
-        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-      </svg></button></div>&nbsp;`;
+    return `<div class="image-outer" contenteditable="false" style="display:block;width:320px;margin:0.75em 0;position:relative;"><div class="image-wrapper"><img src="${src}" style="width:100%;height:auto;display:block;pointer-events:none;" /></div><button class="image-delete-btn" contenteditable="false" title="Delete image">${DELETE_SVG}</button><div class="image-resize-handle" contenteditable="false">${RESIZE_SVG}</div></div>&nbsp;`;
   };
 
   const insertImageFile = (file, targetNodeToReplace = null) => {
@@ -3342,6 +3383,33 @@ export default function App() {
           document.execCommand("insertHTML", false, html);
         }
         syncContentToState();
+
+        // Entrance animation + contrast detection — both programmatic, nothing extra persisted
+        requestAnimationFrame(() => {
+          const allImgs = editorRef.current?.querySelectorAll('.image-wrapper img');
+          if (!allImgs?.length) return;
+          const newImg = allImgs[allImgs.length - 1];
+
+          // Blur/fade-in — Web Animations API, never touches the DOM/HTML
+          newImg.animate(
+            [
+              { opacity: 0, filter: 'blur(7px)', transform: 'scale(0.983)' },
+              { opacity: 1, filter: 'blur(0px)', transform: 'scale(1)' },
+            ],
+            { duration: 300, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'forwards' }
+          );
+
+          // Contrast detection on the actual DOM element so offsetWidth is available
+          const detect = () => {
+            applyImageContrast(newImg);
+            syncContentToState(); // persist data-br-dark attribute
+          };
+          if (newImg.complete && newImg.naturalWidth) {
+            detect();
+          } else {
+            newImg.addEventListener('load', detect, { once: true });
+          }
+        });
       };
       img.src = event.target.result;
     };
@@ -3393,6 +3461,39 @@ export default function App() {
       return;
     }
 
+    if (e.target.closest(".image-resize-handle")) {
+      e.preventDefault();
+      const outer = e.target.closest(".image-outer");
+      if (!outer) return;
+      const startX = e.clientX;
+      const startWidth = outer.offsetWidth;
+
+      const onMouseMove = (moveEvent) => {
+        const dx = moveEvent.clientX - startX;
+        outer.style.width = Math.max(80, startWidth + dx) + "px";
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        syncContentToState();
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+      return;
+    }
+
+    if (e.target.closest(".table-delete-btn")) {
+      e.preventDefault();
+      const container = e.target.closest(".table-container");
+      if (container) {
+        container.remove();
+        syncContentToState();
+      }
+      return;
+    }
+
     if (e.target.tagName === "LI") {
       const ul = e.target.closest("ul");
       if (ul && ul.classList.contains("checklist")) {
@@ -3405,7 +3506,7 @@ export default function App() {
         }
       }
     }
-    if (e.target.classList.contains("table-resize-handle")) {
+    if (e.target.closest(".table-resize-handle")) {
       e.preventDefault();
       const wrapper = e.target.closest(".table-wrapper");
       const table = wrapper.querySelector("table");
@@ -3421,8 +3522,8 @@ export default function App() {
         const dx = moveEvent.clientX - startX;
         const dy = moveEvent.clientY - startY;
 
-        const newCols = Math.max(1, startCols + Math.round(dx / 120));
-        const newRows = Math.max(1, startRows + Math.round(dy / 38));
+        const newCols = Math.max(1, startCols + Math.round(dx / 80));
+        const newRows = Math.max(1, startRows + Math.round(dy / 36));
 
         const currentTrs = Array.from(tbody.querySelectorAll("tr"));
         const maxCols = currentTrs[0] ? currentTrs[0].querySelectorAll("td").length : newCols;
@@ -4568,27 +4669,27 @@ export default function App() {
                 padding: 0 !important;
               }
 
-              /* Image Hover Delete Button */
+              /* Images */
               .image-outer {
                 position: relative;
+                max-width: 100%;
               }
 
               .image-wrapper {
                 ${squircle('8px')};
                 overflow: hidden;
+                width: 100%;
               }
 
-              .image-outer .image-delete-btn,
-              .image-wrapper .image-delete-btn {
+              .image-delete-btn {
                 position: absolute;
-                top: 8px;
-                right: 8px;
+                top: -9px;
+                right: -9px;
                 width: 22px;
                 height: 22px;
                 background: var(--color-bg-secondary, #fff);
                 color: var(--color-text-muted, #888);
                 border-radius: 50%;
-                corner-shape: round;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -4596,20 +4697,50 @@ export default function App() {
                 transition: opacity 0.15s, background 0.15s, color 0.15s;
                 cursor: pointer;
                 border: 1px solid var(--color-border-primary, #e5e7eb);
-                box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+                box-shadow: 0 1px 6px rgba(0,0,0,0.12);
                 z-index: 20;
               }
 
-              .image-outer:hover .image-delete-btn,
-              .image-wrapper:hover .image-delete-btn {
+              .image-outer:hover .image-delete-btn {
                 opacity: 1;
               }
 
-              .image-outer .image-delete-btn:hover,
-              .image-wrapper .image-delete-btn:hover {
-                background: rgba(220, 38, 38, 0.9);
-                color: white;
-                border-color: transparent;
+              .image-delete-btn:hover {
+                background: rgba(220, 38, 38, 0.9) !important;
+                color: white !important;
+                border-color: transparent !important;
+              }
+
+              .image-resize-handle {
+                position: absolute;
+                bottom: 5px;
+                right: 5px;
+                width: 24px;
+                height: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: se-resize;
+                color: transparent;
+                transition: color 0.15s;
+                z-index: 10;
+                border-radius: 4px;
+              }
+
+              /* Light image → dark grabber lines */
+              .image-outer:hover .image-resize-handle {
+                color: rgba(30, 30, 30, 0.45);
+              }
+              .image-resize-handle:hover {
+                color: rgba(20, 20, 20, 0.82) !important;
+              }
+
+              /* Dark image corner → white grabber lines */
+              [data-br-dark="1"]:hover .image-resize-handle {
+                color: rgba(255, 255, 255, 0.55);
+              }
+              [data-br-dark="1"] .image-resize-handle:hover {
+                color: rgba(255, 255, 255, 0.95) !important;
               }
 
               /* Sidebar doc text fade */
@@ -4648,7 +4779,6 @@ export default function App() {
                 position: relative;
                 display: block;
                 width: 100%;
-                max-width: 100%;
                 box-shadow: none !important;
                 outline: none !important;
               }
@@ -4660,11 +4790,11 @@ export default function App() {
               }
 
               .editor-content table {
-                min-width: 100%;
+                width: 100%;
                 border-collapse: collapse;
                 outline: none !important;
                 box-shadow: none !important;
-                table-layout: fixed;
+                table-layout: auto;
               }
 
               .editor-content tr {
@@ -4673,13 +4803,14 @@ export default function App() {
 
               .editor-content td {
                 border: 1px solid var(--color-border-primary);
-                padding: 8px 12px;
-                width: 120px;
-                min-width: 120px;
+                padding: 6px 10px;
+                min-width: 60px;
                 vertical-align: top;
                 word-break: break-word;
+                overflow-wrap: anywhere;
                 outline: none !important;
                 transition: background 0.1s ease;
+                font-size: 0.875em;
               }
 
               .editor-content td:focus-within {
@@ -4688,23 +4819,56 @@ export default function App() {
 
               .table-resize-handle {
                 position: absolute;
-                bottom: -2px;
-                right: -2px;
-                width: 14px;
-                height: 14px;
-                background: var(--color-icon-muted);
-                border-radius: 50%;
-                corner-shape: round;
+                bottom: 5px;
+                right: 5px;
+                width: 24px;
+                height: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 cursor: se-resize;
+                color: transparent;
+                transition: color 0.15s;
                 z-index: 10;
-                border: 2px solid var(--color-bg-primary, white);
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-                transition: transform 0.1s;
+                border-radius: 4px;
+              }
+
+              .table-wrapper:hover .table-resize-handle {
+                color: rgba(120, 120, 120, 0.5);
               }
 
               .table-resize-handle:hover {
-                transform: scale(1.2);
-                background: var(--color-accent);
+                color: rgba(60, 60, 60, 0.85) !important;
+              }
+
+              .table-delete-btn {
+                position: absolute;
+                top: -9px;
+                right: -9px;
+                width: 22px;
+                height: 22px;
+                background: var(--color-bg-secondary, #fff);
+                color: var(--color-text-muted, #888);
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                opacity: 0;
+                transition: opacity 0.15s, background 0.15s, color 0.15s;
+                cursor: pointer;
+                border: 1px solid var(--color-border-primary, #e5e7eb);
+                box-shadow: 0 1px 6px rgba(0,0,0,0.12);
+                z-index: 20;
+              }
+
+              .table-wrapper:hover .table-delete-btn {
+                opacity: 1;
+              }
+
+              .table-delete-btn:hover {
+                background: rgba(220, 38, 38, 0.9) !important;
+                color: white !important;
+                border-color: transparent !important;
               }
 
               .editor-content p:only-child:empty::before,
