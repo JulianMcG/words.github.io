@@ -1009,8 +1009,10 @@ export default function App() {
   const [isAltHeld, setIsAltHeld] = useState(false);
   const [pendingShareId, setPendingShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
   const [isCloudDocsLoaded, setIsCloudDocsLoaded] = useState(false);
+  const [syncVersion, setSyncVersion] = useState(0);
   const skipSyncRef = useRef(false);
   const pendingLocalSaveRef = useRef(false);
+  const ownLastUpdatedRef = useRef(null);
   const pointerDragRef = useRef(null); // { docId, idsToMove, clone, offsetY }
   const lastReorderRef = useRef(null); // prevents duplicate reorder state updates
   const dragStartPosRef = useRef(null); // { x, y } at mousedown on draggable items
@@ -1568,6 +1570,13 @@ export default function App() {
 
         // As long as there is SOME valid data, proceed with sync
         if (data.docs || data.groups) {
+          // Skip snapshots that are echoes of our own writes — they carry no new information
+          // and would otherwise trigger a 100ms skipSync window that blocks the user's next edit.
+          if (data.lastUpdated && ownLastUpdatedRef.current === data.lastUpdated) {
+            setIsCloudDocsLoaded(true);
+            return;
+          }
+
           skipSyncRef.current = true; // prevent the local useEffect from bouncing this right back
 
           if (data.docs) {
@@ -1619,6 +1628,10 @@ export default function App() {
           setTimeout(() => {
             skipSyncRef.current = false;
             setIsCloudDocsLoaded(true);
+            // If the user made edits while sync was blocked, unblock them now.
+            if (pendingLocalSaveRef.current) {
+              setSyncVersion(v => v + 1);
+            }
           }, 100);
         } else {
           setIsCloudDocsLoaded(true);
@@ -1634,14 +1647,16 @@ export default function App() {
         const actId = localStorage.getItem("words_active_doc");
         const lp = localStorage.getItem("words_lock_passcode");
 
+        const writeTime = new Date().toISOString();
         setDoc(doc(db, "users", user.uid), {
           docs: localDocs.length > 0 ? localDocs : docsRef.current, // Fallback to current state if empty
           groups: localGroups,
           activeDocId: actId || activeDocId,
           lockPasscode: lp || lockPasscode,
           trashedDocs: trashedDocsRef.current,
-          lastUpdated: new Date().toISOString()
+          lastUpdated: writeTime
         }).then(() => {
+          ownLastUpdatedRef.current = writeTime;
           skipSyncRef.current = false;
           setIsCloudDocsLoaded(true);
         });
@@ -1653,11 +1668,16 @@ export default function App() {
 
   // Sync to Firebase whenever local docs/groups change
   useEffect(() => {
-    if (!user || skipSyncRef.current) return;
+    if (!user) return;
 
+    // Always flag pending changes before the skipSync check — this prevents onSnapshot
+    // from applying stale cloud data over edits made during a skipSync window.
     pendingLocalSaveRef.current = true;
 
+    if (skipSyncRef.current) return;
+
     const syncData = async () => {
+      const writeTime = new Date().toISOString();
       try {
         await setDoc(doc(db, "users", user.uid), {
           docs: docsRef.current,
@@ -1665,8 +1685,9 @@ export default function App() {
           activeDocId,
           lockPasscode,
           trashedDocs: trashedDocsRef.current,
-          lastUpdated: new Date().toISOString()
+          lastUpdated: writeTime
         });
+        ownLastUpdatedRef.current = writeTime;
       } catch (e) {
         console.error("Error syncing to cloud:", e);
       } finally {
@@ -1676,7 +1697,7 @@ export default function App() {
 
     const timeout = setTimeout(syncData, 500); // debounce sync
     return () => clearTimeout(timeout);
-  }, [docs, groups, activeDocId, lockPasscode, trashedDocs, user]);
+  }, [docs, groups, activeDocId, lockPasscode, trashedDocs, user, syncVersion]);
 
   // Auto-name "New Folder" groups once they accumulate 2+ docs
   useEffect(() => {
