@@ -1015,6 +1015,8 @@ export default function App() {
   const ownLastUpdatedRef = useRef(null);
   const pointerDragRef = useRef(null); // { docId, idsToMove, clone, offsetY }
   const lastReorderRef = useRef(null); // prevents duplicate reorder state updates
+  const groupPointerDragRef = useRef(null); // { groupId, clone, offsetY }
+  const groupLastReorderRef = useRef(null);
   const dragStartPosRef = useRef(null); // { x, y } at mousedown on draggable items
   const [isGrabbing, setIsGrabbing] = useState(false);
 
@@ -1941,6 +1943,22 @@ export default function App() {
     });
   };
 
+  const liveReorderGroups = (groupId, targetGroupId, position) => {
+    const key = `${groupId}-${targetGroupId}-${position}`;
+    if (groupLastReorderRef.current === key) return;
+    groupLastReorderRef.current = key;
+    setGroups(prev => {
+      const dragged = prev.find(g => g.id === groupId);
+      if (!dragged) return prev;
+      const without = prev.filter(g => g.id !== groupId);
+      const targetIdx = without.findIndex(g => g.id === targetGroupId);
+      if (targetIdx === -1) return prev;
+      const result = [...without];
+      result.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, dragged);
+      return result;
+    });
+  };
+
   const FOLDER_COLORS = ['#9a9a97', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
 
   const getNextFolderColor = () => {
@@ -2179,6 +2197,93 @@ export default function App() {
       lastReorderRef.current = null;
       setFolderPendingId(null);
       setDragTarget(null);
+      setDraggedItem(null);
+      document.removeEventListener('pointermove', handleMove);
+      document.removeEventListener('pointerup', handleUp);
+    };
+
+    document.addEventListener('pointermove', handleMove);
+    document.addEventListener('pointerup', handleUp);
+  };
+
+  const startGroupPointerDrag = (e, groupId) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, a')) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragStarted = false;
+    const tryStart = (moveE) => {
+      const dx = moveE.clientX - startX;
+      const dy = moveE.clientY - startY;
+      if (!dragStarted && Math.sqrt(dx * dx + dy * dy) > 5) {
+        dragStarted = true;
+        cleanup();
+        initGroupDrag(groupId, moveE.clientX, moveE.clientY);
+      }
+    };
+    const cleanup = () => {
+      document.removeEventListener('pointermove', tryStart);
+      document.removeEventListener('pointerup', cleanup);
+    };
+    document.addEventListener('pointermove', tryStart);
+    document.addEventListener('pointerup', cleanup);
+  };
+
+  const initGroupDrag = (groupId, currentX, currentY) => {
+    const containerEl = document.querySelector(`[data-group-id="${groupId}"]`);
+    const el = containerEl?.querySelector('[data-group-header]');
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+
+    const clone = el.cloneNode(true);
+    Object.assign(clone.style, {
+      position: 'fixed',
+      top: rect.top + 'px',
+      left: rect.left + 'px',
+      width: rect.width + 'px',
+      margin: '0',
+      pointerEvents: 'none',
+      zIndex: '9999',
+      borderRadius: '0.375rem',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08)',
+      background: 'var(--color-bg-secondary)',
+      opacity: '0.55',
+      backdropFilter: 'blur(2px)',
+      transform: 'scale(1.015)',
+      transition: 'none',
+    });
+    document.body.appendChild(clone);
+
+    groupPointerDragRef.current = { groupId, clone, offsetY: currentY - rect.top };
+    groupLastReorderRef.current = null;
+    setDraggedItem({ type: 'group', id: groupId });
+
+    const handleMove = (moveE) => {
+      if (!groupPointerDragRef.current) return;
+      const { clone, offsetY } = groupPointerDragRef.current;
+      clone.style.top = (moveE.clientY - offsetY) + 'px';
+
+      clone.style.visibility = 'hidden';
+      const elBelow = document.elementFromPoint(moveE.clientX, moveE.clientY);
+      clone.style.visibility = 'visible';
+
+      if (!elBelow) return;
+
+      const groupEl = elBelow.closest('[data-group-id]');
+      if (groupEl) {
+        const targetId = groupEl.getAttribute('data-group-id');
+        if (targetId === groupId) return;
+        const targetRect = groupEl.getBoundingClientRect();
+        const position = moveE.clientY - targetRect.top < targetRect.height / 2 ? 'before' : 'after';
+        liveReorderGroups(groupId, targetId, position);
+      }
+    };
+
+    const handleUp = () => {
+      if (!groupPointerDragRef.current) return;
+      groupPointerDragRef.current.clone.remove();
+      groupPointerDragRef.current = null;
+      groupLastReorderRef.current = null;
       setDraggedItem(null);
       document.removeEventListener('pointermove', handleMove);
       document.removeEventListener('pointerup', handleUp);
@@ -5335,31 +5440,23 @@ export default function App() {
                 <div className="flex-1 flex flex-col relative z-0 mt-2">
                   {/* Document Groups */}
                   <div className="space-y-[2px] mb-2">
+                    <AnimatePresence initial={false}>
                     {groups.map((group) => {
                       const groupDocs = regularDocs.filter((d) => d.groupId === group.id);
                       return (
-                        <div
+                        <motion.div
                           key={group.id}
+                          layout="position"
+                          transition={{ type: "spring", stiffness: 500, damping: 40, mass: 1 }}
                           data-group-id={group.id}
                           className="flex flex-col relative"
-                          onDragOver={(e) => handleSidebarDragOver(e, group.id, 'group')}
-                          onDrop={(e) => handleDropOnGroup(e, group.id)}
                         >
-                          {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'before' && (
-                            <div className="absolute top-[-1px] left-2 right-2 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
-                          )}
-                          {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'after' && (
-                            <div className="absolute bottom-[-1px] left-2 right-2 h-[2px] bg-[#E8572A] rounded-full z-10 pointer-events-none" />
-                          )}
-                          {dragTarget?.id === group.id && dragTarget?.type === 'group' && dragTarget?.position === 'inset' && (
-                            <div className="absolute inset-0 rounded-md bg-[var(--color-text-primary)]/[0.06] pointer-events-none z-10" />
-                          )}
                           <div
+                            data-group-header={group.id}
                             className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'}`}
                             style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
-                            draggable
                             data-sidebar-item
-                            onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; }}
+                            onPointerDown={(e) => startGroupPointerDrag(e, group.id)}
                             onMouseEnter={(e) => {
                               clearTimeout(hoverTimeoutRef.current);
                               setPreviewHoverDocId(null);
@@ -5379,16 +5476,6 @@ export default function App() {
                                 setPreviewHoverGroupId(null);
                               }, 300);
                             }}
-                            onDragStart={(e) => {
-                              // Prevent input from blocking the drag
-                              if (e.target.tagName === 'INPUT') {
-                                e.preventDefault();
-                                return;
-                              }
-                              handleDragStart(e, 'group', group.id);
-                            }}
-                            onDragEnd={handleDragEnd}
-                            onDragLeave={handleDragLeave}
                           >
                             <div
                               className="flex items-center gap-2.5 flex-1 cursor-pointer overflow-hidden"
@@ -5521,9 +5608,10 @@ export default function App() {
                               </motion.div>
                             )}
                           </AnimatePresence>
-                        </div>
+                        </motion.div>
                       );
                     })}
+                    </AnimatePresence>
                   </div>
 
                   {/* Ungrouped Documents */}
@@ -6094,28 +6182,28 @@ export default function App() {
               <>
                 <button
                   onClick={(e) => formatText(e, "bold")}
-                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isBold ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isBold ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
                   title="Bold"
                 >
                   <Bold size={14} />
                 </button>
                 <button
                   onClick={(e) => formatText(e, "italic")}
-                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isItalic ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isItalic ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
                   title="Italic"
                 >
                   <Italic size={14} />
                 </button>
                 <button
                   onClick={(e) => formatText(e, "underline")}
-                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isUnderline ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isUnderline ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
                   title="Underline"
                 >
                   <Underline size={14} />
                 </button>
                 <button
                   onClick={(e) => formatText(e, "strikeThrough")}
-                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isStrikethrough ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isStrikethrough ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
                   title="Strikethrough"
                 >
                   <Strikethrough size={14} />
@@ -6175,10 +6263,49 @@ export default function App() {
                       if (isHighlighted && currentColor === expectedRgba) {
                         formatText(e, "backColor", "transparent");
                       } else {
-                        formatText(e, "backColor", expectedHex);
+                        const existingSpans = new Set(
+                          Array.from(editorRef.current.querySelectorAll('[style*="background-color"]'))
+                        );
+                        e.preventDefault();
+                        document.execCommand('backColor', false, expectedHex);
+                        const newSpans = Array.from(editorRef.current.querySelectorAll('[style*="background-color"]'))
+                          .filter(el => !existingSpans.has(el) && el.style.backgroundColor && el.style.backgroundColor !== 'transparent' && el.style.backgroundColor !== 'rgba(0, 0, 0, 0)');
+                        if (newSpans.length === 0) {
+                          syncContentToState();
+                        } else {
+                          let pending = newSpans.length;
+                          newSpans.forEach(span => {
+                            const color = span.style.backgroundColor;
+                            span.style.backgroundColor = 'transparent';
+                            span.style.backgroundImage = `linear-gradient(${color}, ${color})`;
+                            span.style.backgroundSize = '0% 100%';
+                            span.style.backgroundRepeat = 'no-repeat';
+                            span.style.backgroundPosition = 'left center';
+                            requestAnimationFrame(() => {
+                              // Force the browser to commit the initial 0% state before transitioning
+                              void getComputedStyle(span).backgroundSize;
+                              span.style.transition = 'background-size 200ms cubic-bezier(0.4, 0, 0.2, 1)';
+                              span.style.backgroundSize = '100% 100%';
+                              let cleaned = false;
+                              const cleanup = () => {
+                                if (cleaned) return;
+                                cleaned = true;
+                                span.style.backgroundColor = color;
+                                span.style.backgroundImage = '';
+                                span.style.backgroundSize = '';
+                                span.style.backgroundRepeat = '';
+                                span.style.backgroundPosition = '';
+                                span.style.transition = '';
+                                if (--pending === 0) syncContentToState();
+                              };
+                              span.addEventListener('transitionend', cleanup, { once: true });
+                              setTimeout(cleanup, 350);
+                            });
+                          });
+                        }
                       }
                     }}
-                    className={`p-1.5 rounded-md transition-colors ${toolbarState.isHighlighted ? 'text-[var(--color-accent)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                    className={`p-1.5 rounded-md transition-colors ${toolbarState.isHighlighted ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
                     title="Toggle Highlight"
                   >
                     <Highlighter size={14} />
@@ -6197,7 +6324,7 @@ export default function App() {
                   {/* Color Context Menus */}
                   {toolbarState.showColorPicker && (
                     <div className="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-md px-1 py-1 flex items-center gap-0.5 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-100">
-                      {['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6'].map(color => (
+                      {['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'].map(color => (
                         <button
                           key={color}
                           onClick={(e) => {
