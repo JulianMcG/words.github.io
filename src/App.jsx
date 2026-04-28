@@ -67,6 +67,9 @@ import BuddyWidget from "./components/BuddyWidget";
 import { getEmojiForTitle } from "./utils/emojiMap";
 import EmojiPickerPanel from "./components/EmojiPicker";
 import { generateFolderName, generateDocTitle } from "./utils/gemini";
+import FolderIconPicker from "./components/FolderIconPicker";
+import { FolderIcon } from "./utils/folderIcons";
+import { getIconForFolderName } from "./utils/folderIconMap";
 
 function formatVersionTime(timestamp) {
   return new Date(timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
@@ -816,29 +819,61 @@ const fetchLinkPreviewData = async (url) => {
     }
   }
 };
-const AnimatedFolder = ({ isOpen, color, fill }) => {
-  const backStyle = {
-    transform: isOpen ? "skewX(8deg)" : "skewX(0deg)"
-  };
-  const frontStyle = {
-    transform: isOpen ? "scaleY(0.7) skewX(-16deg)" : "scaleY(1) skewX(0deg)"
-  };
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="none" className="overflow-visible">
-      {/* Back tab opaque mask */}
-      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
-      {/* Back tab color overlay */}
-      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px] brightness-90" style={backStyle} />
-      {/* Back tab stroke layer */}
-      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" stroke={color || "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
+const AnimatedFolder = ({ isOpen, color, fill, icon, animating }) => {
+  const backStyle = { transform: isOpen ? "skewX(8deg)" : "skewX(0deg)" };
+  const frontTransform = isOpen ? "scaleY(0.7) skewX(-16deg)" : "scaleY(1) skewX(0deg)";
+  const frontStyle = { transform: frontTransform };
 
-      {/* Front flap opaque mask */}
-      <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
-      {/* Front flap color overlay */}
-      <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
-      {/* Front flap stroke layer */}
-      <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" stroke={color || "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
-    </svg>
+  // The icon overlay uses the same Tailwind transition class as the SVG paths
+  // so the easing/timing is byte-for-byte identical, preventing any drift.
+  //
+  // Geometry: SVG 20×20 in a 22×22 container → SVG starts at (1,1).
+  // CSS transform-origin "50% 21px" on the paths = (10px, 21px) from SVG top-left
+  //   = container (11, 22).  Place the icon pivot div AT that point.
+  // Front-flap spans viewBox y 6–21 → CSS y 5–17.5 → container y 6–18.5
+  //   → centre at container y 12.25 → offset above pivot = 22 − 12.25 = 9.75 px.
+
+  return (
+    <>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="none" className="overflow-visible">
+        {/* Back tab opaque mask */}
+        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
+        {/* Back tab color overlay */}
+        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px] brightness-90" style={backStyle} />
+        {/* Back tab stroke */}
+        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" stroke={color || "currentColor"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
+        {/* Front flap opaque mask */}
+        <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+        {/* Front flap color overlay */}
+        <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+        {/* Front flap stroke */}
+        <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" stroke={color || "currentColor"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+      </svg>
+      {icon && (
+        <div
+          className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] pointer-events-none"
+          style={{
+            position: 'absolute',
+            top: 22,
+            left: 11,
+            transformOrigin: '0 0',
+            transform: frontTransform,
+          }}
+        >
+          {/* Outer span handles centering; inner span handles the pop animation
+              so scale(0.5→1) doesn't fight with translate(-50%,-50%) */}
+          <span style={{ position: 'absolute', top: -9.75, left: 0, transform: 'translate(-50%, -50%)', display: 'block' }}>
+            <FolderIcon
+              key={animating ? `anim-${icon}` : icon}
+              name={icon}
+              size={8}
+              className={animating ? 'animate-tasteful-pop' : ''}
+              style={{ color: color || 'var(--color-icon-muted)', display: 'block' }}
+            />
+          </span>
+        </div>
+      )}
+    </>
   );
 };
 
@@ -889,6 +924,7 @@ export default function App() {
   const [isSidebarScrolled, setIsSidebarScrolled] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [animatingEmojiDocId, setAnimatingEmojiDocId] = useState(null);
+  const [animatingIconGroupId, setAnimatingIconGroupId] = useState(null);
   const [autoNamingDocId, setAutoNamingDocId] = useState(null);
   const [previewHoverDocId, setPreviewHoverDocId] = useState(null);
   const [previewHoverGroupId, setPreviewHoverGroupId] = useState(null);
@@ -951,6 +987,7 @@ export default function App() {
   const [editingDocId, setEditingDocId] = useState(null);
   const [editingDocTitle, setEditingDocTitle] = useState('');
   const [groupMenuOpen, setGroupMenuOpen] = useState(null);
+  const [folderCustomizeOpen, setFolderCustomizeOpen] = useState(null);
   const [editingGroupId, setEditingGroupId] = useState(null);
   const [animatingDocId, setAnimatingDocId] = useState(null);
 
@@ -1137,6 +1174,7 @@ export default function App() {
   const trashHoverTimeoutRef = useRef(null);
   const isInternalEdit = useRef(false);
   const titleTimeoutRef = useRef(null);
+  const folderIconTimeoutRef = useRef(null);
   const prevActiveDocIdRef = useRef(activeDocId);
   const docHistoryRef = useRef([activeDocId].filter(Boolean)); // [current, previous] for Option+Tab
   // Only updated in useEffect so it always lags one render behind — reliable doc-switch detector at render time
@@ -1562,10 +1600,18 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
+    // The very first snapshot after subscribing must ALWAYS be applied — it's the
+    // initial cloud load. Without this bypass, the sync-up effect's spurious run
+    // (triggered by `user` flipping to a real value) marks pendingLocalSaveRef=true
+    // before the snapshot arrives, and the guard below silently discards real
+    // cloud data — leaving every device stuck on its own stale localStorage.
+    let hasReceivedFirstSnapshot = false;
+
     // Subscribe to changes from the cloud.
     const unsubscribe = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
       // Ignore cloud snapshots if we have local pending changes that haven't been saved/acknowledged yet
-      if (pendingLocalSaveRef.current) return;
+      if (hasReceivedFirstSnapshot && pendingLocalSaveRef.current) return;
+      hasReceivedFirstSnapshot = true;
 
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -1674,6 +1720,8 @@ export default function App() {
 
     // Always flag pending changes before the skipSync check — this prevents onSnapshot
     // from applying stale cloud data over edits made during a skipSync window.
+    // The first-snapshot bypass in the subscription effect ensures the initial cloud
+    // load isn't blocked by this guard.
     pendingLocalSaveRef.current = true;
 
     if (skipSyncRef.current) return;
@@ -1913,14 +1961,14 @@ export default function App() {
     const DISMISS_THRESHOLD = 30;
     const SIDEBAR_WIDTH = 256;
     const handleMouseMove = (e) => {
-      if (previewHoverGroupId || previewHoverDocId || contextMenu || groupMenuOpen) return;
+      if (previewHoverGroupId || previewHoverDocId || contextMenu || groupMenuOpen || folderCustomizeOpen) return;
       if (e.clientX > SIDEBAR_WIDTH + DISMISS_THRESHOLD) {
         setIsSidebarPeeking(false);
       }
     };
     document.addEventListener('mousemove', handleMouseMove);
     return () => document.removeEventListener('mousemove', handleMouseMove);
-  }, [isSidebarPeeking, isSidebarOpen, previewHoverGroupId, previewHoverDocId, contextMenu, groupMenuOpen]);
+  }, [isSidebarPeeking, isSidebarOpen, previewHoverGroupId, previewHoverDocId, contextMenu, groupMenuOpen, folderCustomizeOpen]);
 
   // Live-reorder docs during pointer drag (adopted target's groupId)
   const liveReorderDocs = (idsToMove, targetId, position) => {
@@ -1972,8 +2020,15 @@ export default function App() {
     aiNamingInitiatedRef.current.add(groupId);
     generateFolderName(titles).then(aiName => {
       newlyNamedGroupsRef.current.add(groupId);
+      const autoIcon = getIconForFolderName(aiName || "");
+      if (autoIcon) {
+        setAnimatingIconGroupId(groupId);
+        setTimeout(() => setAnimatingIconGroupId(p => p === groupId ? null : p), 400);
+      }
       setGroups(prev => prev.map(g =>
-        g.id === groupId ? { ...g, name: aiName || "New Folder", isNaming: false } : g
+        g.id === groupId
+          ? { ...g, name: aiName || "New Folder", isNaming: false, ...(autoIcon && !g.hasCustomIcon ? { icon: autoIcon } : {}) }
+          : g
       ));
     });
   };
@@ -5486,23 +5541,40 @@ export default function App() {
                               }}
                             >
                               <div
-                                className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5 cursor-pointer transition-transform hover:scale-110"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const FOLDER_COLORS = ['#9a9a97', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
-                                  const nextColor = FOLDER_COLORS[(FOLDER_COLORS.indexOf(group.color) + 1) % FOLDER_COLORS.length] || FOLDER_COLORS[0];
-                                  updateGroup(group.id, { color: nextColor });
-                                }}
-                                title="Change folder color"
+                                className="relative flex-shrink-0 select-none flex items-center justify-center w-[22px] h-[22px]"
                               >
-                                <AnimatedFolder isOpen={!group.isCollapsed} color={group.color || 'var(--color-icon-muted)'} fill={group.color ? group.color + '40' : 'none'} />
+                                <AnimatedFolder
+                                  isOpen={!group.isCollapsed}
+                                  color={group.color || 'var(--color-icon-muted)'}
+                                  fill={group.color ? group.color + '40' : 'none'}
+                                  icon={group.icon}
+                                  animating={animatingIconGroupId === group.id}
+                                />
                               </div>
                               {editingGroupId === group.id ? (
                                 <input
                                   type="text"
                                   autoFocus
                                   value={group.name}
-                                  onChange={(e) => updateGroup(group.id, { name: e.target.value })}
+                                  onChange={(e) => {
+                                    const newName = e.target.value;
+                                    updateGroup(group.id, { name: newName });
+                                    // Auto-assign icon from name, like emoji auto-assign on pages
+                                    if (folderIconTimeoutRef.current) clearTimeout(folderIconTimeoutRef.current);
+                                    folderIconTimeoutRef.current = setTimeout(() => {
+                                      const gId = group.id;
+                                      setGroups(prev => prev.map(g => {
+                                        if (g.id !== gId || g.hasCustomIcon) return g;
+                                        const autoIcon = getIconForFolderName(newName);
+                                        if (autoIcon) {
+                                          setAnimatingIconGroupId(gId);
+                                          setTimeout(() => setAnimatingIconGroupId(p => p === gId ? null : p), 400);
+                                          return { ...g, icon: autoIcon };
+                                        }
+                                        return g;
+                                      }));
+                                    }, 600);
+                                  }}
                                   onClick={(e) => e.stopPropagation()}
                                   draggable={false}
                                   onDragStart={(e) => e.stopPropagation()}
@@ -6731,6 +6803,22 @@ export default function App() {
                 className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                 onClick={(e) => {
                   e.stopPropagation();
+                  const panelW = 272, panelH = 400;
+                  let x = groupMenuOpen.x + 184;
+                  let y = groupMenuOpen.y;
+                  if (x + panelW > window.innerWidth - 8) x = groupMenuOpen.x - panelW - 8;
+                  x = Math.max(8, x);
+                  if (y + panelH > window.innerHeight - 8) y = Math.max(8, window.innerHeight - panelH - 8);
+                  setGroupMenuOpen(null);
+                  setFolderCustomizeOpen({ id: menuGroup.id, x, y });
+                }}
+              >
+                <Paintbrush size={14} /> Customize
+              </button>
+              <button
+                className="w-full text-left px-3 py-2 flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
                   setEditingGroupId(menuGroup.id);
                   setGroupMenuOpen(null);
                 }}
@@ -6748,6 +6836,33 @@ export default function App() {
               >
                 <FolderMinus size={14} /> Ungroup
               </button>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* Folder Customize Panel */}
+      {folderCustomizeOpen && (() => {
+        const customizeGroup = groups.find(g => g.id === folderCustomizeOpen.id);
+        if (!customizeGroup) return null;
+        return (
+          <>
+            <div
+              className="fixed inset-0 z-[59]"
+              onClick={() => setFolderCustomizeOpen(null)}
+            />
+            <div
+              className="fixed z-[60] animate-in fade-in zoom-in-95 duration-100"
+              style={{ top: folderCustomizeOpen.y, left: folderCustomizeOpen.x }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <FolderIconPicker
+                currentColor={customizeGroup.color}
+                currentIcon={customizeGroup.icon}
+                onSelectColor={(color) => updateGroup(customizeGroup.id, { color })}
+                onSelectIcon={(iconName) => updateGroup(customizeGroup.id, { icon: iconName, hasCustomIcon: true })}
+                onRemoveIcon={() => updateGroup(customizeGroup.id, { icon: null, hasCustomIcon: false })}
+              />
             </div>
           </>
         );
