@@ -953,6 +953,7 @@ export default function App() {
   const [autoNamingDocId, setAutoNamingDocId] = useState(null);
   const [previewHoverDocId, setPreviewHoverDocId] = useState(null);
   const [previewHoverGroupId, setPreviewHoverGroupId] = useState(null);
+  const [hoverGroupId, setHoverGroupId] = useState(null);
   const hoverTimeoutRef = useRef(null);
   const [previewPos, setPreviewPos] = useState({ top: 0, left: 0 });
   const [groupPreviewPos, setGroupPreviewPos] = useState({ top: 0, left: 0 });
@@ -1218,6 +1219,7 @@ export default function App() {
   const dragSourceRangeRef = useRef(null);
   const isInternalTextDragRef = useRef(false);
   const dragCursorRef = useRef(null);
+  const recentlyPinnedRef = useRef(new Set());
   const newlyNamedGroupsRef = useRef(new Set());
   const aiNamingInitiatedRef = useRef(new Set());
   const autoTitledDocsRef = useRef(new Set());
@@ -2686,7 +2688,7 @@ export default function App() {
             }
             return { ...d, title: aiTitle, emoji: autoEmoji };
           }));
-          if (titleRef.current && !titleRef.current.textContent.trim()) {
+          if (titleRef.current && !titleRef.current.textContent.trim() && renderedDocIdRef.current === docIdToName) {
             titleRef.current.textContent = aiTitle;
           }
         });
@@ -3018,6 +3020,11 @@ export default function App() {
 
   const togglePinDoc = (e, id) => {
     e.stopPropagation();
+    const wasUnpinned = !docsRef.current.find(d => d.id === id)?.isPinned;
+    if (wasUnpinned) {
+      recentlyPinnedRef.current.add(id);
+      setTimeout(() => recentlyPinnedRef.current.delete(id), 400);
+    }
     const newDocs = docsRef.current.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned, pinnedAt: !d.isPinned ? Date.now() : d.pinnedAt } : d));
     docsRef.current = newDocs;
     setDocs(newDocs);
@@ -5499,7 +5506,7 @@ export default function App() {
             ) : (
               <>
                 {/* Sticky Header Zone */}
-                <div className="sticky top-0 z-20 bg-[var(--color-bg-secondary)] pb-2 pt-2 -mt-2">
+                <div className="sticky top-0 z-20 bg-[var(--color-bg-secondary)] pb-1 pt-0 -mt-2">
                   <div className={`absolute top-full left-0 right-0 h-8 pointer-events-none transition-opacity duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isSidebarScrolled ? 'opacity-100' : 'opacity-0'}`}>
                     <GradualBlur position="top" height="100%" strength={0.15} divCount={4} zIndex={0} />
                     <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-bg-secondary)] to-transparent z-10" />
@@ -5521,7 +5528,7 @@ export default function App() {
                       style={{ overflow: "hidden" }}
                       className="-mx-2"
                     >
-                      <div className="grid gap-1 px-2 pt-2.5 pb-3" style={{ gridTemplateColumns: `repeat(${Math.min(pinnedDocs.length, 4)}, 1fr)` }}>
+                      <div className="grid gap-1 px-2 pt-2 pb-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(pinnedDocs.length, 4)}, 1fr)` }}>
                       <AnimatePresence initial={false}>
                       {pinnedDocs.map((doc) => {
                             const isActive = activeDocId === doc.id;
@@ -5532,7 +5539,7 @@ export default function App() {
                                 key={doc.id}
                                 initial={{ opacity: 1 }}
                                 animate={{ opacity: isDraggingThis ? 0 : 1 }}
-                                exit={{ opacity: 0, transition: { duration: 0.08 } }}
+                                exit={pinnedDocs.length > 1 ? {} : { opacity: 0, transition: { duration: 0.08 } }}
                                 data-doc-id={doc.id}
                                 data-sidebar-item
                                 onPointerDown={(e) => startDocPointerDrag(e, doc.id)}
@@ -5556,7 +5563,7 @@ export default function App() {
                                 }}
                                 style={isDraggingThis ? { pointerEvents: 'none' } : undefined}
                                 onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; }}
-                                className={`group relative flex items-center justify-center p-2 rounded-lg ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} transition-all border select-none ${isSelected || isActive
+                                className={`group relative flex items-center justify-center py-3 px-2 rounded-lg ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} transition-all border select-none ${isSelected || isActive
                                   ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
                                   : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
                                   }`}
@@ -5564,7 +5571,7 @@ export default function App() {
                               >
                                 <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
                                   {doc.emoji ? (
-                                    <span className="animate-in zoom-in spin-in-12 duration-300">
+                                    <span className={recentlyPinnedRef.current.has(doc.id) ? "animate-in zoom-in spin-in-12 duration-300" : undefined}>
                                       {doc.emoji}
                                     </span>
                                   ) : (
@@ -5603,45 +5610,11 @@ export default function App() {
                   )}
                   </AnimatePresence>
 
-                  {/* New Document Button or Create Group Button */}
-                  <div className="space-y-[1px]">
-                    {selectedDocIds.length > 1 ? (
-                      <div
-                        data-sidebar-item
-                        onClick={createGroup}
-                        className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-                      >
-                        <div className="flex items-center gap-2.5 overflow-hidden">
-                          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
-                            <Folder size={16} className="text-[var(--color-icon-muted)]" />
-                          </div>
-                          <span className="text-[14px] truncate select-none font-medium text-[var(--color-text-primary)]">
-                            Group {selectedDocIds.length} items
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        data-sidebar-item
-                        onClick={createNewDoc}
-                        className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-                      >
-                        <div className="flex items-center gap-2.5 overflow-hidden">
-                          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
-                            <Plus size={16} className="text-[var(--color-icon-muted)]" />
-                          </div>
-                          <span className="text-[14px] truncate select-none text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors">
-                            New Page
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 </div>
 
                 <div className="flex-1 flex flex-col relative z-0 mt-2">
                   {/* Document Groups */}
-                  <div className="space-y-[2px] mb-2">
+                  <div className="space-y-[2px]">
                     <AnimatePresence initial={false}>
                     {groups.map((group) => {
                       const groupDocs = regularDocs.filter((d) => d.groupId === group.id);
@@ -5651,12 +5624,15 @@ export default function App() {
                           layout="position"
                           transition={{ type: "spring", stiffness: 500, damping: 40, mass: 1 }}
                           data-group-id={group.id}
-                          className="flex flex-col relative"
+                          className="flex flex-col relative rounded-md transition-colors"
+                          style={{ backgroundColor: group.color && !group.isCollapsed ? group.color + '10' : undefined }}
+                          onMouseEnter={() => setHoverGroupId(group.id)}
+                          onMouseLeave={() => setHoverGroupId(null)}
                         >
                           <div
                             data-group-header={group.id}
-                            className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'}`}
-                            style={{ backgroundColor: group.color ? group.color + '10' : undefined }}
+                            className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] transition-colors ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} ${hoverGroupId === group.id ? (group.color ? '' : 'bg-[var(--color-bg-hover)]') : ''}`}
+                            style={{ backgroundColor: group.color && hoverGroupId === group.id && group.isCollapsed ? group.color + '10' : undefined }}
                             data-sidebar-item
                             onPointerDown={(e) => startGroupPointerDrag(e, group.id)}
                             onMouseEnter={(e) => {
@@ -5797,7 +5773,7 @@ export default function App() {
                             className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${group.isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
                           >
                             <div className="overflow-hidden">
-                              <div className="pl-4 pr-1 pt-0.5 pb-1">
+                              <div className="pl-4 pr-1 pt-0.5 pb-1" style={group.color ? { '--color-bg-hover': 'rgba(0,0,0,0.04)', '--color-bg-hover-strong': group.color + '30' } : undefined}>
                                 <AnimatePresence initial={false}>
                                   {groupDocs.length > 0 ? (
                                     groupDocs.map(renderDocItem)
@@ -5833,8 +5809,57 @@ export default function App() {
                     </AnimatePresence>
                   </div>
 
+                  {/* Divider between folders and New Page — only when folders exist */}
+                  <AnimatePresence initial={false}>
+                    {groups.length > 0 && (
+                      <motion.div
+                        key="folder-divider"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="mx-3 mt-2.5 mb-2 h-px bg-[var(--color-border-primary)]/50"
+                      />
+                    )}
+                  </AnimatePresence>
+
+                  {/* New Page / Group N items button */}
+                  <div className="space-y-[1px]">
+                    {selectedDocIds.length > 1 ? (
+                      <div
+                        data-sidebar-item
+                        onClick={createGroup}
+                        className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+                      >
+                        <div className="flex items-center gap-2.5 overflow-hidden">
+                          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                            <Folder size={16} className="text-[var(--color-icon-muted)]" />
+                          </div>
+                          <span className="text-[14px] truncate select-none font-medium text-[var(--color-text-primary)]">
+                            Group {selectedDocIds.length} items
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        data-sidebar-item
+                        onClick={createNewDoc}
+                        className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+                      >
+                        <div className="flex items-center gap-2.5 overflow-hidden">
+                          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                            <Plus size={16} className="text-[var(--color-icon-muted)]" />
+                          </div>
+                          <span className="text-[14px] truncate select-none text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors">
+                            New Page
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Ungrouped Documents */}
-                  <div>
+                  <div className="mt-[2px]">
                     <AnimatePresence initial={false}>
                       {ungroupedDocs.map(renderDocItem)}
                     </AnimatePresence>
