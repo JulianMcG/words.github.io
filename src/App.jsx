@@ -1466,14 +1466,12 @@ export default function App() {
   }, [groups]);
 
   useEffect(() => {
-    if (!user) {
-      try {
-        localStorage.setItem("words_active_doc", activeDocId);
-      } catch (error) {
-        console.warn("Failed to save active doc state to local storage.", error);
-      }
+    try {
+      localStorage.setItem("words_active_doc", activeDocId);
+    } catch (error) {
+      console.warn("Failed to save active doc state to local storage.", error);
     }
-  }, [activeDocId, user]);
+  }, [activeDocId]);
 
   // Sync active document to URL
   useEffect(() => {
@@ -1684,12 +1682,11 @@ export default function App() {
                 trashedDocsRef.current = freshTrash;
                 setTrashedDocs(freshTrash);
               }
-              let nextActiveId = stash.activeDocId;
-              if (!(nextActiveId && stash.docs.some(d => d.id === nextActiveId))) {
-                nextActiveId = stash.docs[0]?.id || null;
-              }
+              let nextActiveId = stash.docs.some(d => d.id === activeDocId)
+                ? activeDocId
+                : (stash.docs[0]?.id || null);
               if (nextActiveId) {
-                setActiveDocId(nextActiveId);
+                if (nextActiveId !== activeDocId) setActiveDocId(nextActiveId);
                 prevActiveDocIdRef.current = nextActiveId;
                 const activeDoc = stash.docs.find(d => d.id === nextActiveId);
                 if (activeDoc && editorRef.current && titleRef.current) {
@@ -1762,13 +1759,12 @@ export default function App() {
           }
 
           if (data.docs) {
-            let nextActiveId = data.activeDocId;
-            if (nextActiveId && data.docs.some(d => d.id === nextActiveId)) {
-              setActiveDocId(nextActiveId);
-            } else if (data.docs.length > 0) {
-              nextActiveId = data.docs[0].id;
-              setActiveDocId(nextActiveId);
-            }
+            // Keep the current tab's active doc — don't switch based on cloud data.
+            // Each tab/bookmark is independent, like Notion.
+            let nextActiveId = data.docs.some(d => d.id === activeDocId)
+              ? activeDocId
+              : (data.docs[0]?.id || null);
+            if (nextActiveId && nextActiveId !== activeDocId) setActiveDocId(nextActiveId);
 
             // Force immediate synchronous DOM update with cloud content,
             // but only if the content actually changed (avoids cursor reset
