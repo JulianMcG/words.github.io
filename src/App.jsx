@@ -347,6 +347,28 @@ const NATIVE_HIGHLIGHT_COLORS = new Map([
   ["rgba(0,0,0,0)", "transparent"],
 ]);
 
+// editHistory is per-device undo state; it can grow to ~150 full-content snapshots per
+// doc and would push large accounts past Firestore's 1 MiB per-document limit, causing
+// setDoc to fail server-side and the local cache to roll back (which fires onSnapshot
+// with stale data — the "edit appears, then disappears" bug).
+const stripCloudHeavy = (docs) => docs.map((d) => {
+  if (!d || !d.editHistory || d.editHistory.length === 0) return d;
+  const { editHistory, ...rest } = d;
+  return rest;
+});
+
+// Cloud payloads don't carry editHistory anymore — merge local history back onto
+// the docs we just received from a snapshot so the per-device undo timeline isn't
+// wiped on every cross-tab/cross-device sync.
+const mergeLocalHistory = (incoming, current) => {
+  const byId = new Map((current || []).map((d) => [d.id, d.editHistory]));
+  return incoming.map((d) => {
+    if (d.editHistory && d.editHistory.length > 0) return d;
+    const local = byId.get(d.id);
+    return local && local.length > 0 ? { ...d, editHistory: local } : d;
+  });
+};
+
 const hasMeaningfulText = (text = "") => text.replace(/\u00A0/g, " ").trim().length > 0;
 
 const escapeHtml = (text = "") => {
@@ -1049,7 +1071,12 @@ export default function App() {
   const [syncVersion, setSyncVersion] = useState(0);
   const skipSyncRef = useRef(false);
   const pendingLocalSaveRef = useRef(false);
+  const applyingSnapshotRef = useRef(false);
+  const pendingSerialRef = useRef(0);
   const ownLastUpdatedRef = useRef(null);
+  const userRef = useRef(null);
+  const groupsRef = useRef([]);
+  const lockPasscodeRef = useRef(null);
   const pointerDragRef = useRef(null); // { docId, idsToMove, clone, offsetY }
   const lastReorderRef = useRef(null); // prevents duplicate reorder state updates
   const groupPointerDragRef = useRef(null); // { groupId, clone, offsetY }
@@ -1109,6 +1136,10 @@ export default function App() {
       localStorage.setItem("words_trash", JSON.stringify(trashedDocs));
     } catch (e) {}
   }, [trashedDocs]);
+
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { groupsRef.current = groups; }, [groups]);
+  useEffect(() => { lockPasscodeRef.current = lockPasscode; }, [lockPasscode]);
 
   // We don't want to use state for the backups, otherwise they re-render when they shouldn't.
   // We'll use refs, and initialize them from localStorage if they exist.
@@ -1611,7 +1642,73 @@ export default function App() {
     const unsubscribe = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
       // Ignore cloud snapshots if we have local pending changes that haven't been saved/acknowledged yet
       if (hasReceivedFirstSnapshot && pendingLocalSaveRef.current) return;
+      const isFirstSnapshot = !hasReceivedFirstSnapshot;
       hasReceivedFirstSnapshot = true;
+
+      // First-snapshot reconciliation: if a previous session left a pending stash
+      // (in-flight setDoc never landed before unload), and its timestamp beats the
+      // cloud copy, push the stash up before the snapshot overwrites the editor.
+      if (isFirstSnapshot) {
+        try {
+          const stashRaw = localStorage.getItem(`words_pending_${user.uid}`);
+          if (stashRaw) {
+            const stash = JSON.parse(stashRaw);
+            const cloudLastUpdated = (docSnap.exists() && docSnap.data().lastUpdated) || '';
+            if (stash && stash.lastUpdated && stash.lastUpdated > cloudLastUpdated && Array.isArray(stash.docs)) {
+              skipSyncRef.current = true;
+              applyingSnapshotRef.current = true;
+              docsRef.current = stash.docs;
+              setDocs(stash.docs);
+              if (Array.isArray(stash.groups)) setGroups(stash.groups);
+              setLockPasscode(stash.lockPasscode || null);
+              if (Array.isArray(stash.trashedDocs)) {
+                const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+                const freshTrash = stash.trashedDocs.filter(d => d.deletedAt > cutoff);
+                trashedDocsRef.current = freshTrash;
+                setTrashedDocs(freshTrash);
+              }
+              let nextActiveId = stash.activeDocId;
+              if (!(nextActiveId && stash.docs.some(d => d.id === nextActiveId))) {
+                nextActiveId = stash.docs[0]?.id || null;
+              }
+              if (nextActiveId) {
+                setActiveDocId(nextActiveId);
+                prevActiveDocIdRef.current = nextActiveId;
+                const activeDoc = stash.docs.find(d => d.id === nextActiveId);
+                if (activeDoc && editorRef.current && titleRef.current) {
+                  if (titleRef.current.textContent !== activeDoc.title && document.activeElement !== titleRef.current) {
+                    titleRef.current.textContent = activeDoc.title || '';
+                  }
+                  if (editorRef.current.innerHTML !== activeDoc.content) {
+                    editorRef.current.innerHTML = activeDoc.content;
+                  }
+                }
+              }
+              setDoc(doc(db, "users", user.uid), {
+                docs: stripCloudHeavy(stash.docs),
+                groups: Array.isArray(stash.groups) ? stash.groups : [],
+                activeDocId: nextActiveId,
+                lockPasscode: stash.lockPasscode || null,
+                trashedDocs: trashedDocsRef.current,
+                lastUpdated: stash.lastUpdated,
+              }).then(() => {
+                ownLastUpdatedRef.current = stash.lastUpdated;
+                try { localStorage.removeItem(`words_pending_${user.uid}`); } catch (e) { }
+              }).catch(() => { });
+              setTimeout(() => {
+                skipSyncRef.current = false;
+                setIsCloudDocsLoaded(true);
+              }, 100);
+              return;
+            } else {
+              // Stash is stale (cloud is newer or already in sync) — drop it.
+              try { localStorage.removeItem(`words_pending_${user.uid}`); } catch (e) { }
+            }
+          }
+        } catch (e) {
+          try { localStorage.removeItem(`words_pending_${user.uid}`); } catch (_) { }
+        }
+      }
 
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -1626,10 +1723,12 @@ export default function App() {
           }
 
           skipSyncRef.current = true; // prevent the local useEffect from bouncing this right back
+          applyingSnapshotRef.current = true; // consumed by the sync-up effect so it doesn't writeback this snapshot
 
           if (data.docs) {
-            docsRef.current = data.docs;
-            setDocs(data.docs);
+            const merged = mergeLocalHistory(data.docs, docsRef.current);
+            docsRef.current = merged;
+            setDocs(merged);
           }
 
           if (data.groups) {
@@ -1697,7 +1796,7 @@ export default function App() {
 
         const writeTime = new Date().toISOString();
         setDoc(doc(db, "users", user.uid), {
-          docs: localDocs.length > 0 ? localDocs : docsRef.current, // Fallback to current state if empty
+          docs: stripCloudHeavy(localDocs.length > 0 ? localDocs : docsRef.current), // Fallback to current state if empty
           groups: localGroups,
           activeDocId: actId || activeDocId,
           lockPasscode: lp || lockPasscode,
@@ -1718,19 +1817,36 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    // Always flag pending changes before the skipSync check — this prevents onSnapshot
+    // If this state change came from applying an incoming cloud snapshot, do NOT
+    // flag pending or schedule a write — otherwise both tabs ping-pong the same
+    // payload back to each other (each receives, re-uploads with a new lastUpdated,
+    // the other receives that, and so on). The flag is set in the onSnapshot handler
+    // immediately before its setState calls and is consumed here on the first effect
+    // run that follows.
+    if (applyingSnapshotRef.current) {
+      applyingSnapshotRef.current = false;
+      return;
+    }
+
+    // Flag pending changes before the skipSync check — this prevents onSnapshot
     // from applying stale cloud data over edits made during a skipSync window.
     // The first-snapshot bypass in the subscription effect ensures the initial cloud
     // load isn't blocked by this guard.
     pendingLocalSaveRef.current = true;
+    pendingSerialRef.current += 1;
 
     if (skipSyncRef.current) return;
 
     const syncData = async () => {
+      // Snapshot the change-serial at the moment we start writing. If a new local
+      // edit happens before the await resolves, the serial will have advanced and
+      // we must NOT clear pendingLocalSaveRef — otherwise the local Firestore echo
+      // for *this* write would be applied and would overwrite the newer keystrokes.
+      const startSerial = pendingSerialRef.current;
       const writeTime = new Date().toISOString();
       try {
         await setDoc(doc(db, "users", user.uid), {
-          docs: docsRef.current,
+          docs: stripCloudHeavy(docsRef.current),
           groups,
           activeDocId,
           lockPasscode,
@@ -1738,10 +1854,13 @@ export default function App() {
           lastUpdated: writeTime
         });
         ownLastUpdatedRef.current = writeTime;
+        try { localStorage.removeItem(`words_pending_${user.uid}`); } catch (e) { }
       } catch (e) {
         console.error("Error syncing to cloud:", e);
       } finally {
-        pendingLocalSaveRef.current = false;
+        if (pendingSerialRef.current === startSerial) {
+          pendingLocalSaveRef.current = false;
+        }
       }
     };
 
@@ -1896,6 +2015,20 @@ export default function App() {
           localStorage.setItem("words_docs", JSON.stringify(currentDocs));
           localStorage.setItem("words_active_doc", activeDocId);
         } catch (e) { }
+        // Per-uid pending stash: only when we have unsynced local changes.
+        // Reconciled on next cloud load if the in-flight setDoc never landed.
+        if (userRef.current && pendingLocalSaveRef.current) {
+          try {
+            localStorage.setItem(`words_pending_${userRef.current.uid}`, JSON.stringify({
+              docs: currentDocs,
+              groups: groupsRef.current,
+              activeDocId,
+              lockPasscode: lockPasscodeRef.current,
+              trashedDocs: trashedDocsRef.current,
+              lastUpdated: new Date().toISOString(),
+            }));
+          } catch (e) { }
+        }
       }
     };
     const handleVisibilityChange = () => {
@@ -2877,7 +3010,7 @@ export default function App() {
     setDocs(newDocs);
     if (user) {
       setDoc(doc(db, "users", user.uid), {
-        docs: newDocs,
+        docs: stripCloudHeavy(newDocs),
         groups,
         activeDocId,
         lockPasscode,
@@ -2987,8 +3120,9 @@ export default function App() {
 
     try {
       const sharedByName = user.displayName || user.email || '';
+      const { editHistory: _editHistory, ...docToShareSlim } = docToShare;
       await setDoc(doc(db, "shared_documents", docId), {
-        ...docToShare,
+        ...docToShareSlim,
         sharedBy: user.uid,
         sharedByName,
         sharedAt: new Date().toISOString()
