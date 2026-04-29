@@ -58,6 +58,7 @@ import {
   Clock,
   RotateCcw
 } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot } from "./firebase";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate as animateMV } from "framer-motion";
 import GradualBlur from "./components/GradualBlur";
@@ -940,6 +941,8 @@ const applyImageContrast = (img) => {
 };
 
 export default function App() {
+  const { docId: urlDocId } = useParams();
+  const navigate = useNavigate();
   const sidebarScrollRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
@@ -997,7 +1000,7 @@ export default function App() {
     return [];
   });
   const [activeDocId, setActiveDocId] = useState(() => {
-    return localStorage.getItem("words_active_doc") || "1";
+    return urlDocId || localStorage.getItem("words_active_doc") || "1";
   });
   const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -1471,6 +1474,20 @@ export default function App() {
       }
     }
   }, [activeDocId, user]);
+
+  // Sync active document to URL
+  useEffect(() => {
+    if (activeDocId) {
+      navigate(`/documents/${activeDocId}`, { replace: true });
+    }
+  }, [activeDocId]);
+
+  // If the active doc no longer exists (stale bookmark), fall back to first available doc
+  useEffect(() => {
+    if (docs.length > 0 && !docs.find(d => d.id === activeDocId)) {
+      setActiveDocId(docs[0].id);
+    }
+  }, [docs]);
 
   // Handle Shared Document Links
   useEffect(() => {
