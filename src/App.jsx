@@ -1046,6 +1046,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [trashViewOpen, setTrashViewOpen] = useState(false);
+  const [pressedPinId, setPressedPinId] = useState(null);
   const [trashHoverDocId, setTrashHoverDocId] = useState(null);
   const [trashHoverPos, setTrashHoverPos] = useState({ top: 0, left: 0 });
   const [authModal, setAuthModal] = useState(false); // false, 'login', 'signup'
@@ -4653,11 +4654,10 @@ export default function App() {
         style={{ overflow: "hidden", transformOrigin: "top" }}
         key={doc._isTemp ? `temp-${doc.id}` : doc.id}
       >
-        <div
+        <motion.div
           data-doc-id={doc.id}
           data-sidebar-item
           onPointerDown={(e) => startDocPointerDrag(e, doc.id)}
-          onClick={(e) => handleDocClick(e, doc.id)}
           onMouseEnter={(e) => {
             clearTimeout(hoverTimeoutRef.current);
             setPreviewHoverGroupId(null);
@@ -4681,8 +4681,8 @@ export default function App() {
             if (dragTarget?.id === doc.id && dragTarget?.position === 'inset') return { boxShadow: 'inset 0 0 0 1.5px rgba(232, 87, 42, 0.65)' };
             return undefined;
           })()}
-          onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; }}
-          className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} transition-colors select-none ${isSelected
+          onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; handleDocClick(e, doc.id); }}
+          className={`doc-item group relative flex items-center justify-between px-3 py-[6px] rounded-md ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} select-none ${isSelected
             ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
             : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
             }`}
@@ -4795,7 +4795,7 @@ export default function App() {
               {isAltHeld ? <Trash2 size={14} /> : <MoreHorizontal size={14} />}
             </button>
           </div>
-        </div>
+        </motion.div>
       </motion.div>
     )
   };
@@ -5543,7 +5543,6 @@ export default function App() {
                                 data-doc-id={doc.id}
                                 data-sidebar-item
                                 onPointerDown={(e) => startDocPointerDrag(e, doc.id)}
-                                onClick={(e) => handleDocClick(e, doc.id)}
                                 onMouseEnter={(e) => {
                                   clearTimeout(hoverTimeoutRef.current);
                                   setPreviewHoverGroupId(null);
@@ -5562,8 +5561,20 @@ export default function App() {
                                   }, 300);
                                 }}
                                 style={isDraggingThis ? { pointerEvents: 'none' } : undefined}
-                                onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; }}
-                                className={`group relative flex items-center justify-center py-3 px-2 rounded-lg ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} transition-all border select-none ${isSelected || isActive
+                                onMouseDown={(e) => {
+                                  dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+                                  handleDocClick(e, doc.id);
+                                  const id = doc.id;
+                                  const t0 = Date.now();
+                                  setPressedPinId(id);
+                                  const onUp = () => {
+                                    document.removeEventListener('mouseup', onUp);
+                                    const delay = Math.max(0, 160 - (Date.now() - t0));
+                                    setTimeout(() => setPressedPinId(p => p === id ? null : p), delay);
+                                  };
+                                  document.addEventListener('mouseup', onUp);
+                                }}
+                                className={`pin-item${pressedPinId === doc.id ? ' pin-pressed' : ''} group relative flex items-center justify-center py-3 px-2 rounded-lg ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} border select-none ${isSelected || isActive
                                   ? "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]/80 shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-[var(--color-text-primary)] z-10"
                                   : "bg-[var(--color-bg-hover)] border-transparent hover:bg-[var(--color-bg-hover-strong)] text-[var(--color-text-muted)]"
                                   }`}
@@ -5624,15 +5635,15 @@ export default function App() {
                           layout="position"
                           transition={{ type: "spring", stiffness: 500, damping: 40, mass: 1 }}
                           data-group-id={group.id}
-                          className="flex flex-col relative rounded-md transition-colors"
-                          style={{ backgroundColor: group.color && !group.isCollapsed ? group.color + '10' : undefined }}
+                          className="flex flex-col relative rounded-md"
+                          style={{ backgroundColor: group.color && !group.isCollapsed ? group.color + '10' : 'transparent', transition: 'background-color 300ms cubic-bezier(0.16, 1, 0.3, 1)' }}
                           onMouseEnter={() => setHoverGroupId(group.id)}
                           onMouseLeave={() => setHoverGroupId(null)}
                         >
                           <div
                             data-group-header={group.id}
                             className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] transition-colors ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} ${hoverGroupId === group.id ? (group.color ? '' : 'bg-[var(--color-bg-hover)]') : ''}`}
-                            style={{ backgroundColor: group.color && hoverGroupId === group.id && group.isCollapsed ? group.color + '10' : undefined }}
+                            style={{ backgroundColor: group.color && hoverGroupId === group.id && group.isCollapsed ? group.color + '10' : 'transparent', transition: 'background-color 300ms cubic-bezier(0.16, 1, 0.3, 1)' }}
                             data-sidebar-item
                             onPointerDown={(e) => startGroupPointerDrag(e, group.id)}
                             onMouseEnter={(e) => {
@@ -5770,10 +5781,16 @@ export default function App() {
 
                           {/* Docs mapping inside this group */}
                           <div
-                            className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${group.isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
+                            className={`grid ${group.isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
+                            style={{ transition: 'grid-template-rows 300ms cubic-bezier(0.16, 1, 0.3, 1)' }}
                           >
                             <div className="overflow-hidden">
-                              <div className="pl-4 pr-1 pt-0.5 pb-1" style={group.color ? { '--color-bg-hover': 'rgba(0,0,0,0.04)', '--color-bg-hover-strong': group.color + '30' } : undefined}>
+                              <motion.div
+                                animate={{ y: group.isCollapsed ? -12 : 0 }}
+                                transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                                className="pl-4 pr-1 pt-0.5 pb-1"
+                                style={group.color ? { '--color-bg-hover': 'rgba(0,0,0,0.04)', '--color-bg-hover-strong': group.color + '30' } : undefined}
+                              >
                                 <AnimatePresence initial={false}>
                                   {groupDocs.length > 0 ? (
                                     groupDocs.map(renderDocItem)
@@ -5783,7 +5800,7 @@ export default function App() {
                                     </div>
                                   )}
                                 </AnimatePresence>
-                              </div>
+                              </motion.div>
                             </div>
                           </div>
 
@@ -6748,10 +6765,10 @@ export default function App() {
                   <div className="px-3 py-3 text-[13px] text-[var(--color-text-muted)] italic text-center opacity-70">Folder is empty</div>
                 ) : (
                   groupDocs.map((doc, idx) => (
-                    <div
+                    <motion.div
                       key={doc.id}
                       className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] shrink-0"
-                      onClick={(e) => {
+                      onMouseDown={(e) => {
                         handleDocClick(e, doc.id);
                         setPreviewHoverGroupId(null);
                         setPreviewHoverDocId(null);
@@ -6791,7 +6808,7 @@ export default function App() {
                           {doc.title || "New Page"}
                         </span>
                       </div>
-                    </div>
+                    </motion.div>
                   ))
                 )}
               </div>
