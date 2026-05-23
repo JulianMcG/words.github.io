@@ -1934,6 +1934,11 @@ export default function App() {
     const url = new URL(window.location.href);
     url.searchParams.delete('openLive');
     window.history.replaceState({}, '', url.toString());
+    if (!user) {
+      // Buddy Live requires a cloud account — prompt signup
+      setAuthModal('signup');
+      return;
+    }
     setBuddyDumpActive(true);
   }, [isAuthLoading, isCloudDocsLoaded, user]);
 
@@ -8266,7 +8271,7 @@ export default function App() {
           docs={docs}
           activeDocId={activeDocId}
           isDumpActive={buddyDumpActive}
-          onLongPress={() => setBuddyDumpActive(true)}
+          onLongPress={() => user ? setBuddyDumpActive(true) : setAuthModal('signup')}
           onGlobalClick={() => {
             const sel = window.getSelection();
             let text = sel.toString();
