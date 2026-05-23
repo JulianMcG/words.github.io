@@ -1,0 +1,10 @@
+{
+  "redirects": [
+    { "source": "/live", "destination": "/documents?openLive=1", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/share/(.*)", "destination": "/api/share?id=$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
