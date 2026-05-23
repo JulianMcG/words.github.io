@@ -1080,6 +1080,7 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
   const pendingNewDocRef = useRef(location.state?.createNew === true);
+  const pendingOpenLiveRef = useRef(new URLSearchParams(window.location.search).get('openLive') === '1');
   const sidebarScrollRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
@@ -1922,6 +1923,18 @@ export default function App() {
     if (user && !isCloudDocsLoaded) return;
     pendingNewDocRef.current = false;
     createNewDoc(null);
+  }, [isAuthLoading, isCloudDocsLoaded, user]);
+
+  // Auto-open Buddy Live when navigated from /live (redirects to ?openLive=1)
+  useEffect(() => {
+    if (!pendingOpenLiveRef.current) return;
+    if (isAuthLoading) return;
+    if (user && !isCloudDocsLoaded) return;
+    pendingOpenLiveRef.current = false;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('openLive');
+    window.history.replaceState({}, '', url.toString());
+    setBuddyDumpActive(true);
   }, [isAuthLoading, isCloudDocsLoaded, user]);
 
   // Two-way Sync with Firestore
