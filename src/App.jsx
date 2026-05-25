@@ -1403,6 +1403,7 @@ export default function App() {
   });
   const [buddyDumpActive, setBuddyDumpActive] = useState(false);
   const [buddyMicError, setBuddyMicError] = useState(null); // null | 'no-mic' | 'no-permission' | 'error'
+  const buddyMicErrorTimerRef = useRef(null);
   const [isSpacingAnimating, setIsSpacingAnimating] = useState(false);
 
   const editorRef = useRef(null);
@@ -8273,6 +8274,7 @@ export default function App() {
           activeDocId={activeDocId}
           isDumpActive={buddyDumpActive}
           micError={buddyMicError}
+          onDismissMicError={() => { clearTimeout(buddyMicErrorTimerRef.current); setBuddyMicError(null); }}
           onLongPress={async () => {
             if (!user) { setAuthModal('signup'); return; }
             try {
@@ -8286,7 +8288,7 @@ export default function App() {
                 name === 'NotAllowedError' || name === 'PermissionDeniedError' ? 'no-permission' :
                 'error';
               setBuddyMicError(kind);
-              setTimeout(() => setBuddyMicError(null), 3000);
+              buddyMicErrorTimerRef.current = setTimeout(() => setBuddyMicError(null), 3000);
             }
           }}
           onGlobalClick={() => {

@@ -3,7 +3,7 @@ import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motio
 import { Loader2, ArrowRight, CornerDownLeft, X, File, Check, MicOff } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 
-export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId, onLongPress, isDumpActive = false, micError = null }) {
+export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId, onLongPress, isDumpActive = false, micError = null, onDismissMicError = null }) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [previewText, setPreviewText] = useState("");
@@ -33,6 +33,11 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   useEffect(() => {
     if (!micError) return;
+    // Kill hover/magnet state immediately so they don't affect the animation
+    setIsHovered(false);
+    setIsClicked(false);
+    rawMagnetX.set(0);
+    rawMagnetY.set(0);
     setIsShaking(true);
     const t = setTimeout(() => setIsShaking(false), 600);
     return () => clearTimeout(t);
@@ -485,8 +490,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             bottom: 0, 
             right: 15 
           }}
-          onMouseEnter={() => setIsHovered(true)}
+          onMouseEnter={() => { if (!micError) setIsHovered(true); }}
           onMouseMove={(e) => {
+            if (micError) return;
             const hitboxSize = restingWidth + 40;
             const centerX = window.innerWidth - 15 - hitboxSize / 2;
             const centerY = window.innerHeight - hitboxSize / 2;
@@ -498,13 +504,15 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           }}
           onMouseLeave={() => {
             clearTimeout(longPressTimerRef.current);
-            setIsHovered(false);
-            setIsClicked(false);
             rawMagnetX.set(0);
             rawMagnetY.set(0);
+            if (micError) return;
+            setIsHovered(false);
+            setIsClicked(false);
           }}
           onMouseDown={(e) => {
             e.preventDefault();
+            if (micError) return;
             setIsClicked(true);
             isLongPressRef.current = false;
             longPressTimerRef.current = setTimeout(() => {
@@ -517,6 +525,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           onMouseUp={(e) => {
             e.preventDefault();
             clearTimeout(longPressTimerRef.current);
+            if (micError) {
+              if (onDismissMicError) onDismissMicError();
+              return;
+            }
             setIsClicked(false);
             if (!isLongPressRef.current && onGlobalClick) {
               onGlobalClick();
@@ -524,6 +536,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             }
           }}
           onTouchStart={(e) => {
+            if (micError) return;
             isLongPressRef.current = false;
             longPressTimerRef.current = setTimeout(() => {
               isLongPressRef.current = true;
@@ -532,6 +545,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           }}
           onTouchEnd={() => {
             clearTimeout(longPressTimerRef.current);
+            if (micError) {
+              if (onDismissMicError) onDismissMicError();
+              return;
+            }
             if (!isLongPressRef.current && onGlobalClick) {
               onGlobalClick();
             }
@@ -577,7 +594,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 opacity: 1,
                 x: isShaking ? [-9, 9, -7, 7, -4, 4, 0] : 0,
                 y: micError
-                  ? -24
+                  ? -40
                   : (!isShaking && isHovered && !isClicked ? [0, -4, 0] : 0),
               }}
               exit={{ opacity: 0, scale: 0.9, filter: "blur(4px)" }}
@@ -636,7 +653,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 src={getUrl(activeExpression)}
                 alt="Buddy"
                 animate={{
-                  scale: isClicked ? 1.25 : (micError || isHovered ? 1.4 : 1),
+                  scale: isClicked ? 1.25 : (micError ? 1.2 : isHovered ? 1.4 : 1),
                   opacity: isOpen ? 1 : (micError || isHovered ? 1 : 0.45)
                 }}
                 transition={{
