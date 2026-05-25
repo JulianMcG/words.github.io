@@ -636,7 +636,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 src={getUrl(activeExpression)}
                 alt="Buddy"
                 animate={{
-                  scale: isClicked ? 1.25 : (isHovered ? 1.4 : 1),
+                  scale: isClicked ? 1.25 : (micError || isHovered ? 1.4 : 1),
                   opacity: isOpen ? 1 : (micError || isHovered ? 1 : 0.45)
                 }}
                 transition={{
