@@ -22,6 +22,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const inputRef = useRef(null);
   const longPressTimerRef = useRef(null);
   const isLongPressRef = useRef(false);
+  const micErrorDismissReadyRef = useRef(false);
   
   const [isOpeningTransition, setIsOpeningTransition] = useState(false);
   const [hasError, setHasError] = useState(false);
@@ -38,6 +39,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     setIsClicked(false);
     rawMagnetX.set(0);
     rawMagnetY.set(0);
+    // Require a fresh down+up after the error shows — the mouseUp that triggered
+    // the long-press should not immediately dismiss
+    micErrorDismissReadyRef.current = false;
     setIsShaking(true);
     const t = setTimeout(() => setIsShaking(false), 600);
     return () => clearTimeout(t);
@@ -512,7 +516,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           }}
           onMouseDown={(e) => {
             e.preventDefault();
-            if (micError) return;
+            if (micError) { micErrorDismissReadyRef.current = true; return; }
             setIsClicked(true);
             isLongPressRef.current = false;
             longPressTimerRef.current = setTimeout(() => {
@@ -526,7 +530,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             e.preventDefault();
             clearTimeout(longPressTimerRef.current);
             if (micError) {
-              if (onDismissMicError) onDismissMicError();
+              if (micErrorDismissReadyRef.current) {
+                micErrorDismissReadyRef.current = false;
+                if (onDismissMicError) onDismissMicError();
+              }
               return;
             }
             setIsClicked(false);
@@ -536,7 +543,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             }
           }}
           onTouchStart={(e) => {
-            if (micError) return;
+            if (micError) { micErrorDismissReadyRef.current = true; return; }
             isLongPressRef.current = false;
             longPressTimerRef.current = setTimeout(() => {
               isLongPressRef.current = true;
@@ -546,7 +553,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           onTouchEnd={() => {
             clearTimeout(longPressTimerRef.current);
             if (micError) {
-              if (onDismissMicError) onDismissMicError();
+              if (micErrorDismissReadyRef.current) {
+                micErrorDismissReadyRef.current = false;
+                if (onDismissMicError) onDismissMicError();
+              }
               return;
             }
             if (!isLongPressRef.current && onGlobalClick) {
