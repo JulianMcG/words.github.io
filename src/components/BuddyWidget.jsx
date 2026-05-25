@@ -630,7 +630,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.94 }}
                     transition={{ type: "spring", stiffness: 320, damping: 24 }}
-                    className="absolute bottom-[calc(100%+12px)] right-0 z-[110] pointer-events-none"
+                    className="absolute bottom-[calc(100%+22px)] right-0 z-[110] pointer-events-none"
                     style={{ filter: 'drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))' }}
                   >
                     <div className="relative flex items-center gap-1.5 px-2.5 py-1.5 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg whitespace-nowrap">
