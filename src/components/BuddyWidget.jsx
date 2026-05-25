@@ -576,7 +576,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               animate={{
                 opacity: 1,
                 x: isShaking ? [-9, 9, -7, 7, -4, 4, 0] : 0,
-                y: !isShaking && isHovered && !isClicked ? [0, -4, 0] : 0,
+                y: micError
+                  ? -24
+                  : (!isShaking && isHovered && !isClicked ? [0, -4, 0] : 0),
               }}
               exit={{ opacity: 0, scale: 0.9, filter: "blur(4px)" }}
               transition={{
@@ -584,9 +586,11 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 x: isShaking
                   ? { duration: 0.5, ease: "easeInOut" }
                   : { type: "spring", stiffness: 300, damping: 20 },
-                ...(!isShaking && isHovered && !isClicked
-                  ? { y: { repeat: Infinity, duration: 2.2, ease: "easeInOut" } }
-                  : { y: { type: "spring", stiffness: 300, damping: 20 } }),
+                y: micError
+                  ? { type: "spring", stiffness: 260, damping: 22 }
+                  : (!isShaking && isHovered && !isClicked
+                    ? { repeat: Infinity, duration: 2.2, ease: "easeInOut" }
+                    : { type: "spring", stiffness: 300, damping: 20 }),
               }}
               className="w-[48px] h-[48px] flex m-auto items-center justify-center origin-bottom relative"
             >
@@ -595,19 +599,33 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 {micError && (
                   <motion.div
                     key="mic-error-bubble"
-                    initial={{ opacity: 0, y: 4, scale: 0.92 }}
+                    initial={{ opacity: 0, y: 6, scale: 0.9 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.94 }}
                     transition={{ type: "spring", stiffness: 320, damping: 24 }}
-                    className="absolute bottom-[calc(100%+8px)] right-0 z-[110] pointer-events-none"
+                    className="absolute bottom-[calc(100%+12px)] right-0 z-[110] pointer-events-none"
+                    style={{ filter: 'drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))' }}
                   >
-                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg whitespace-nowrap">
+                    <div className="relative flex items-center gap-1.5 px-2.5 py-1.5 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg whitespace-nowrap">
                       <MicOff size={12} className="text-[var(--color-text-faint)] flex-shrink-0" />
                       <span className="text-[12.5px] font-medium text-[var(--color-text-primary)]">
                         {micError === 'no-mic' ? 'No mic connected' :
                          micError === 'no-permission' ? 'Mic access denied' :
                          'Microphone unavailable'}
                       </span>
+                      {/* Tail — rounded diamond pointing down at Buddy */}
+                      <div style={{
+                        position: 'absolute',
+                        bottom: -5,
+                        right: 15,
+                        width: 10,
+                        height: 10,
+                        background: 'var(--color-bg-primary)',
+                        borderRight: '1px solid var(--color-border-primary)',
+                        borderBottom: '1px solid var(--color-border-primary)',
+                        borderRadius: 2,
+                        transform: 'rotate(45deg)',
+                      }} />
                     </div>
                   </motion.div>
                 )}
