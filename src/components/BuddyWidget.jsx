@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
-import { Loader2, ArrowRight, CornerDownLeft, X, File, Check } from "lucide-react";
+import { Loader2, ArrowRight, CornerDownLeft, X, File, Check, MicOff } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 
-export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId, onLongPress, isDumpActive = false }) {
+export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId, onLongPress, isDumpActive = false, micError = null }) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [previewText, setPreviewText] = useState("");
@@ -29,6 +29,14 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [isViewingChanges, setIsViewingChanges] = useState(false);
 
   const [blinkState, setBlinkState] = useState("");
+  const [isShaking, setIsShaking] = useState(false);
+
+  useEffect(() => {
+    if (!micError) return;
+    setIsShaking(true);
+    const t = setTimeout(() => setIsShaking(false), 600);
+    return () => clearTimeout(t);
+  }, [micError]);
 
   const rawMagnetX = useMotionValue(0);
   const rawMagnetY = useMotionValue(0);
@@ -209,7 +217,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     }
   }, [isClicked, isOpen]);
 
-  let activeExpression = hasError ? "error" : expression;
+  let activeExpression = hasError || micError ? "error" : expression;
   
   if (!hasError && (expression === "idle" || expression === "smile") && blinkState === "blink" && shouldBackgroundBlink) {
      activeExpression = expression === "idle" ? "blink" : "smileblink";
@@ -567,22 +575,51 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               initial={{ opacity: 0 }}
               animate={{
                 opacity: 1,
-                y: isHovered && !isClicked ? [0, -4, 0] : 0
+                x: isShaking ? [-9, 9, -7, 7, -4, 4, 0] : 0,
+                y: !isShaking && isHovered && !isClicked ? [0, -4, 0] : 0,
               }}
               exit={{ opacity: 0, scale: 0.9, filter: "blur(4px)" }}
               transition={{
                 opacity: { duration: 0.15, delay: 0.15 },
-                ...(isHovered && !isClicked ? { y: { repeat: Infinity, duration: 2.2, ease: "easeInOut" } } : { y: { type: "spring", stiffness: 300, damping: 20 } })
+                x: isShaking
+                  ? { duration: 0.5, ease: "easeInOut" }
+                  : { type: "spring", stiffness: 300, damping: 20 },
+                ...(!isShaking && isHovered && !isClicked
+                  ? { y: { repeat: Infinity, duration: 2.2, ease: "easeInOut" } }
+                  : { y: { type: "spring", stiffness: 300, damping: 20 } }),
               }}
-              className="w-[48px] h-[48px] flex m-auto items-center justify-center origin-bottom"
+              className="w-[48px] h-[48px] flex m-auto items-center justify-center origin-bottom relative"
             >
+              {/* Mic error popover */}
+              <AnimatePresence>
+                {micError && (
+                  <motion.div
+                    key="mic-error-bubble"
+                    initial={{ opacity: 0, y: 4, scale: 0.92 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.94 }}
+                    transition={{ type: "spring", stiffness: 320, damping: 24 }}
+                    className="absolute bottom-[calc(100%+8px)] right-0 z-[110] pointer-events-none"
+                  >
+                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg whitespace-nowrap">
+                      <MicOff size={12} className="text-[var(--color-text-faint)] flex-shrink-0" />
+                      <span className="text-[12.5px] font-medium text-[var(--color-text-primary)]">
+                        {micError === 'no-mic' ? 'No mic connected' :
+                         micError === 'no-permission' ? 'Mic access denied' :
+                         'Microphone unavailable'}
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <motion.img
                 layoutId="buddy-face"
                 src={getUrl(activeExpression)}
                 alt="Buddy"
                 animate={{
                   scale: isClicked ? 1.25 : (isHovered ? 1.4 : 1),
-                  opacity: isOpen ? 1 : (isHovered ? 1 : 0.45)
+                  opacity: isOpen ? 1 : (micError || isHovered ? 1 : 0.45)
                 }}
                 transition={{
                   scale: { type: "spring", stiffness: 400, damping: 20 },

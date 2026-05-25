@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
-import { X, MicOff } from "lucide-react";
+import { X } from "lucide-react";
 import { formatBrainDumpFromAudio } from "../utils/gemini";
 
 export default function BuddyDumpMode({ isActive, onClose, onInsert }) {
@@ -15,7 +15,6 @@ export default function BuddyDumpMode({ isActive, onClose, onInsert }) {
   const [blinkState, setBlinkState] = useState("");
   const [buddySettled, setBuddySettled] = useState(false);
   const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const [micError, setMicError] = useState(null); // null | 'no-mic' | 'no-permission' | 'error'
 
   const phaseRef = useRef("recording");
   const mrRef = useRef(null);
@@ -230,7 +229,6 @@ export default function BuddyDumpMode({ isActive, onClose, onInsert }) {
       setElapsed(0);
       setDoneMsg(null);
       setBuddySettled(false);
-      setMicError(null);
       audioLevelMV.set(0);
       hasSpokenRef.current = false;
       chunksRef.current = [];
@@ -249,17 +247,8 @@ export default function BuddyDumpMode({ isActive, onClose, onInsert }) {
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (err) {
-        if (!cancelled) {
-          const name = err?.name ?? '';
-          const kind =
-            name === 'NotFoundError' || name === 'DevicesNotFoundError' ? 'no-mic' :
-            name === 'NotAllowedError' || name === 'PermissionDeniedError' ? 'no-permission' :
-            'error';
-          setMicError(kind);
-          setExpression('error');
-          setTimeout(() => { if (!cancelled) onClose(); }, 3000);
-        }
+      } catch {
+        if (!cancelled) onClose();
         return;
       }
 
@@ -372,68 +361,9 @@ export default function BuddyDumpMode({ isActive, onClose, onInsert }) {
           {/* ── Buddy ── */}
           <motion.div
             style={{ position: "relative", zIndex: 1 }}
-            animate={
-              micError
-                ? { x: [-10, 10, -8, 8, -5, 5, 0] }
-                : buddySettled && phase === "recording" && !isPaused && !justResumed
-                  ? { y: [0, -5, 0] }
-                  : { y: 0 }
-            }
-            transition={
-              micError
-                ? { duration: 0.5, ease: "easeInOut" }
-                : { duration: 4.2, repeat: Infinity, ease: "easeInOut", repeatType: "mirror" }
-            }
+            animate={buddySettled && phase === "recording" && !isPaused && !justResumed ? { y: [0, -5, 0] } : { y: 0 }}
+            transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut", repeatType: "mirror" }}
           >
-            {/* ── No-mic speech bubble ── */}
-            <AnimatePresence>
-              {micError && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8, scale: 0.88 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ type: "spring", stiffness: 320, damping: 22 }}
-                  className="absolute bottom-[calc(100%+14px)] left-1/2 -translate-x-1/2 z-10 whitespace-nowrap"
-                >
-                  <div
-                    className="relative flex items-center gap-2 px-3.5 py-2 rounded-xl shadow-lg border"
-                    style={{
-                      background: 'var(--color-bg-primary)',
-                      borderColor: 'var(--color-border-primary)',
-                    }}
-                  >
-                    <MicOff size={13} style={{ color: 'var(--color-text-faint)', flexShrink: 0 }} />
-                    <span className="text-[13px] font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-                      {micError === 'no-mic' ? 'No mic connected' :
-                       micError === 'no-permission' ? 'Mic access denied' :
-                       'Microphone unavailable'}
-                    </span>
-                    {/* Bubble tail — border layer */}
-                    <div
-                      className="absolute top-full left-1/2 -translate-x-1/2"
-                      style={{
-                        marginTop: -1,
-                        width: 0, height: 0,
-                        borderLeft: '7px solid transparent',
-                        borderRight: '7px solid transparent',
-                        borderTop: '8px solid var(--color-border-primary)',
-                      }}
-                    />
-                    {/* Bubble tail — fill layer */}
-                    <div
-                      className="absolute top-full left-1/2 -translate-x-1/2"
-                      style={{
-                        width: 0, height: 0,
-                        borderLeft: '6px solid transparent',
-                        borderRight: '6px solid transparent',
-                        borderTop: '7px solid var(--color-bg-primary)',
-                      }}
-                    />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
             <motion.img
               layoutId="buddy-face"
               src={getUrl(activeExpression)}
@@ -469,7 +399,7 @@ export default function BuddyDumpMode({ isActive, onClose, onInsert }) {
             transition={{ delay: 0.45, type: "spring", stiffness: 220, damping: 22 }}
             className="mt-9 flex flex-col items-center gap-4 z-[1] px-6"
           >
-            {phase === "recording" && !micError && (
+            {phase === "recording" && (
               <>
                 {/* Timer + status */}
                 <motion.div
@@ -541,7 +471,7 @@ export default function BuddyDumpMode({ isActive, onClose, onInsert }) {
 
           {/* ── Close ── */}
           <AnimatePresence>
-            {phase === "recording" && !micError && (
+            {phase === "recording" && (
               <motion.button
                 key="close-btn"
                 initial={{ opacity: 0 }}

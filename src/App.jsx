@@ -1402,6 +1402,7 @@ export default function App() {
     isCollapsed: true,
   });
   const [buddyDumpActive, setBuddyDumpActive] = useState(false);
+  const [buddyMicError, setBuddyMicError] = useState(null); // null | 'no-mic' | 'no-permission' | 'error'
   const [isSpacingAnimating, setIsSpacingAnimating] = useState(false);
 
   const editorRef = useRef(null);
@@ -8271,7 +8272,23 @@ export default function App() {
           docs={docs}
           activeDocId={activeDocId}
           isDumpActive={buddyDumpActive}
-          onLongPress={() => user ? setBuddyDumpActive(true) : setAuthModal('signup')}
+          micError={buddyMicError}
+          onLongPress={async () => {
+            if (!user) { setAuthModal('signup'); return; }
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              stream.getTracks().forEach(t => t.stop());
+              setBuddyDumpActive(true);
+            } catch (err) {
+              const name = err?.name ?? '';
+              const kind =
+                name === 'NotFoundError' || name === 'DevicesNotFoundError' ? 'no-mic' :
+                name === 'NotAllowedError' || name === 'PermissionDeniedError' ? 'no-permission' :
+                'error';
+              setBuddyMicError(kind);
+              setTimeout(() => setBuddyMicError(null), 3000);
+            }
+          }}
           onGlobalClick={() => {
             const sel = window.getSelection();
             let text = sel.toString();
