@@ -1,0 +1,16 @@
+{
+  "redirects": [
+    { "source": "/live", "destination": "/documents?openLive=1", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/share/(.*)", "destination": "/api/share?id=$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/transcribe.js": { "maxDuration": 300 },
+    "api/start-upload.js": { "maxDuration": 30 },
+    "api/upload-chunk.js": { "maxDuration": 60 },
+    "api/basic-transcribe.js": { "maxDuration": 120 }
+  }
+}

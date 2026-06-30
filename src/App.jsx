@@ -1,0 +1,8409 @@
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import {
+  Type,
+  Heading1,
+  Heading2,
+  Heading3,
+  List,
+  ListOrdered,
+  Quote,
+  Plus,
+  File,
+  Trash2,
+  Menu,
+  ChevronsLeft,
+  ChevronsRight,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  Highlighter,
+  Pin,
+  PinOff,
+  CheckSquare,
+  Table,
+  Image as ImageIcon,
+  Folder,
+  FolderOpen,
+  FolderMinus,
+  ChevronRight,
+  ChevronDown,
+  MoreHorizontal,
+  Circle,
+  GripVertical,
+  Lock,
+  Unlock,
+  X,
+  Share,
+  Printer,
+  Pencil,
+  Link,
+  Unlink,
+  Cloud,
+  CloudOff,
+  LogOut,
+  Copy,
+  Paintbrush,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  EyeOff,
+  ChevronLeft,
+  ArrowLeft,
+  Maximize2,
+  Minimize2,
+  AlignJustify,
+  Undo2,
+  Smile,
+  Clock,
+  RotateCcw,
+  Minus,
+  Search
+} from "lucide-react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, writeBatch } from "./firebase";
+import { motion, AnimatePresence, useMotionValue, useTransform, useSpring, animate as animateMV, LayoutGroup } from "framer-motion";
+import GradualBlur from "./components/GradualBlur";
+import { Sparkles } from "lucide-react";
+import BuddyIcon from "./components/BuddyIcon";
+import BuddyWidget from "./components/BuddyWidget";
+import { getEmojiForTitle } from "./utils/emojiMap";
+import EmojiPickerPanel from "./components/EmojiPicker";
+import { generateFolderName, generateDocTitle } from "./utils/gemini";
+import { exportToGoogleDocs } from "./utils/googleDocs";
+import FolderIconPicker from "./components/FolderIconPicker";
+import { FolderIcon } from "./utils/folderIcons";
+import { getIconForFolderName } from "./utils/folderIconMap";
+import HeadingNavigator from "./components/HeadingNavigator";
+import BuddyDumpMode from "./components/BuddyDumpMode";
+
+function formatVersionTime(timestamp) {
+  return new Date(timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function historyDayLabel(timestamp) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const entryDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today - entryDay) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return date.toLocaleDateString('en-US', { weekday: 'long' });
+  if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function getTextPreview(html) {
+  if (!html) return '';
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return (div.innerText || div.textContent || '').trim();
+}
+
+function wordDiff(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Int16Array(n + 1));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+  const ops = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i-1] === b[j-1]) { ops.unshift(['=', b[j-1]]); i--; j--; }
+    else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { ops.unshift(['+', b[j-1]]); j--; }
+    else { ops.unshift(['-', a[i-1]]); i--; }
+  }
+  // Consolidate consecutive same-type runs
+  return ops.reduce((acc, [t, v]) => {
+    if (acc.length && acc[acc.length-1][0] === t) acc[acc.length-1][1] += ' ' + v;
+    else acc.push([t, v]);
+    return acc;
+  }, []);
+}
+
+function buildDiffHtml(oldHtml, newHtml) {
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Extract block elements preserving tag
+  const getBlocks = (html) => {
+    const div = document.createElement('div');
+    div.innerHTML = html || '';
+    const blocks = [];
+    const blockTags = new Set(['p','h1','h2','h3','h4','li','blockquote','pre']);
+    const walk = (el) => {
+      const tag = el.tagName?.toLowerCase();
+      if (blockTags.has(tag)) {
+        const text = (el.innerText || el.textContent || '').trim();
+        if (text) blocks.push({ tag, text });
+      } else {
+        Array.from(el.childNodes).forEach(c => { if (c.nodeType === 1) walk(c); });
+      }
+    };
+    Array.from(div.children).forEach(walk);
+    if (!blocks.length) {
+      const text = (div.innerText || div.textContent || '').trim();
+      if (text) text.split(/\n+/).filter(Boolean).forEach(t => blocks.push({ tag: 'p', text: t }));
+    }
+    return blocks;
+  };
+
+  const oldBlocks = getBlocks(oldHtml);
+  const newBlocks = getBlocks(newHtml);
+
+  if (!newBlocks.length) return '<p><br></p>';
+  if (!oldBlocks.length) return newBlocks.map(b => `<${b.tag}><mark class="hdiff-add">${esc(b.text)}</mark></${b.tag}>`).join('');
+
+  // Paragraph-level LCS to align blocks
+  const pOps = wordDiff(oldBlocks.map(b => b.text), newBlocks.map(b => b.text));
+  let oi = 0, ni = 0;
+  const result = [];
+  for (const [type, _] of pOps) {
+    if (type === '=') {
+      // Same paragraph — do inline word diff
+      const oB = oldBlocks[oi++], nB = newBlocks[ni++];
+      const tag = nB.tag;
+      const wOps = wordDiff(oB.text.split(/\s+/), nB.text.split(/\s+/));
+      const inner = wOps.map(([t, v]) => {
+        const e = esc(v);
+        if (t === '=') return e;
+        if (t === '+') return `<mark class="hdiff-add">${e}</mark>`;
+        return `<del class="hdiff-del">${e}</del>`;
+      }).join(' ');
+      result.push(`<${tag}>${inner}</${tag}>`);
+    } else if (type === '+') {
+      const nB = newBlocks[ni++];
+      result.push(`<${nB.tag}><mark class="hdiff-add">${esc(nB.text)}</mark></${nB.tag}>`);
+    } else {
+      const oB = oldBlocks[oi++];
+      result.push(`<${oB.tag}><del class="hdiff-del">${esc(oB.text)}</del></${oB.tag}>`);
+    }
+  }
+  return result.join('') || '<p><br></p>';
+}
+
+// Groups newest-first entries into version groups (buddy/title always isolated; user edits within 10-min windows)
+function groupHistoryVersions(entries) {
+  const groups = [];
+  for (const entry of entries) {
+    if (entry.type === 'buddy' || entry.type === 'title') {
+      groups.push({ id: entry.id, type: entry.type, label: entry.label, timestamp: entry.timestamp, versions: [entry] });
+    } else {
+      const last = groups[groups.length - 1];
+      if (last && last.type === 'user' && new Date(last.timestamp) - new Date(entry.timestamp) < 10 * 60 * 1000) {
+        last.versions.push(entry);
+      } else {
+        groups.push({ id: entry.id, type: 'user', label: entry.label, timestamp: entry.timestamp, versions: [entry] });
+      }
+    }
+  }
+  if (groups.length > 0) groups[0].isFirst = true;
+  return groups;
+}
+
+// Squircle helper for CSS-in-JS/pseudo-elements where Tailwind utilities can't reach
+const SQUIRCLE_SHAPE = 'shape(from calc(1.6 * var(--r)) 0, hline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.546 * var(--r)) calc(0.109 * var(--r)) with calc(100% - 1.04 * var(--r)) 0 / calc(100% - 0.76 * var(--r)) 0, arc to calc(100% - 0.109 * var(--r)) calc(0.546 * var(--r)) of var(--r) cw, curve to 100% calc(1.6 * var(--r)) with 100% calc(0.76 * var(--r)) / 100% calc(1.04 * var(--r)), vline to calc(100% - 1.6 * var(--r)), curve to calc(100% - 0.109 * var(--r)) calc(100% - 0.546 * var(--r)) with 100% calc(100% - 1.04 * var(--r)) / 100% calc(100% - 0.76 * var(--r)), arc to calc(100% - 0.546 * var(--r)) calc(100% - 0.109 * var(--r)) of var(--r) cw, curve to calc(100% - 1.6 * var(--r)) 100% with calc(100% - 1.04 * var(--r)) 100% / calc(100% - 0.76 * var(--r)) 100%, hline to calc(1.6 * var(--r)), curve to calc(0.546 * var(--r)) calc(100% - 0.109 * var(--r)) with calc(1.04 * var(--r)) 100% / calc(0.76 * var(--r)) 100%, arc to calc(0.109 * var(--r)) calc(100% - 0.546 * var(--r)) of var(--r) cw, curve to 0 calc(100% - 1.6 * var(--r)) with 0 calc(100% - 0.76 * var(--r)) / 0 calc(100% - 1.04 * var(--r)), vline to calc(1.6 * var(--r)), curve to calc(0.109 * var(--r)) calc(0.546 * var(--r)) with 0 calc(1.04 * var(--r)) / 0 calc(0.76 * var(--r)), arc to calc(0.546 * var(--r)) calc(0.109 * var(--r)) of var(--r) cw, curve to calc(1.6 * var(--r)) 0 with calc(0.76 * var(--r)) 0 / calc(1.04 * var(--r)) 0)';
+const squircle = (r) => `--r: ${r}; border-radius: ${r}; border-shape: ${SQUIRCLE_SHAPE}`;
+
+const DocPageIcon = ({ hasContent, size = 16, className = "" }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+    className={className}>
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+    <polyline points="14 2 14 8 20 8" />
+    {hasContent && <>
+      <motion.line x1="8" y1="9" x2="10" y2="9"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+        transition={{ duration: 0.12, ease: "easeOut" }} />
+      <motion.line x1="8" y1="13" x2="16" y2="13"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+        transition={{ duration: 0.18, delay: 0.07, ease: "easeOut" }} />
+      <motion.line x1="8" y1="17" x2="14" y2="17"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+        transition={{ duration: 0.15, delay: 0.15, ease: "easeOut" }} />
+    </>}
+  </svg>
+);
+
+const DeleteGhostOverlay = ({ ghost, onComplete, impactRef }) => {
+  const { rect, targetRect, title, emoji, hasContent } = ghost;
+  const targetCX = targetRect.left + targetRect.width / 2;
+  const targetCY = targetRect.top + targetRect.height / 2;
+  const startCX = rect.left + rect.width / 2;
+  const startCY = rect.top + rect.height / 2;
+  const dx = targetCX - startCX;
+  const dy = targetCY - startCY;
+
+  // T[2]=0.72 — doc arrives at trash. Flight is long, transform is short (308ms).
+  // Impact fires right at arrival and overlaps with the collapse.
+  const T = [0, 0.14, 0.72, 1];
+
+  // Fires impact exactly when the ghost visually "enters" the trash (scale < 0.22).
+  // onUpdate fires every animation frame — no timer drift, no Strict Mode cleanup issues.
+  const impactFired = useRef(false);
+  const handleUpdate = useCallback((latest) => {
+    if (!impactFired.current && latest.scale !== undefined && latest.scale < 0.22) {
+      impactFired.current = true;
+      const el = impactRef?.current;
+      if (!el) return;
+      el.style.transition = 'transform 0.11s ease-out';
+      el.style.transform = 'translateY(5px)';
+      setTimeout(() => {
+        el.style.transition = 'transform 0.24s cubic-bezier(0.25, 0.1, 0.3, 1)';
+        el.style.transform = 'translateY(0px)';
+      }, 110);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <motion.div
+      style={{
+        position: 'fixed',
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+        pointerEvents: 'none',
+        zIndex: 9999,
+        transformOrigin: 'center center',
+        willChange: 'transform, filter',
+        // Match the doc-item padding/layout exactly so it looks like the real thing
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 6px',
+        boxSizing: 'border-box',
+      }}
+      onUpdate={handleUpdate}
+      animate={{
+        x: [0, 0, dx, dx],
+        y: [0, -22, dy, dy],
+        scale: [1, 1.06, 0.18, 0],
+        rotate: [0, -1.5, 0, 0],
+        filter: ['blur(0px)', 'blur(0px)', 'blur(0px)', 'blur(6px)'],
+      }}
+      transition={{
+        duration: 1.1,
+        x:      { times: T, ease: ['easeOut', [0.55, 0, 0.85, 0.45], 'linear'] },
+        y:      { times: T, ease: ['easeOut', [0.55, 0, 0.85, 0.45], 'linear'] },
+        scale:  { times: T, ease: ['easeOut', [0.5, 0, 0.8, 0.45], [0.4, 0, 1, 0.3]] },
+        rotate: { times: T, ease: ['easeOut', 'easeOut', 'linear'] },
+        filter: { times: T },
+      }}
+      onAnimationComplete={onComplete}
+    >
+      {/* Inner card — exact same layout as the sidebar doc-item */}
+      <div style={{
+        flex: 1,
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        padding: '0 10px',
+        borderRadius: '7px',
+        background: 'var(--color-bg-primary)',
+        border: '1px solid var(--color-border-primary)',
+        boxShadow: [
+          '0 1px 2px rgba(0,0,0,0.04)',
+          '0 4px 12px rgba(0,0,0,0.10)',
+          '0 12px 32px rgba(0,0,0,0.13)',
+          '0 32px 64px rgba(0,0,0,0.08)',
+        ].join(', '),
+        overflow: 'hidden',
+      }}>
+        <div style={{ width: 20, height: 20, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {emoji
+            ? <span style={{ fontSize: '14px', lineHeight: 1 }}>{emoji}</span>
+            : <DocPageIcon hasContent={hasContent} size={16} className="text-[var(--color-icon-muted)]" />
+          }
+        </div>
+        <span style={{
+          fontSize: '14px',
+          fontWeight: 500,
+          color: 'var(--color-text-primary)',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          flex: 1,
+          minWidth: 0,
+        }}>
+          {title || 'New Page'}
+        </span>
+      </div>
+    </motion.div>
+  );
+};
+
+// Define the separated commands
+const COMMANDS = [
+  {
+    id: "buddy",
+    title: "Ask Buddy",
+    description: "Edit, generate, or brainstorm.",
+    icon: BuddyIcon,
+    type: "buddy",
+  },
+  {
+    id: "h1",
+    title: "Heading 1",
+    description: "Big section heading.",
+    icon: Heading1,
+    type: "formatBlock",
+    tag: "H1",
+  },
+  {
+    id: "h2",
+    title: "Heading 2",
+    description: "Medium section heading.",
+    icon: Heading2,
+    type: "formatBlock",
+    tag: "H2",
+  },
+  {
+    id: "h3",
+    title: "Heading 3",
+    description: "Small section heading.",
+    icon: Heading3,
+    type: "formatBlock",
+    tag: "H3",
+  },
+  {
+    id: "checklist",
+    title: "To-do List",
+    description: "Track tasks with a checklist.",
+    icon: CheckSquare,
+    type: "checklist",
+  },
+  {
+    id: "ul",
+    title: "Bulleted List",
+    description: "Create a simple bulleted list.",
+    icon: List,
+    type: "list",
+    tag: "insertUnorderedList",
+  },
+
+  {
+    id: "ol",
+    title: "Numbered List",
+    description: "Create a list with numbering.",
+    icon: ListOrdered,
+    type: "list",
+    tag: "insertOrderedList",
+  },
+  {
+    id: "quote",
+    title: "Quote",
+    description: "Capture a quote.",
+    icon: Quote,
+    type: "formatBlock",
+    tag: "BLOCKQUOTE",
+  },
+  {
+    id: "divider",
+    title: "Divider",
+    description: "Add a visual section break.",
+    icon: Minus,
+    type: "divider",
+  },
+  {
+    id: "table",
+    title: "Table",
+    description: "Add a resizable grid.",
+    icon: Table,
+    type: "insertHTML",
+    tag: `<div class="table-container" contenteditable="false" style="margin: 1.5em 0; clear: both;"><div class="table-title" contenteditable="true" data-placeholder="Table Title"></div><div class="table-wrapper"><div class="table-scroll"><table contenteditable="true"><tbody><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr></tbody></table></div><div class="table-resize-handle" contenteditable="false" title="Drag to add/remove rows and columns"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><line x1="3" y1="13.5" x2="13.5" y2="3" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="8.5" y1="13.5" x2="13.5" y2="8.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg></div><button class="table-delete-btn" contenteditable="false" title="Delete table"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button></div></div><p><br></p>`,
+  },
+];
+
+const ROOT_NATIVE_BLOCK_TAGS = new Set(["P", "H1", "H2", "H3", "BLOCKQUOTE", "UL", "OL"]);
+const DROP_CONTENT_TAGS = new Set([
+  "SCRIPT",
+  "STYLE",
+  "META",
+  "LINK",
+  "TITLE",
+  "NOSCRIPT",
+  "TEMPLATE",
+  "IFRAME",
+  "OBJECT",
+  "EMBED",
+  "SVG",
+  "CANVAS",
+  "FORM",
+  "INPUT",
+  "BUTTON",
+  "TEXTAREA",
+  "SELECT",
+  "OPTION",
+]);
+const HEADING_TAG_MAP = {
+  H1: "h1",
+  H2: "h2",
+  H3: "h3",
+  H4: "h3",
+  H5: "h3",
+  H6: "h3",
+};
+const NATIVE_HIGHLIGHT_COLORS = new Map([
+  ["#fef08a", "#fef08a"],
+  ["rgb(254,240,138)", "#fef08a"],
+  ["#fecaca", "#fecaca"],
+  ["rgb(254,202,202)", "#fecaca"],
+  ["#bbf7d0", "#bbf7d0"],
+  ["rgb(187,247,208)", "#bbf7d0"],
+  ["#716215", "#716215"],
+  ["rgb(113,98,21)", "#716215"],
+  ["#7f1d1d", "#7f1d1d"],
+  ["rgb(127,29,29)", "#7f1d1d"],
+  ["#14532d", "#14532d"],
+  ["rgb(20,83,45)", "#14532d"],
+  ["transparent", "transparent"],
+  ["rgba(0,0,0,0)", "transparent"],
+]);
+
+// ── Subcollection batch writer ────────────────────────────────────────────────
+// Firestore batches cap at 500 operations. This splits large payloads automatically.
+async function commitInBatches(db, operations) {
+  const CHUNK = 400;
+  for (let i = 0; i < operations.length; i += CHUNK) {
+    const batch = writeBatch(db);
+    for (const op of operations.slice(i, i + CHUNK)) {
+      if (op.type === 'set') batch.set(op.ref, op.data, op.options || {});
+      else if (op.type === 'delete') batch.delete(op.ref);
+    }
+    await batch.commit();
+  }
+}
+
+// Compare two stripped docs (shallow) to detect changes worth writing to Firestore.
+function docChanged(prev, curr) {
+  if (!prev) return true;
+  const keys = new Set([...Object.keys(prev), ...Object.keys(curr)]);
+  for (const k of keys) {
+    if (k === 'editHistory') continue;
+    if (prev[k] !== curr[k]) return true;
+  }
+  return false;
+}
+
+// editHistory is per-device undo state; it can grow to ~150 full-content snapshots per
+// doc — strip it before any cloud write so individual doc subcollection entries stay
+// well under the 1 MiB Firestore per-document limit.
+const stripCloudHeavy = (docs) => docs.map((d) => {
+  if (!d || !d.editHistory || d.editHistory.length === 0) return d;
+  const { editHistory, ...rest } = d;
+  return rest;
+});
+
+// Cloud payloads don't carry editHistory anymore — merge local history back onto
+// the docs we just received from a snapshot so the per-device undo timeline isn't
+// wiped on every cross-tab/cross-device sync.
+const mergeLocalHistory = (incoming, current) => {
+  const byId = new Map((current || []).map((d) => [d.id, d.editHistory]));
+  return incoming.map((d) => {
+    if (d.editHistory && d.editHistory.length > 0) return d;
+    const local = byId.get(d.id);
+    return local && local.length > 0 ? { ...d, editHistory: local } : d;
+  });
+};
+
+const hasMeaningfulText = (text = "") => text.replace(/\u00A0/g, " ").trim().length > 0;
+
+const escapeHtml = (text = "") => {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+};
+
+const normalizeColorToken = (value = "") => value.toLowerCase().replace(/\s+/g, "");
+
+const getNativeHighlightColor = (value = "") => {
+  const token = normalizeColorToken(value);
+  return NATIVE_HIGHLIGHT_COLORS.get(token) || "";
+};
+
+const sanitizeHref = (href) => {
+  if (!href) return "";
+  const trimmedHref = href.trim();
+  if (!trimmedHref) return "";
+
+  if (/^(mailto:|tel:)/i.test(trimmedHref)) return trimmedHref;
+
+  try {
+    const parsed = new URL(trimmedHref, window.location.origin);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return trimmedHref;
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+};
+
+const hasMeaningfulContent = (element) => {
+  if (!element) return false;
+  if (hasMeaningfulText(element.textContent || "")) return true;
+
+  return Array.from(element.childNodes).some((child) => {
+    if (child.nodeType !== Node.ELEMENT_NODE) return false;
+    return ["BR", "UL", "OL"].includes(child.tagName);
+  });
+};
+
+const isNativeBlockNode = (node) =>
+  node?.nodeType === Node.ELEMENT_NODE && ROOT_NATIVE_BLOCK_TAGS.has(node.tagName);
+
+const getInlineFormatting = (sourceNode, explicitTag = null) => {
+  const semanticTags = [];
+  const seenTags = new Set();
+  const pushTag = (tag) => {
+    if (tag && !seenTags.has(tag)) {
+      seenTags.add(tag);
+      semanticTags.push(tag);
+    }
+  };
+
+  pushTag(explicitTag);
+
+  const style = sourceNode.style;
+  if (style) {
+    const fontWeight = style.fontWeight?.toLowerCase() || "";
+    const numericWeight = Number.parseInt(fontWeight, 10);
+    if (
+      (fontWeight === "bold" || fontWeight === "bolder" || (!Number.isNaN(numericWeight) && numericWeight >= 600)) &&
+      explicitTag !== "strong"
+    ) {
+      pushTag("strong");
+    }
+
+    if (style.fontStyle?.toLowerCase() === "italic" && explicitTag !== "em") {
+      pushTag("em");
+    }
+
+    const textDecoration = `${style.textDecoration || ""} ${style.textDecorationLine || ""}`.toLowerCase();
+    if (textDecoration.includes("underline") && explicitTag !== "u") {
+      pushTag("u");
+    }
+    if (textDecoration.includes("line-through") && explicitTag !== "s") {
+      pushTag("s");
+    }
+  }
+
+  return {
+    semanticTags,
+    highlightColor: getNativeHighlightColor(style?.backgroundColor || ""),
+  };
+};
+
+const appendFormattedInline = (sourceNode, targetParent, explicitTag = null) => {
+  const { semanticTags, highlightColor } = getInlineFormatting(sourceNode, explicitTag);
+
+  if (!semanticTags.length && !highlightColor) {
+    sanitizeNodeChildren(sourceNode, targetParent);
+    return;
+  }
+
+  let outermost = null;
+  let currentTarget = null;
+
+  semanticTags.forEach((tag) => {
+    const el = document.createElement(tag);
+    if (!outermost) {
+      outermost = el;
+    } else {
+      currentTarget.appendChild(el);
+    }
+    currentTarget = el;
+  });
+
+  if (highlightColor) {
+    const span = document.createElement("span");
+    span.style.backgroundColor = highlightColor;
+    if (!outermost) {
+      outermost = span;
+    } else {
+      currentTarget.appendChild(span);
+    }
+    currentTarget = span;
+  }
+
+  sanitizeNodeChildren(sourceNode, currentTarget);
+
+  if (hasMeaningfulContent(outermost)) {
+    targetParent.appendChild(outermost);
+  }
+};
+
+const getFormattedContentTarget = (sourceNode, blockElement) => {
+  const { semanticTags, highlightColor } = getInlineFormatting(sourceNode);
+  let currentTarget = blockElement;
+
+  semanticTags.forEach((tag) => {
+    const el = document.createElement(tag);
+    currentTarget.appendChild(el);
+    currentTarget = el;
+  });
+
+  if (highlightColor) {
+    const span = document.createElement("span");
+    span.style.backgroundColor = highlightColor;
+    currentTarget.appendChild(span);
+    currentTarget = span;
+  }
+
+  return currentTarget;
+};
+
+const flattenSingleParagraphInListItem = (listItem) => {
+  const meaningfulChildren = Array.from(listItem.childNodes).filter((node) => {
+    if (node.nodeType === Node.TEXT_NODE) return hasMeaningfulText(node.textContent);
+    return node.nodeType === Node.ELEMENT_NODE;
+  });
+
+  if (
+    meaningfulChildren.length === 1 &&
+    meaningfulChildren[0].nodeType === Node.ELEMENT_NODE &&
+    meaningfulChildren[0].tagName === "P"
+  ) {
+    const paragraph = meaningfulChildren[0];
+    while (paragraph.firstChild) {
+      listItem.insertBefore(paragraph.firstChild, paragraph);
+    }
+    paragraph.remove();
+  }
+};
+
+const wrapLooseInlineChildren = (container) => {
+  let paragraph = null;
+
+  Array.from(container.childNodes).forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE && !hasMeaningfulText(node.textContent)) {
+      node.remove();
+      return;
+    }
+
+    if (isNativeBlockNode(node)) {
+      paragraph = null;
+      return;
+    }
+
+    if (!paragraph) {
+      paragraph = document.createElement("p");
+      container.insertBefore(paragraph, node);
+    }
+
+    paragraph.appendChild(node);
+  });
+};
+
+function sanitizeListNode(sourceList, targetList) {
+  Array.from(sourceList.childNodes).forEach((child) => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      if (hasMeaningfulText(child.textContent)) {
+        const li = document.createElement("li");
+        li.textContent = child.textContent.trim();
+        targetList.appendChild(li);
+      }
+      return;
+    }
+
+    if (child.nodeType !== Node.ELEMENT_NODE) return;
+
+    const li = document.createElement("li");
+    if (child.classList?.contains("checked")) {
+      li.classList.add("checked");
+    }
+    const listItemTarget = getFormattedContentTarget(child, li);
+
+    if (child.tagName === "LI") {
+      sanitizeNodeChildren(child, listItemTarget);
+    } else {
+      appendSanitizedNode(child, listItemTarget);
+    }
+
+    flattenSingleParagraphInListItem(li);
+
+    // If the li has no direct text/inline content and only contains nested
+    // lists, the empty wrapper would render as a phantom bullet. Promote
+    // the nested list items directly into targetList instead.
+    const liChildElements = Array.from(li.children);
+    const onlyNestedLists =
+      liChildElements.length > 0 &&
+      liChildElements.every((c) => c.tagName === "UL" || c.tagName === "OL");
+    const hasDirectText = Array.from(li.childNodes).some(
+      (n) => n.nodeType === Node.TEXT_NODE && hasMeaningfulText(n.textContent)
+    );
+
+    if (onlyNestedLists && !hasDirectText) {
+      // The wrapper li has no text — only a nested list (e.g. copying a
+      // secondary bullet without its parent). Append the nested list
+      // directly to preserve indentation and circle-bullet style without
+      // rendering a phantom filled bullet from the empty wrapper li.
+      liChildElements.forEach((nestedList) => {
+        targetList.appendChild(nestedList);
+      });
+      return;
+    }
+
+    if (hasMeaningfulContent(li)) {
+      targetList.appendChild(li);
+    }
+  });
+}
+
+function sanitizeNodeChildren(sourceParent, targetParent) {
+  Array.from(sourceParent.childNodes).forEach((child) => appendSanitizedNode(child, targetParent));
+}
+
+function appendSanitizedNode(node, targetParent) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (hasMeaningfulText(node.textContent)) {
+      targetParent.appendChild(document.createTextNode(node.textContent));
+    }
+    return;
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+  const tagName = node.tagName.toUpperCase();
+
+  if (DROP_CONTENT_TAGS.has(tagName)) return;
+
+  if (tagName === "BR") {
+    targetParent.appendChild(document.createElement("br"));
+    return;
+  }
+
+  if (tagName === "A") {
+    const href = sanitizeHref(node.getAttribute("href"));
+    if (!href) {
+      sanitizeNodeChildren(node, targetParent);
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.setAttribute("href", href);
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noopener noreferrer");
+    sanitizeNodeChildren(node, link);
+
+    if (hasMeaningfulContent(link)) {
+      targetParent.appendChild(link);
+    }
+    return;
+  }
+
+  if (tagName === "B" || tagName === "STRONG") {
+    appendFormattedInline(node, targetParent, "strong");
+    return;
+  }
+
+  if (tagName === "I" || tagName === "EM") {
+    appendFormattedInline(node, targetParent, "em");
+    return;
+  }
+
+  if (tagName === "U") {
+    appendFormattedInline(node, targetParent, "u");
+    return;
+  }
+
+  if (tagName === "S" || tagName === "STRIKE" || tagName === "DEL") {
+    appendFormattedInline(node, targetParent, "s");
+    return;
+  }
+
+  if (tagName === "SPAN" || tagName === "FONT") {
+    appendFormattedInline(node, targetParent);
+    return;
+  }
+
+  if (HEADING_TAG_MAP[tagName]) {
+    const heading = document.createElement(HEADING_TAG_MAP[tagName]);
+    sanitizeNodeChildren(node, getFormattedContentTarget(node, heading));
+    if (hasMeaningfulContent(heading)) {
+      targetParent.appendChild(heading);
+    }
+    return;
+  }
+
+  if (tagName === "P") {
+    const paragraph = document.createElement("p");
+    sanitizeNodeChildren(node, getFormattedContentTarget(node, paragraph));
+    if (hasMeaningfulContent(paragraph)) {
+      targetParent.appendChild(paragraph);
+    }
+    return;
+  }
+
+  if (tagName === "BLOCKQUOTE") {
+    const blockquote = document.createElement("blockquote");
+    sanitizeNodeChildren(node, getFormattedContentTarget(node, blockquote));
+    wrapLooseInlineChildren(blockquote);
+    if (hasMeaningfulContent(blockquote)) {
+      targetParent.appendChild(blockquote);
+    }
+    return;
+  }
+
+  if (tagName === "UL" || tagName === "OL") {
+    const list = document.createElement(tagName.toLowerCase());
+    if (tagName === "UL" && node.classList.contains("checklist")) {
+      list.classList.add("checklist");
+    }
+    sanitizeListNode(node, list);
+    if (list.querySelector("li")) {
+      targetParent.appendChild(list);
+    }
+    return;
+  }
+
+  sanitizeNodeChildren(node, targetParent);
+}
+
+const cleanupNativeHtml = (container) => {
+  Array.from(container.querySelectorAll("strong, em, u, s, a, span, p, h1, h2, h3, blockquote, li"))
+    .reverse()
+    .forEach((element) => {
+      if (!hasMeaningfulContent(element)) {
+        element.remove();
+      }
+    });
+};
+
+const buildPlainTextHtml = (text, { forceBlockRoots = false } = {}) => {
+  const normalizedText = (text || "").replace(/\r\n?/g, "\n");
+
+  if (!forceBlockRoots) {
+    return escapeHtml(normalizedText).replace(/\n/g, "<br>");
+  }
+
+  return normalizedText
+    .split("\n")
+    .map((line) => (line.trim() ? `<p>${escapeHtml(line)}</p>` : "<p><br></p>"))
+    .join("");
+};
+
+const createNativeHtmlPayload = (rawContent, { forceBlockRoots = false } = {}) => {
+  if (typeof rawContent !== "string") {
+    return { html: forceBlockRoots ? "<p><br></p>" : "", hasBlockRoot: forceBlockRoots };
+  }
+
+  let source = rawContent
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.*?)\*/g, "<em>$1</em>")
+    .replace(/_(.*?)_/g, "<em>$1</em>");
+
+  const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(source);
+  const sourceHasBlockMarkup = /<(p|div|section|article|aside|main|nav|header|footer|center|h[1-6]|blockquote|ul|ol|li|table|thead|tbody|tfoot|tr|td|th)\b/i.test(source);
+
+  if (!looksLikeHtml) {
+    source = buildPlainTextHtml(source, { forceBlockRoots });
+  }
+
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(source, "text/html");
+  const container = document.createElement("div");
+
+  sanitizeNodeChildren(parsed.body, container);
+
+  if (forceBlockRoots || sourceHasBlockMarkup) {
+    wrapLooseInlineChildren(container);
+  }
+
+  cleanupNativeHtml(container);
+
+  const html = container.innerHTML.trim();
+  return {
+    html: html || (forceBlockRoots ? "<p><br></p>" : ""),
+    hasBlockRoot: Array.from(container.childNodes).some((node) => isNativeBlockNode(node)),
+  };
+};
+
+const fetchLinkPreviewData = async (url) => {
+  try {
+    const response = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`);
+    const json = await response.json();
+
+    if (json.status === 'success' && json.data) {
+      const { title, description, image, url: actualUrl, publisher } = json.data;
+
+      let domain = publisher || '';
+      let displayUrl = actualUrl || url;
+
+      if (!domain) {
+        try {
+          const urlObj = new URL(displayUrl);
+          domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
+        } catch (e) { }
+      }
+
+      return {
+        title: title || displayUrl,
+        image: image?.url || '',
+        description: description || '',
+        domain: domain || new URL(displayUrl).hostname.replace(/^www\./, ''),
+        url: displayUrl
+      };
+    }
+    throw new Error('Microlink API did not return success status');
+  } catch (error) {
+    console.error("Primary link preview fetch failed, trying fallback:", error);
+    try {
+      const fallbackResponse = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
+      const fallbackData = await fallbackResponse.json();
+      const html = fallbackData.contents;
+
+      if (!html) return null;
+
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+
+      let title = doc.querySelector('meta[property="og:title"]')?.content || doc.querySelector('meta[name="twitter:title"]')?.content || doc.title || url;
+      let image = doc.querySelector('meta[property="og:image"]')?.content || doc.querySelector('meta[name="twitter:image"]')?.content || '';
+      let description = doc.querySelector('meta[property="og:description"]')?.content || doc.querySelector('meta[name="twitter:description"]')?.content || doc.querySelector('meta[name="description"]')?.content || '';
+
+      let domain = '';
+      let displayUrl = url;
+      try {
+        const urlObj = new URL(url);
+        domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
+        displayUrl = `${urlObj.protocol}//${domain}${urlObj.pathname}${urlObj.search}`;
+      } catch (e) { }
+
+      return { title, image, description, domain, url: displayUrl };
+    } catch (fallbackError) {
+      console.error("Fallback link preview fetch failed:", fallbackError);
+      return null;
+    }
+  }
+};
+const AnimatedFolder = ({ isOpen, color, fill, icon, animating }) => {
+  const backStyle = { transform: isOpen ? "skewX(8deg)" : "skewX(0deg)" };
+  const frontTransform = isOpen ? "scaleY(0.7) skewX(-16deg)" : "scaleY(1) skewX(0deg)";
+  const frontStyle = { transform: frontTransform };
+
+  // The icon overlay uses the same Tailwind transition class as the SVG paths
+  // so the easing/timing is byte-for-byte identical, preventing any drift.
+  //
+  // Geometry: SVG 20×20 in a 22×22 container → SVG starts at (1,1).
+  // CSS transform-origin "50% 21px" on the paths = (10px, 21px) from SVG top-left
+  //   = container (11, 22).  Place the icon pivot div AT that point.
+  // Front-flap spans viewBox y 6–21 → CSS y 5–17.5 → container y 6–18.5
+  //   → centre at container y 12.25 → offset above pivot = 22 − 12.25 = 9.75 px.
+
+  return (
+    <>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="none" className="overflow-visible">
+        {/* Back tab opaque mask */}
+        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
+        {/* Back tab color overlay */}
+        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px] brightness-90" style={backStyle} />
+        {/* Back tab stroke */}
+        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v15" stroke={color || "currentColor"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={backStyle} />
+        {/* Front flap opaque mask */}
+        <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill="var(--color-bg-primary)" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+        {/* Front flap color overlay */}
+        <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" fill={fill} className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+        {/* Front flap stroke */}
+        <path d="M2 19 a2 2 0 0 0 2 2 h16 a2 2 0 0 0 2 -2 v-11 a2 2 0 0 0 -2 -2 h-16 a2 2 0 0 0 -2 2 z" stroke={color || "currentColor"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-[50%_21px]" style={frontStyle} />
+      </svg>
+      {icon && (
+        <div
+          className="transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] pointer-events-none"
+          style={{
+            position: 'absolute',
+            top: 22,
+            left: 11,
+            transformOrigin: '0 0',
+            transform: frontTransform,
+          }}
+        >
+          {/* Outer span handles centering; inner span handles the pop animation
+              so scale(0.5→1) doesn't fight with translate(-50%,-50%) */}
+          <span style={{ position: 'absolute', top: -9.75, left: 0, transform: 'translate(-50%, -50%)', display: 'block' }}>
+            <FolderIcon
+              key={animating ? `anim-${icon}` : icon}
+              name={icon}
+              size={8}
+              className={animating ? 'animate-tasteful-pop' : ''}
+              style={{ color: color || 'var(--color-icon-muted)', display: 'block' }}
+            />
+          </span>
+        </div>
+      )}
+    </>
+  );
+};
+
+// Image contrast helpers — run outside React to avoid re-creation on render
+const _avgLuminance = (data) => {
+  let sum = 0;
+  const n = data.length / 4;
+  for (let i = 0; i < data.length; i += 4) {
+    sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+  }
+  return n > 0 ? sum / n : 128;
+};
+
+const applyImageContrast = (img) => {
+  const outer = img.closest('.image-outer');
+  if (!outer) return;
+  try {
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    if (!nw || !nh) { outer.dataset.brDark = '0'; return; }
+
+    const rw = outer.offsetWidth || parseInt(outer.style.width) || 320;
+    const rh = rw * nh / nw;
+
+    const handlePx = 29;
+    const sw = Math.max(8, Math.ceil(nw * handlePx / Math.max(rw, handlePx)));
+    const sh = Math.max(8, Math.ceil(nh * handlePx / Math.max(rh, handlePx)));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, nw - sw, nh - sh, sw, sh, 0, 0, sw, sh);
+
+    const lum = _avgLuminance(ctx.getImageData(0, 0, sw, sh));
+    outer.dataset.brDark = lum < 128 ? '1' : '0';
+  } catch (_) {
+    outer.dataset.brDark = '0'; // default to light on any failure
+  }
+};
+
+export default function App() {
+  const { docId: urlDocId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const pendingNewDocRef = useRef(location.state?.createNew === true);
+  const pendingOpenLiveRef = useRef(new URLSearchParams(window.location.search).get('openLive') === '1');
+  const sidebarScrollRef = useRef(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
+  const SIDEBAR_MIN = 180;
+  const SIDEBAR_DEFAULT = 256;
+  const SIDEBAR_MAX = 520;
+  const SIDEBAR_INITIAL = (() => {
+    try {
+      const v = Number(localStorage.getItem('words_sidebar_width'));
+      return v >= SIDEBAR_MIN && v <= SIDEBAR_MAX ? v : SIDEBAR_DEFAULT;
+    } catch { return SIDEBAR_DEFAULT; }
+  })();
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_INITIAL);
+  const sidebarWidthMV = useMotionValue(SIDEBAR_INITIAL);
+  const displaySidebarWidth = useSpring(sidebarWidthMV, { stiffness: 600, damping: 38, mass: 0.8 });
+  const squishMV = useMotionValue(0);
+  const displaySquish = useSpring(squishMV, { stiffness: 280, damping: 28, mass: 0.6 });
+  // Amplified opacity for blur/gradient: squish ratio is tiny (0–0.1), scale it up so effects are visible
+  const squishOpacity = useTransform(displaySquish, v => Math.min(1, v * 13));
+  const isResizingRef = useRef(false);
+  const resizeDragRef = useRef({ startX: 0, startWidth: 0 });
+  const [resizeCursorActive, setResizeCursorActive] = useState(false);
+  const resizeCursorTimerRef = useRef(null);
+  const contentAreaRef = useRef(null);
+  const sidebarInnerRef = useRef(null);
+  const cancelResizeRef = useRef(false);
+  const snapBackRef = useRef(false);
+  const [isSidebarScrolled, setIsSidebarScrolled] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [animatingEmojiDocId, setAnimatingEmojiDocId] = useState(null);
+  const [animatingIconGroupId, setAnimatingIconGroupId] = useState(null);
+  const [autoNamingDocId, setAutoNamingDocId] = useState(null);
+  const [previewHoverDocId, setPreviewHoverDocId] = useState(null);
+  const [previewHoverGroupId, setPreviewHoverGroupId] = useState(null);
+  const [hoverGroupId, setHoverGroupId] = useState(null);
+  const hoverTimeoutRef = useRef(null);
+  const [previewPos, setPreviewPos] = useState({ top: 0, left: 0 });
+  const [groupPreviewPos, setGroupPreviewPos] = useState({ top: 0, left: 0 });
+  const [sidebarContextMenu, setSidebarContextMenu] = useState({ isOpen: false, x: 0, y: 0 });
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [shareDocMenuOpen, setShareDocMenuOpen] = useState(false);
+  const [gdocsLoading, setGdocsLoading] = useState(false);
+  const [styleAccordionOpen, setStyleAccordionOpen] = useState(false);
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const [docs, setDocs] = useState(() => {
+    const saved = localStorage.getItem("words_docs");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        console.error("Failed to parse local storage docs:", e);
+      }
+    }
+    return [
+      {
+        id: "1",
+        title: "",
+        content: "<p><br></p>",
+        isPinned: false,
+        emoji: null,
+        hasCustomEmoji: false,
+        groupId: null,
+        textAlign: "left",
+        hideTitle: false,
+        fullWidth: false,
+        lineSpacing: "1.5",
+      },
+    ];
+  });
+  const [groups, setGroups] = useState(() => {
+    const saved = localStorage.getItem("words_groups");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error("Failed to parse local storage groups:", e);
+      }
+    }
+    return [];
+  });
+  const [activeDocId, setActiveDocId] = useState(() => {
+    return urlDocId || localStorage.getItem("words_active_doc") || "1";
+  });
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [draggedItem, setDraggedItem] = useState(null); // { type: 'doc' | 'group', id: string }
+  const [dragTarget, setDragTarget] = useState(null); // { id: string, position: 'before' | 'after' | 'inset', type: 'doc' | 'group' }
+  const [folderPendingId, setFolderPendingId] = useState(null); // doc id currently in "hold to create folder" state
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState(null); // { docId, x, y }
+  const [editingDocId, setEditingDocId] = useState(null);
+  const [editingDocTitle, setEditingDocTitle] = useState('');
+  const [groupMenuOpen, setGroupMenuOpen] = useState(null);
+  const [folderCustomizeOpen, setFolderCustomizeOpen] = useState(null);
+  const [editingGroupId, setEditingGroupId] = useState(null);
+  const [animatingDocId, setAnimatingDocId] = useState(null);
+
+  // Single progress value (0 → 1) drives the entire new-doc reveal
+  const animProgress = useMotionValue(1); // 1 = fully settled
+  const animControlRef = useRef(null);    // holds the animateMV playback control
+  const animStartedIdRef = useRef(null);  // tracks which doc ID has already begun animating
+
+  // ── Image: sweeps up from below, scale-blooms, blurs + fades to white at exit ──
+  // ∨ shape at start: outer highest (wings), middle lowest (tip). Middle fastest.
+  const imageYMiddle = useTransform(animProgress, [0, 0.75], ['102%', '-122%']);
+  const imageYSide   = useTransform(animProgress, [0, 0.85], ['86%',  '-122%']);
+  const imageYOuter  = useTransform(animProgress, [0, 0.94], ['70%',  '-122%']);
+  const imageScaleN  = useTransform(animProgress, [0, 0.70], [1.07, 1.0]);
+  const imageOp      = useTransform(animProgress, [0, 0.50, 1], [1, 1, 0]);
+  // Blur builds progressively as elements rise
+  const imageBlurN   = useTransform(animProgress, [0, 0.15, 1], [0, 2, 32]);
+  const imageFilter  = useTransform(imageBlurN, v => `blur(${v}px)`);
+  const imageOpFinal = imageOp;
+  // White overlay builds as elements move up
+  const imageWhiteOp = useTransform(animProgress, [0.1, 0.85], [0, 0.92]);
+  // Text fades in smoothly as the middle element sweeps over it, then stays visible
+  // Pure opacity — GPU-composited, zero jitter
+  const contentOpacity = useTransform(animProgress, [0, 0.42, 0.68, 1], [0, 0, 1, 1]);
+  const [lockPasscode, setLockPasscode] = useState(() => localStorage.getItem('words_lock_passcode') || null);
+  const [lockModal, setLockModal] = useState(null); // { mode: 'create' | 'unlock', docId }
+  const [passcodeInput, setPasscodeInput] = useState('');
+
+  // Cloud Sync State
+  const [user, setUser] = useState(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [trashViewOpen, setTrashViewOpen] = useState(false);
+  const [pressedPinId, setPressedPinId] = useState(null);
+  const [trashHoverDocId, setTrashHoverDocId] = useState(null);
+  const [trashHoverPos, setTrashHoverPos] = useState({ top: 0, left: 0 });
+  const [authModal, setAuthModal] = useState(false); // false, 'login', 'signup'
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [termsPopupAction, setTermsPopupAction] = useState(null); // null | 'google' | 'email'
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [showSyncSuggestion, setShowSyncSuggestion] = useState(false);
+  const [sharePopupInfo, setSharePopupInfo] = useState(null);
+  const [deletedDocInfo, setDeletedDocInfo] = useState(null);
+  const [trashedDocs, setTrashedDocs] = useState(() => {
+    const saved = localStorage.getItem("words_trash");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+          return parsed.filter(d => d.deletedAt > cutoff);
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
+  const [isAltHeld, setIsAltHeld] = useState(false);
+  const [pendingShareId, setPendingShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
+  const [isCloudDocsLoaded, setIsCloudDocsLoaded] = useState(false);
+  const [syncVersion, setSyncVersion] = useState(0);
+  const skipSyncRef = useRef(false);
+  const cloudWriteReadyRef = useRef(false); // true only after first Firestore snapshot received
+  const lastKnownCloudDocCountRef = useRef(0); // tracks cloud doc count to detect accidental wipes
+  const lastWrittenDocsRef = useRef(null); // last docs successfully written to Firestore (for diffing)
+  const pendingLocalSaveRef = useRef(false);
+  const applyingSnapshotRef = useRef(false);
+  const pendingSerialRef = useRef(0);
+  const ownLastUpdatedRef = useRef(null);
+  const userRef = useRef(null);
+  const groupsRef = useRef([]);
+  const lockPasscodeRef = useRef(null);
+  const pointerDragRef = useRef(null); // { docId, idsToMove, clone, offsetY }
+  const lastReorderRef = useRef(null); // prevents duplicate reorder state updates
+  const groupPointerDragRef = useRef(null); // { groupId, clone, offsetY }
+  const groupLastReorderRef = useRef(null);
+  const dragStartPosRef = useRef(null); // { x, y } at mousedown on draggable items
+  const [isGrabbing, setIsGrabbing] = useState(false);
+  const [deleteGhost, setDeleteGhost] = useState(null);
+  const [cloudIconPhase, setCloudIconPhase] = useState('idle'); // 'idle' | 'trash'
+  const cloudButtonRef = useRef(null);
+  const trashIconRef = useRef(null);
+  const lastDeleteAnimationTs = useRef(0);
+
+  // Show grabbing cursor only after dragging past a pixel threshold
+  useEffect(() => {
+    const DRAG_THRESHOLD = 8;
+    const onMouseMove = (e) => {
+      if (!dragStartPosRef.current) return;
+      const dx = e.clientX - dragStartPosRef.current.x;
+      const dy = e.clientY - dragStartPosRef.current.y;
+      if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+        setIsGrabbing(true);
+      }
+    };
+    const onMouseUp = () => {
+      dragStartPosRef.current = null;
+      setIsGrabbing(false);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    document.body.style.cursor = isGrabbing ? 'grabbing' : '';
+  }, [isGrabbing]);
+
+  useEffect(() => {
+    if (sharePopupInfo) {
+      const timer = setTimeout(() => {
+        setSharePopupInfo(null);
+      }, 10000); // 10 seconds
+      return () => clearTimeout(timer);
+    }
+  }, [sharePopupInfo]);
+
+  useEffect(() => {
+    if (deletedDocInfo) {
+      const timer = setTimeout(() => {
+        deletedDocInfoRef.current = null;
+        setDeletedDocInfo(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [deletedDocInfo]);
+
+  useEffect(() => {
+    trashedDocsRef.current = trashedDocs;
+    try {
+      localStorage.setItem("words_trash", JSON.stringify(trashedDocs));
+    } catch (e) {}
+  }, [trashedDocs]);
+
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { groupsRef.current = groups; }, [groups]);
+  useEffect(() => { lockPasscodeRef.current = lockPasscode; }, [lockPasscode]);
+  useEffect(() => { activeDocIdRef.current = activeDocId; }, [activeDocId]);
+  useEffect(() => {
+    return displaySidebarWidth.on('change', v => {
+      if ((isResizingRef.current || snapBackRef.current) && contentAreaRef.current) {
+        contentAreaRef.current.style.marginLeft = `${v}px`;
+      }
+    });
+  }, [displaySidebarWidth]);
+
+  useEffect(() => {
+    return displaySquish.on('change', v => {
+      const el = sidebarInnerRef.current;
+      if (el) {
+        if (v > 0.001) {
+          el.style.transformOrigin = 'left center';
+          el.style.transform = `scaleX(${1 - v})`;
+          el.style.overflow = 'visible';
+          el.style.minWidth = '180px'; /* SIDEBAR_MIN — prevents text reflow/ellipsis */
+        } else {
+          el.style.transform = '';
+          el.style.transformOrigin = '';
+          el.style.overflow = '';
+          el.style.minWidth = '';
+        }
+      }
+    });
+  }, [displaySquish]);
+
+  // We don't want to use state for the backups, otherwise they re-render when they shouldn't.
+  // We'll use refs, and initialize them from localStorage if they exist.
+  const termsCheckedRef = useRef(false);
+  const localBackupDocsRef = useRef(() => {
+    const saved = localStorage.getItem("words_local_backup_docs");
+    return saved ? JSON.parse(saved) : null;
+  });
+  const localBackupGroupsRef = useRef(() => {
+    const saved = localStorage.getItem("words_local_backup_groups");
+    return saved ? JSON.parse(saved) : null;
+  });
+  const localBackupPasscodeRef = useRef(() => {
+    return localStorage.getItem("words_local_backup_passcode") || null;
+  });
+
+  // Editor UI State
+  const [slashState, setSlashState] = useState({
+    isOpen: false,
+    query: "",
+    x: 0,
+    y: 0,
+    charRect: null,
+    charFontSize: "16px",
+    charFontFamily: "var(--font-sans)",
+    activeIndex: 0,
+  });
+  const [toolbarState, setToolbarState] = useState({
+    show: false,
+    x: 0,
+    y: 0,
+    showLinkInput: false,
+    showColorPicker: false,
+    linkUrl: "",
+    savedRange: null,
+    isBold: false,
+    isItalic: false,
+    isUnderline: false,
+    isStrikethrough: false,
+    isHighlighted: false,
+  });
+  const [linkPopoverState, setLinkPopoverState] = useState({
+    show: false,
+    url: "",
+    x: 0,
+    y: 0,
+  });
+  const [buddyState, setBuddyState] = useState({
+    show: false,
+    x: 0,
+    y: 0,
+    savedRange: null,
+    selectedText: "",
+    selectedHtml: "",
+    isCollapsed: true,
+  });
+  const [buddyDumpActive, setBuddyDumpActive] = useState(false);
+  const [buddyMicError, setBuddyMicError] = useState(null); // null | 'no-mic' | 'no-permission' | 'error'
+  const buddyMicErrorTimerRef = useRef(null);
+  const [isSpacingAnimating, setIsSpacingAnimating] = useState(false);
+
+  const editorRef = useRef(null);
+  const titleRef = useRef(null);
+  const titleCursorPosRef = useRef(null);
+  const emojiPickerRef = useRef(null);
+  const slashMenuRef = useRef(null);
+  const docsRef = useRef(docs);
+  const deletedDocInfoRef = useRef(null);
+  const trashedDocsRef = useRef(trashedDocs);
+  const trashHoverTimeoutRef = useRef(null);
+  const isInternalEdit = useRef(false);
+  const titleTimeoutRef = useRef(null);
+  const folderIconTimeoutRef = useRef(null);
+  const prevActiveDocIdRef = useRef(activeDocId);
+  const activeDocIdRef = useRef(activeDocId);
+  const docHistoryRef = useRef([activeDocId].filter(Boolean)); // [current, previous] for Option+Tab
+  // Only updated in useEffect so it always lags one render behind — reliable doc-switch detector at render time
+  // null on first render so first mount also snaps (no spring on page load)
+  const renderedDocIdRef = useRef(null);
+  const draggedTextHtmlRef = useRef(null);
+  const dragSourceRangeRef = useRef(null);
+  const isInternalTextDragRef = useRef(false);
+  const dragCursorRef = useRef(null);
+  const recentlyPinnedRef = useRef(new Set());
+  const newlyNamedGroupsRef = useRef(new Set());
+  const aiNamingInitiatedRef = useRef(new Set());
+  const autoTitledDocsRef = useRef(new Set());
+  const newlyAutoTitledDocsRef = useRef(new Set());
+  const lastFolderColorRef = useRef(null);
+  const historySnapshotTimerRef = useRef(null);
+  const titleHistoryTimerRef = useRef(null);
+  const periodicHistoryRef = useRef(null);
+  const historyPreviewSavedRef = useRef(null);
+
+  const undoDeleteDoc = useCallback(() => {
+    const info = deletedDocInfoRef.current;
+    if (!info) return;
+    setDocs(info.prevDocs);
+    docsRef.current = info.prevDocs;
+    setActiveDocId(info.prevActiveDocId);
+    if (info.trashedId) {
+      const next = trashedDocsRef.current.filter(d => d.id !== info.trashedId);
+      trashedDocsRef.current = next;
+      setTrashedDocs(next);
+    }
+    deletedDocInfoRef.current = null;
+    setDeletedDocInfo(null);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Alt') setIsAltHeld(true);
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'z' && deletedDocInfoRef.current) {
+        undoDeleteDoc();
+      }
+    };
+    const onKeyUp = (e) => { if (e.key === 'Alt') setIsAltHeld(false); };
+    const onBlur = () => setIsAltHeld(false);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [undoDeleteDoc]);
+
+  const filteredCommands = COMMANDS.filter(
+    (cmd) =>
+      (cmd.id !== "buddy" || user) &&
+      (cmd.title.toLowerCase().includes(slashState.query.toLowerCase()) ||
+       cmd.id.toLowerCase().includes(slashState.query.toLowerCase())),
+  ).sort((a, b) => {
+    const q = slashState.query.toLowerCase();
+    if (q.startsWith("b")) {
+      if (a.id === "ul" && b.id === "buddy") return -1;
+      if (a.id === "buddy" && b.id === "ul") return 1;
+    }
+    return 0; // Preserve default COMMANDS ordering
+  });
+
+  // Synchronous flush: saves current editor state to docsRef + state
+  const flushCurrentDoc = useCallback(() => {
+    if (!editorRef.current || !titleRef.current) return;
+    const currentId = prevActiveDocIdRef.current;
+    // Strip leading bare <br> nodes browsers insert before block-level elements
+    while (editorRef.current.firstChild && editorRef.current.firstChild.nodeName === 'BR') {
+      editorRef.current.removeChild(editorRef.current.firstChild);
+    }
+    const content = editorRef.current.innerHTML || "<p><br></p>";
+    const title = titleRef.current.textContent || "";
+    // Update ref synchronously so subsequent reads are correct
+    docsRef.current = docsRef.current.map((d) =>
+      d.id === currentId ? { ...d, content, title } : d
+    );
+    setDocs(docsRef.current);
+  }, []);
+
+  // Option+Tab: toggle between the two most recently viewed documents
+  const switchToPrevDoc = useCallback(() => {
+    const history = docHistoryRef.current;
+    if (history.length < 2 || !history[1]) return;
+    const prevId = history[1];
+    if (!docsRef.current.find(d => d.id === prevId)) return;
+    flushCurrentDoc();
+    setActiveDocId(prevId);
+    setSelectedDocIds([prevId]);
+  }, [flushCurrentDoc]);
+
+  useEffect(() => {
+    const onAltTab = (e) => {
+      if (e.altKey && e.key === 'Tab') {
+        e.preventDefault();
+        switchToPrevDoc();
+      }
+    };
+    window.addEventListener('keydown', onAltTab);
+    return () => window.removeEventListener('keydown', onAltTab);
+  }, [switchToPrevDoc]);
+
+  // Option+ArrowUp/Down: navigate to the prev/next document in visual sidebar order
+  const switchToAdjacentDoc = useCallback((direction) => {
+    const allDocs = docsRef.current;
+    const currentGroups = groupsRef.current;
+
+    const pinned = allDocs.filter(d => d.isPinned).sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
+    const regular = allDocs.filter(d => !d.isPinned);
+
+    const orderedIds = [];
+    pinned.forEach(d => orderedIds.push(d.id));
+    currentGroups.forEach(group => {
+      regular.filter(d => d.groupId === group.id).forEach(d => orderedIds.push(d.id));
+    });
+    regular.filter(d => !d.groupId || !currentGroups.some(g => g.id === d.groupId)).forEach(d => orderedIds.push(d.id));
+
+    const currentIndex = orderedIds.indexOf(activeDocIdRef.current);
+    if (currentIndex === -1) return;
+
+    const nextIndex = direction === 'down' ? currentIndex + 1 : currentIndex - 1;
+    if (nextIndex < 0 || nextIndex >= orderedIds.length) return;
+
+    const nextId = orderedIds[nextIndex];
+    const nextDoc = allDocs.find(d => d.id === nextId);
+    if (!nextDoc || nextDoc.isLocked) return;
+
+    flushCurrentDoc();
+    setActiveDocId(nextId);
+    setSelectedDocIds([nextId]);
+  }, [flushCurrentDoc]);
+
+  useEffect(() => {
+    const onAltArrow = (e) => {
+      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+      switchToAdjacentDoc(e.key === 'ArrowUp' ? 'up' : 'down');
+    };
+    window.addEventListener('keydown', onAltArrow);
+    return () => window.removeEventListener('keydown', onAltArrow);
+  }, [switchToAdjacentDoc]);
+
+  useEffect(() => {
+    // Flush the PREVIOUS doc's content before loading the new one
+    const prevId = prevActiveDocIdRef.current;
+    if (prevId && prevId !== activeDocId) {
+      flushCurrentDoc();
+      // Keep a 2-entry history for Option+Tab switching: [current, previous]
+      docHistoryRef.current = [activeDocId, prevId];
+    }
+    prevActiveDocIdRef.current = activeDocId;
+
+    // Load synchronously from docsRef (already updated by flush above)
+    const activeDoc = docsRef.current.find((d) => d.id === activeDocId);
+    if (activeDoc && editorRef.current && titleRef.current) {
+      titleRef.current.textContent = activeDoc.title;
+      editorRef.current.innerHTML = activeDoc.content;
+    }
+  }, [activeDocId, flushCurrentDoc]);
+
+  // Re-apply contrast detection whenever a doc loads (restores data-br-dark robustly)
+  useEffect(() => {
+    if (!editorRef.current) return;
+    let cancelled = false;
+    const detect = (img) => {
+      if (img.naturalWidth) applyImageContrast(img);
+    };
+    const run = () => {
+      if (cancelled) return;
+      let pending = 0;
+      editorRef.current?.querySelectorAll('.image-wrapper img').forEach((img) => {
+        if (img.complete && img.naturalWidth) {
+          detect(img);
+        } else {
+          pending++;
+          const onLoad = () => { detect(img); pending--; };
+          img.addEventListener('load', onLoad, { once: true });
+          // Belt-and-suspenders: retry after decode even if load already fired
+          setTimeout(() => { if (img.naturalWidth) detect(img); }, 400);
+        }
+      });
+    };
+    // Two passes: first at 60ms (data URLs usually decode by then),
+    // second at 300ms as a safety net for slow decodes.
+    const t1 = setTimeout(run, 60);
+    const t2 = setTimeout(run, 300);
+    return () => { cancelled = true; clearTimeout(t1); clearTimeout(t2); };
+  }, [activeDocId]);
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+
+      // Handle Link Popover
+      if (selection && selection.rangeCount > 0 && editorRef.current?.contains(selection.anchorNode)) {
+        let node = selection.focusNode;
+        if (node?.nodeType === 3) node = node.parentNode; // Get element if text node
+
+        const anchor = node?.closest ? node.closest('a:not(.link-preview-card)') : null;
+
+        if (anchor && anchor.href) {
+          const rect = anchor.getBoundingClientRect();
+          setLinkPopoverState({
+            show: true,
+            url: anchor.href,
+            x: rect.left + rect.width / 2,
+            y: rect.bottom + window.scrollY + 8, // Position below the link
+          });
+        } else {
+          setLinkPopoverState(prev => prev.show ? { ...prev, show: false } : prev);
+        }
+      } else {
+        setLinkPopoverState(prev => prev.show ? { ...prev, show: false } : prev);
+      }
+
+      // Handle Text Formatting Toolbar
+      if (
+        selection &&
+        !selection.isCollapsed &&
+        editorRef.current?.contains(selection.anchorNode)
+      ) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        let activeAlign = 'left';
+        if (document.queryCommandState("justifyCenter")) activeAlign = 'center';
+        else if (document.queryCommandState("justifyRight")) activeAlign = 'right';
+        else if (document.queryCommandState("justifyFull")) activeAlign = 'justify';
+
+        let node = selection.focusNode;
+        if (node?.nodeType === 3) node = node.parentNode;
+        const isLinkActive = !!(node?.closest && node.closest('a'));
+
+        setToolbarState((prev) => ({
+          ...prev,
+          show: true,
+          x: rect.left + rect.width / 2,
+          y: rect.top - 8,
+          showLinkInput: false,
+          linkUrl: "",
+          isLinkActive,
+          activeAlign,
+          savedRange: range,
+          isBold: document.queryCommandState("bold"),
+          isItalic: document.queryCommandState("italic"),
+          isUnderline: document.queryCommandState("underline"),
+          isStrikethrough: document.queryCommandState("strikeThrough"),
+          isHighlighted: (() => {
+            let n = selection.focusNode;
+            if (n?.nodeType === 3) n = n.parentNode;
+            while (n && editorRef.current?.contains(n)) {
+              if (n.style?.backgroundColor && n.style.backgroundColor !== 'transparent' && n.style.backgroundColor !== 'rgba(0, 0, 0, 0)') return true;
+              n = n.parentNode;
+            }
+            return false;
+          })(),
+        }));
+      } else {
+        setToolbarState((prev) => {
+          const isEditorClick = selection && editorRef.current?.contains(selection.anchorNode);
+          if (prev.showLinkInput && !isEditorClick) return prev;
+          return prev.show ? { ...prev, show: false, showLinkInput: false } : prev;
+        });
+      }
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () =>
+      document.removeEventListener("selectionchange", handleSelectionChange);
+  }, []);
+
+  useEffect(() => {
+    docsRef.current = docs;
+    if (!user) {
+      try {
+        localStorage.setItem("words_docs", JSON.stringify(docs));
+      } catch (error) {
+        console.warn(
+          "Local storage quota exceeded. The document is too large to save locally.",
+          error,
+        );
+      }
+    }
+    // Always persist edit history locally so signed-in users don't lose it on page reload.
+    // (Firestore strips editHistory before cloud saves to stay under the 1 MiB limit.)
+    try {
+      const historyMap = {};
+      docs.forEach(d => { if (d.editHistory?.length > 0) historyMap[d.id] = d.editHistory; });
+      localStorage.setItem("words_edit_history", JSON.stringify(historyMap));
+    } catch (e) { /* quota — skip */ }
+  }, [docs, user]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("words_groups", JSON.stringify(groups));
+    } catch (error) {
+      console.warn("Failed to save groups to local storage.", error);
+    }
+  }, [groups]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("words_active_doc", activeDocId);
+    } catch (error) {
+      console.warn("Failed to save active doc state to local storage.", error);
+    }
+  }, [activeDocId]);
+
+  // Sync active document to URL
+  useEffect(() => {
+    if (activeDocId) {
+      navigate(`/documents/${activeDocId}`, { replace: true });
+    }
+  }, [activeDocId]);
+
+  // If the active doc no longer exists (stale bookmark), fall back to first available doc
+  useEffect(() => {
+    if (docs.length > 0 && !docs.find(d => d.id === activeDocId)) {
+      setActiveDocId(docs[0].id);
+    }
+  }, [docs]);
+
+  // Handle Shared Document Links
+  useEffect(() => {
+    if (!pendingShareId || isAuthLoading || (!isCloudDocsLoaded && user)) return;
+
+    const cloneSharedDoc = async () => {
+      try {
+        const sharedSnap = await getDoc(doc(db, "shared_documents", pendingShareId));
+        if (sharedSnap.exists()) {
+          const data = sharedSnap.data();
+          const docTitle = data.title || 'New Page';
+
+          // Set page title and OG meta for accurate embedding (Google Classroom, etc.)
+          document.title = docTitle;
+          const ogTitle = document.querySelector('meta[property="og:title"]');
+          if (ogTitle) ogTitle.setAttribute('content', docTitle);
+          const ogDesc = document.querySelector('meta[property="og:description"]');
+          if (ogDesc) ogDesc.setAttribute('content', data.content ? data.content.replace(/<[^>]+>/g, '').slice(0, 150) : '');
+
+          const newDocId = crypto.randomUUID();
+          const newDoc = {
+            id: newDocId,
+            title: docTitle,
+            content: data.content,
+            isPinned: false,
+            emoji: data.emoji || null,
+            hasCustomEmoji: data.hasCustomEmoji || false,
+            groupId: null,
+            isLocked: false,
+            editHistory: data.editHistory || [],
+            sharedFrom: data.sharedByName || null,
+            docFont: data.docFont || null,
+            lineSpacing: data.lineSpacing || null,
+            hideTitle: data.hideTitle || false,
+            fullWidth: data.fullWidth || false,
+            textAlign: data.textAlign || null,
+          };
+
+          setDocs(prev => {
+            const updated = [newDoc, ...prev];
+            docsRef.current = updated;
+            return updated;
+          });
+          setActiveDocId(newDocId);
+        }
+      } catch (e) {
+        console.error("Failed to load or parse shared document.", e);
+      }
+      const newUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+      setPendingShareId(null);
+    };
+    cloneSharedDoc();
+  }, [pendingShareId, isAuthLoading, isCloudDocsLoaded, user]);
+
+  // Firebase Auth Listener - Handles Auth State Transitions (Login/Logout)
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setIsAuthLoading(false);
+      if (!currentUser) setIsCloudDocsLoaded(true);
+      if (currentUser && !user) {
+        // Logging in. 
+        // 0. Prevent local sync to cloud until initialization fetch completes.
+        skipSyncRef.current = true;
+
+        // 1. Snapshot the CURRENT local data and save it to the backup keys.
+        localBackupDocsRef.current = docs;
+        localBackupGroupsRef.current = groups;
+        localBackupPasscodeRef.current = lockPasscode;
+
+        localStorage.setItem("words_local_backup_docs", JSON.stringify(docs));
+        localStorage.setItem("words_local_backup_groups", JSON.stringify(groups));
+        localStorage.setItem("words_local_backup_trash", JSON.stringify(trashedDocsRef.current));
+        if (lockPasscode) {
+          localStorage.setItem("words_local_backup_passcode", lockPasscode);
+        } else {
+          localStorage.removeItem("words_local_backup_passcode");
+        }
+
+      } else if (!currentUser && user) {
+        // Logging out.
+        // 1. Prevent sync from firing up to the cloud while we swap out the local state.
+        skipSyncRef.current = true;
+
+        // 2. Load the backups we stored
+        const savedDocs = localStorage.getItem("words_local_backup_docs");
+        const savedGroups = localStorage.getItem("words_local_backup_groups");
+        const savedPasscode = localStorage.getItem("words_local_backup_passcode");
+        const savedTrash = localStorage.getItem("words_local_backup_trash");
+
+        const parsedDocs = savedDocs ? JSON.parse(savedDocs) : [];
+        const finalDocs = parsedDocs.length > 0 ? parsedDocs : [
+          { id: "1", title: "", content: "<p><br></p>", isPinned: false, emoji: null, hasCustomEmoji: false, groupId: null, textAlign: "left", hideTitle: false, fullWidth: false, lineSpacing: "1.5" }
+        ];
+
+        const parsedGroups = savedGroups ? JSON.parse(savedGroups) : [];
+        const nextId = finalDocs[0]?.id || "1";
+        const restoredTrash = savedTrash ? JSON.parse(savedTrash) : [];
+
+        // 3. Set standard React state and synchronous refs to prevent flush race conditions
+        docsRef.current = finalDocs;
+        prevActiveDocIdRef.current = nextId;
+        trashedDocsRef.current = restoredTrash;
+
+        setDocs(finalDocs);
+        setGroups(parsedGroups);
+        setLockPasscode(savedPasscode || null);
+        setActiveDocId(nextId);
+        setTrashedDocs(restoredTrash);
+
+        // Instantly force the DOM to match the loaded state for snappiness
+        const docToLoad = finalDocs.find(d => d.id === nextId);
+        if (docToLoad && editorRef.current && titleRef.current) {
+          titleRef.current.textContent = docToLoad.title;
+          editorRef.current.innerHTML = docToLoad.content;
+        }
+
+        // 4. Also immediately update the regular local storage keys so next refresh is correct
+        localStorage.setItem("words_docs", JSON.stringify(finalDocs));
+        localStorage.setItem("words_groups", JSON.stringify(parsedGroups));
+        if (savedPasscode) {
+          localStorage.setItem("words_lock_passcode", savedPasscode);
+        } else {
+          localStorage.removeItem("words_lock_passcode");
+        }
+
+        // 5. Allow sync to operate normally again (which does nothing as !user)
+        setTimeout(() => { skipSyncRef.current = false; }, 100);
+      }
+
+      setUser(currentUser);
+      if (currentUser) {
+        setAuthModal(false);
+        // Check once per session whether this user has accepted the ToS
+        if (!termsCheckedRef.current) {
+          termsCheckedRef.current = true;
+          try {
+            const localAccepted = localStorage.getItem(`words_terms_accepted_${currentUser.uid}`);
+            if (!localAccepted) {
+              const userMeta = await getDoc(doc(db, 'users', currentUser.uid));
+              if (!userMeta.data()?.termsAccepted) {
+                setTermsPopupAction('required');
+              } else {
+                // Cache in localStorage so future sessions skip the Firestore round-trip
+                localStorage.setItem(`words_terms_accepted_${currentUser.uid}`, '1');
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [user, docs, groups, lockPasscode]);
+
+  // Sync Suggestion Logic
+  useEffect(() => {
+    if (isAuthLoading) return; // Wait for initial auth response
+
+    if (user) {
+      setShowSyncSuggestion(false);
+      return;
+    }
+
+    // Suggest if they have more than 3 documents
+    if (docs.length >= 4) {
+      const hasDismissed = localStorage.getItem('words_dismissed_sync');
+      if (!hasDismissed) {
+        setShowSyncSuggestion(true);
+      }
+    }
+  }, [docs, user, isAuthLoading]);
+
+  // Auto-create new doc when navigated from /new
+  useEffect(() => {
+    if (!pendingNewDocRef.current) return;
+    if (isAuthLoading) return;
+    if (user && !isCloudDocsLoaded) return;
+    pendingNewDocRef.current = false;
+    createNewDoc(null);
+  }, [isAuthLoading, isCloudDocsLoaded, user]);
+
+  // Auto-open Buddy Live when navigated from /live (redirects to ?openLive=1)
+  useEffect(() => {
+    if (!pendingOpenLiveRef.current) return;
+    if (isAuthLoading) return;
+    if (user && !isCloudDocsLoaded) return;
+    pendingOpenLiveRef.current = false;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('openLive');
+    window.history.replaceState({}, '', url.toString());
+    if (!user) {
+      // Buddy Live requires a cloud account — prompt signup
+      setAuthModal('signup');
+      return;
+    }
+    setBuddyDumpActive(true);
+  }, [isAuthLoading, isCloudDocsLoaded, user]);
+
+  // Two-way Sync with Firestore
+  // Storage layout (schemaVersion 2):
+  //   users/{uid}          → metadata only: groups, activeDocId, lockPasscode, trashedDocs, lastUpdated, schemaVersion
+  //   users/{uid}/docs/{id} → individual doc (no editHistory — stored only in localStorage)
+  // This eliminates Firestore's 1 MiB per-document limit; each doc can hold up to 1 MiB,
+  // and total data is unbounded. Only changed docs are written on each sync (diff-based).
+  useEffect(() => {
+    if (!user) return;
+
+    let hasReceivedFirstSnapshot = false;
+
+    // Load all docs from the subcollection and re-attach local editHistory.
+    const loadSubcollectionDocs = async () => {
+      const snap = await getDocs(collection(db, "users", user.uid, "docs"));
+      const cloudDocs = snap.docs.map(d => d.data()).filter(d => d && d.id)
+        .sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
+      const savedHistoryMap = (() => {
+        try { return JSON.parse(localStorage.getItem("words_edit_history") || "{}"); } catch { return {}; }
+      })();
+      const currentWithHistory = docsRef.current.map(d => {
+        if (d.editHistory?.length > 0) return d;
+        const h = savedHistoryMap[d.id];
+        return h?.length > 0 ? { ...d, editHistory: h } : d;
+      });
+      return mergeLocalHistory(cloudDocs, currentWithHistory);
+    };
+
+    // Write a full doc set + metadata in batches (used for stash recovery and new-user init).
+    const writeAllToCloud = (docs, metadata) => {
+      const stripped = stripCloudHeavy(docs).filter(d => d && d.id) // guard against missing IDs
+        .map((d, i) => ({ ...d, sortIndex: i }));
+      const ops = [
+        { type: 'set', ref: doc(db, "users", user.uid), data: { ...metadata, schemaVersion: 2 } },
+        ...stripped.map(d => ({ type: 'set', ref: doc(db, "users", user.uid, "docs", d.id), data: d })),
+      ];
+      return commitInBatches(db, ops);
+    };
+
+    // Apply docs/metadata state from a known-good doc list + data object.
+    const applyCloudState = (docs, data) => {
+      if (docs.length > 0) {
+        docsRef.current = docs;
+        setDocs(docs);
+        lastKnownCloudDocCountRef.current = docs.length;
+      }
+      if (data.groups) setGroups(data.groups);
+      setLockPasscode(data.lockPasscode || null);
+      if (data.trashedDocs) {
+        const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        const freshTrash = data.trashedDocs.filter(d => d.deletedAt > cutoff);
+        trashedDocsRef.current = freshTrash;
+        setTrashedDocs(freshTrash);
+      }
+      const nextActiveId = docs.length > 0
+        ? (docs.some(d => d.id === activeDocIdRef.current) ? activeDocIdRef.current : docs[0].id)
+        : null;
+      if (nextActiveId && nextActiveId !== activeDocIdRef.current) setActiveDocId(nextActiveId);
+      if (nextActiveId) {
+        prevActiveDocIdRef.current = nextActiveId;
+        const activeDoc = docs.find(d => d.id === nextActiveId);
+        if (activeDoc && editorRef.current && titleRef.current) {
+          if (titleRef.current.textContent !== activeDoc.title && document.activeElement !== titleRef.current) {
+            titleRef.current.textContent = activeDoc.title || '';
+          }
+          if (editorRef.current.innerHTML !== activeDoc.content) {
+            editorRef.current.innerHTML = activeDoc.content;
+          }
+        }
+      }
+    };
+
+    const unsubscribe = onSnapshot(doc(db, "users", user.uid), async (docSnap) => {
+      if (hasReceivedFirstSnapshot && pendingLocalSaveRef.current) return;
+      const isFirstSnapshot = !hasReceivedFirstSnapshot;
+      hasReceivedFirstSnapshot = true;
+
+      // ── Stash reconciliation ─────────────────────────────────────────────────
+      // If a previous session left an unsynced stash (in-flight write never landed
+      // before unload) whose timestamp beats the cloud copy, push it up first.
+      if (isFirstSnapshot) {
+        try {
+          const stashRaw = localStorage.getItem(`words_pending_${user.uid}`);
+          if (stashRaw) {
+            const stash = JSON.parse(stashRaw);
+            const cloudLastUpdated = (docSnap.exists() && docSnap.data().lastUpdated) || '';
+            const stashIsSafe = stash && stash.lastUpdated && stash.lastUpdated > cloudLastUpdated
+              && Array.isArray(stash.docs) && stash.docs.length > 0;
+            if (stashIsSafe) {
+              skipSyncRef.current = true;
+              applyingSnapshotRef.current = true;
+              const stashMeta = {
+                groups: Array.isArray(stash.groups) ? stash.groups : [],
+                activeDocId: null,
+                lockPasscode: stash.lockPasscode || null,
+                trashedDocs: stash.trashedDocs || [],
+                lastUpdated: stash.lastUpdated,
+              };
+              applyCloudState(stash.docs, stashMeta);
+              stashMeta.activeDocId = activeDocIdRef.current;
+              writeAllToCloud(stash.docs, stashMeta).then(() => {
+                ownLastUpdatedRef.current = stash.lastUpdated;
+                lastWrittenDocsRef.current = stripCloudHeavy(stash.docs);
+                try { localStorage.removeItem(`words_pending_${user.uid}`); } catch (e) { }
+              }).catch(() => { });
+              setTimeout(() => {
+                cloudWriteReadyRef.current = true;
+                lastKnownCloudDocCountRef.current = stash.docs.length;
+                skipSyncRef.current = false;
+                setIsCloudDocsLoaded(true);
+              }, 100);
+              return;
+            } else {
+              try { localStorage.removeItem(`words_pending_${user.uid}`); } catch (e) { }
+            }
+          }
+        } catch (e) {
+          try { localStorage.removeItem(`words_pending_${user.uid}`); } catch (_) { }
+        }
+      }
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const hasAnyData = data.groups || data.activeDocId || data.lastUpdated || data.schemaVersion;
+
+        if (!hasAnyData) {
+          cloudWriteReadyRef.current = true;
+          setIsCloudDocsLoaded(true);
+          return;
+        }
+
+        // Echo of our own write — nothing new to apply.
+        if (data.lastUpdated && ownLastUpdatedRef.current === data.lastUpdated) {
+          if (isFirstSnapshot) setIsCloudDocsLoaded(true);
+          return;
+        }
+
+        skipSyncRef.current = true;
+        applyingSnapshotRef.current = true;
+
+        // ── V1 → V2 migration ────────────────────────────────────────────────
+        // Old format stored all docs in the user document. Migrate them to the
+        // docs subcollection transparently so the app becomes large-data-safe.
+        if (Array.isArray(data.docs) && data.schemaVersion !== 2) {
+          const writeTime = new Date().toISOString();
+          const migrationMeta = {
+            groups: data.groups || [],
+            activeDocId: data.activeDocId || data.docs[0]?.id || null,
+            lockPasscode: data.lockPasscode || null,
+            trashedDocs: data.trashedDocs || [],
+            lastUpdated: writeTime,
+          };
+          writeAllToCloud(data.docs, migrationMeta).then(() => {
+            ownLastUpdatedRef.current = writeTime;
+            lastWrittenDocsRef.current = stripCloudHeavy(data.docs);
+          }).catch(e => console.error('[words] V1→V2 migration failed:', e));
+
+          const savedHistoryMap = (() => {
+            try { return JSON.parse(localStorage.getItem("words_edit_history") || "{}"); } catch { return {}; }
+          })();
+          const currentWithHistory = docsRef.current.map(d => {
+            if (d.editHistory?.length > 0) return d;
+            const h = savedHistoryMap[d.id];
+            return h?.length > 0 ? { ...d, editHistory: h } : d;
+          });
+          const merged = mergeLocalHistory(data.docs, currentWithHistory);
+          applyCloudState(merged, data);
+          setTimeout(() => {
+            cloudWriteReadyRef.current = true;
+            lastKnownCloudDocCountRef.current = data.docs.length;
+            skipSyncRef.current = false;
+            setIsCloudDocsLoaded(true);
+            if (pendingLocalSaveRef.current) setSyncVersion(v => v + 1);
+          }, 100);
+          return;
+        }
+
+        // ── V2 schema: load docs from subcollection ──────────────────────────
+        try {
+          const merged = await loadSubcollectionDocs();
+          applyCloudState(merged, data);
+        } catch (e) {
+          console.error('[words] Failed to load docs from subcollection:', e);
+        }
+
+        setTimeout(() => {
+          cloudWriteReadyRef.current = true;
+          skipSyncRef.current = false;
+          setIsCloudDocsLoaded(true);
+          if (pendingLocalSaveRef.current) setSyncVersion(v => v + 1);
+        }, 100);
+
+      } else {
+        // ── New user: seed cloud from local storage ──────────────────────────
+        skipSyncRef.current = true;
+        const localDocs = (() => { try { return JSON.parse(localStorage.getItem("words_docs") || "[]"); } catch { return []; } })();
+        const localGroups = (() => { try { return JSON.parse(localStorage.getItem("words_groups") || "[]"); } catch { return []; } })();
+        const actId = localStorage.getItem("words_active_doc");
+        const lp = localStorage.getItem("words_lock_passcode");
+        const candidateDocs = localDocs.length > 0 ? localDocs : docsRef.current;
+        const docsForCloud = candidateDocs.length > 0 ? candidateDocs : [{ id: "1", title: "", content: "<p><br></p>" }];
+        const writeTime = new Date().toISOString();
+        const meta = {
+          groups: localGroups,
+          activeDocId: actId || activeDocId,
+          lockPasscode: lp || lockPasscode,
+          trashedDocs: trashedDocsRef.current,
+          lastUpdated: writeTime,
+        };
+        writeAllToCloud(docsForCloud, meta).then(() => {
+          ownLastUpdatedRef.current = writeTime;
+          lastWrittenDocsRef.current = stripCloudHeavy(docsForCloud);
+          cloudWriteReadyRef.current = true;
+          lastKnownCloudDocCountRef.current = docsForCloud.length;
+          skipSyncRef.current = false;
+          setIsCloudDocsLoaded(true);
+        }).catch(e => {
+          console.error('[words] New-user cloud init failed:', e);
+          cloudWriteReadyRef.current = true;
+          setIsCloudDocsLoaded(true);
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Sync to Firebase whenever local docs/groups change.
+  // Uses diff-based writes: only changed docs are written to the subcollection,
+  // and removed docs are deleted. This makes syncs O(changed) not O(total).
+  useEffect(() => {
+    if (!user) return;
+
+    // ── Guard 1: never write before the first Firestore snapshot is received ──
+    if (!cloudWriteReadyRef.current) return;
+
+    // ── Guard 2: cloud snapshot echo — don't bounce it back ──
+    if (applyingSnapshotRef.current) {
+      applyingSnapshotRef.current = false;
+      return;
+    }
+
+    pendingLocalSaveRef.current = true;
+    pendingSerialRef.current += 1;
+
+    if (skipSyncRef.current) return;
+
+    const syncData = async () => {
+      if (!cloudWriteReadyRef.current) return;
+      if (applyingSnapshotRef.current) return;
+      if (skipSyncRef.current) return;
+
+      const docsToWrite = stripCloudHeavy(docsRef.current).filter(d => d && d.id)
+        .map((d, i) => ({ ...d, sortIndex: i }));
+
+      // ── Guard 3: never write an empty docs array ──
+      if (docsToWrite.length === 0) {
+        console.warn('[words] Blocked cloud write: docs array is empty.');
+        return;
+      }
+
+      // ── Diff: only write what actually changed ────────────────────────────
+      const lastWritten = lastWrittenDocsRef.current;
+      const lastWrittenMap = new Map((lastWritten || []).map(d => [d.id, d]));
+      const changedDocs = docsToWrite.filter(d => docChanged(lastWrittenMap.get(d.id), d));
+      const deletedIds = lastWritten
+        ? lastWritten.filter(p => !docsToWrite.find(d => d.id === p.id)).map(p => p.id)
+        : [];
+
+      const writeTime = new Date().toISOString();
+      const startSerial = pendingSerialRef.current;
+      try {
+        const ops = [
+          // Metadata doc — no docs array; each doc lives in its own subcollection entry
+          {
+            type: 'set',
+            ref: doc(db, "users", user.uid),
+            data: { groups, activeDocId, lockPasscode, trashedDocs: trashedDocsRef.current, lastUpdated: writeTime, schemaVersion: 2 },
+          },
+          ...changedDocs.map(d => ({ type: 'set', ref: doc(db, "users", user.uid, "docs", d.id), data: d })),
+          ...deletedIds.map(id => ({ type: 'delete', ref: doc(db, "users", user.uid, "docs", id) })),
+        ];
+        await commitInBatches(db, ops);
+        ownLastUpdatedRef.current = writeTime;
+        lastKnownCloudDocCountRef.current = docsToWrite.length;
+        lastWrittenDocsRef.current = docsToWrite;
+        try { localStorage.removeItem(`words_pending_${user.uid}`); } catch (e) { }
+      } catch (e) {
+        console.error('[words] Cloud sync failed:', e);
+      } finally {
+        if (pendingSerialRef.current === startSerial) {
+          pendingLocalSaveRef.current = false;
+        }
+      }
+    };
+
+    const timeout = setTimeout(syncData, 500);
+    return () => clearTimeout(timeout);
+  }, [docs, groups, activeDocId, lockPasscode, trashedDocs, user, syncVersion]);
+
+  // Auto-name "New Folder" groups once they accumulate 2+ docs
+  useEffect(() => {
+    groups.forEach(group => {
+      if (group.name !== "New Folder" || group.isNaming || aiNamingInitiatedRef.current.has(group.id)) return;
+      const groupDocs = docs.filter(d => d.groupId === group.id);
+      if (groupDocs.length >= 2) {
+        setGroups(prev => prev.map(g => g.id === group.id ? { ...g, isNaming: true } : g));
+        nameGroupWithAI(group.id, groupDocs.map(d => d.title));
+      }
+    });
+  }, [docs, groups]);
+
+  const handleGoogleLogin = () => {
+    signInWithPopup(auth, googleProvider)
+      .then(() => {
+        setAuthError('');
+      })
+      .catch((error) => {
+        setAuthError(error.message.replace('Firebase: ', ''));
+      });
+  };
+
+
+  const handleTermsAccept = async () => {
+    setTermsPopupAction(null);
+    if (!user) return;
+    localStorage.setItem(`words_terms_accepted_${user.uid}`, '1');
+    try {
+      await setDoc(doc(db, 'users', user.uid), { termsAccepted: Date.now() }, { merge: true });
+    } catch (_) {}
+  };
+
+  const handleEmailAuth = async () => {
+    if (!authEmail || !authPassword) {
+      setAuthError('Email and password required');
+      return;
+    }
+    try {
+      setAuthError('');
+      await signInWithEmailAndPassword(auth, authEmail, authPassword);
+    } catch (e) {
+      if (e.code === 'auth/invalid-credential' || e.code === 'auth/user-not-found') {
+        try {
+          await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        } catch (createErr) {
+          if (createErr.code === 'auth/email-already-in-use') {
+            setAuthError('Incorrect password.');
+          } else {
+            setAuthError(createErr.message.replace('Firebase: ', ''));
+          }
+        }
+      } else {
+        setAuthError(e.message.replace('Firebase: ', ''));
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  // Update tab title and favicon based on active document
+  useEffect(() => {
+    const activeDoc = docsRef.current.find(d => d.id === activeDocId);
+    if (!activeDoc) return;
+
+    // Update tab title
+    document.title = activeDoc.title || 'New Page';
+
+    // Update favicon with emoji
+    let link = document.querySelector("link[rel~='icon']");
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+
+    const setFavicon = () => {
+      if (activeDoc.emoji) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.font = '48px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(activeDoc.emoji, 32, 36);
+        link.href = canvas.toDataURL('image/png');
+      } else {
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        link.href = isDark ? '/favicondark.png' : '/faviconlight.png';
+      }
+    };
+
+    setFavicon();
+
+    // Listen for theme changes to update favicon
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e) => { setFavicon(); setIsDark(e.matches); };
+    mq.addEventListener('change', handleChange);
+    return () => mq.removeEventListener('change', handleChange);
+  }, [activeDocId, docs]);
+
+  // New doc reveal: single progress value drives image sweep + content reveal
+  useEffect(() => {
+    // Only fire once per animatingDocId; prevents re-triggering if activeDocId changes away and back
+    if (animatingDocId === activeDocId && animatingDocId !== null && animStartedIdRef.current !== animatingDocId) {
+      animStartedIdRef.current = animatingDocId;
+      // Re-confirm 0 here: the event-handler set(0) may have been overridden by a stale
+      // RAF frame from the previous animation before this effect ran.
+      animProgress.set(0);
+      animControlRef.current = animateMV(animProgress, 1, {
+        duration: 1.4,
+        ease: [0.16, 0, 0.06, 1],
+      });
+    }
+  }, [animatingDocId, activeDocId]);
+
+  // Preload all new-doc animation images on mount so they never pop in mid-animation.
+  // decode() goes further than src-setting — it ensures the browser fully decodes the
+  // image into GPU-ready pixels so the first animation frame paints without a stutter.
+  useEffect(() => {
+    const srcs = ['middle', 'left', 'right', 'leftside', 'rightside'];
+    const urls = [
+      ...srcs.map(s => `/newdoceffect/lightassets/${s}.png`),
+      ...srcs.map(s => `/newdoceffect/darkassets/${s}dark.png`),
+    ];
+    urls.forEach(url => {
+      const img = new Image();
+      img.src = url;
+      img.decode().catch(() => {}); // ensures fully decoded before first paint
+    });
+  }, []);
+
+  // Failsafe: Synchronous save on unmount/refresh + visibility change
+  useEffect(() => {
+    const flushSave = () => {
+      if (editorRef.current && titleRef.current) {
+        // Strip leading bare <br> nodes browsers insert before block-level elements
+        while (editorRef.current.firstChild && editorRef.current.firstChild.nodeName === 'BR') {
+          editorRef.current.removeChild(editorRef.current.firstChild);
+        }
+        const currentDocs = docsRef.current.map((d) =>
+          d.id === activeDocId
+            ? {
+              ...d,
+              title: d.hideTitle ? d.title : (titleRef.current.textContent || d.title || ""),
+              content: editorRef.current.innerHTML || "<p><br></p>",
+            }
+            : d,
+        );
+        try {
+          localStorage.setItem("words_docs", JSON.stringify(currentDocs));
+          localStorage.setItem("words_active_doc", activeDocId);
+        } catch (e) { }
+        // Per-uid pending stash: only when we have unsynced local changes.
+        // Reconciled on next cloud load if the in-flight setDoc never landed.
+        if (userRef.current && pendingLocalSaveRef.current && cloudWriteReadyRef.current) {
+          try {
+            localStorage.setItem(`words_pending_${userRef.current.uid}`, JSON.stringify({
+              docs: currentDocs,
+              groups: groupsRef.current,
+              activeDocId,
+              lockPasscode: lockPasscodeRef.current,
+              trashedDocs: trashedDocsRef.current,
+              lastUpdated: new Date().toISOString(),
+            }));
+          } catch (e) { }
+        }
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) flushSave();
+    };
+    window.addEventListener("beforeunload", flushSave);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    // Periodic auto-save every 5 seconds
+    const autoSaveInterval = setInterval(flushSave, 5000);
+    return () => {
+      window.removeEventListener("beforeunload", flushSave);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearInterval(autoSaveInterval);
+    };
+  }, [activeDocId]);
+
+  // Failsafe: Enforce DOM text integrity against React wiping uncontrolled nodes on CSS/parent re-renders
+  useEffect(() => {
+    const doc = docs.find(d => d.id === activeDocId);
+    if (doc && titleRef.current && titleRef.current.textContent !== doc.title) {
+      if (doc.title === undefined) return;
+      if (document.activeElement === titleRef.current) return; // never clobber while user is typing
+      titleRef.current.textContent = doc.title || "";
+    }
+  }, [docs, activeDocId]);
+
+  // After any docs-triggered re-render, restore cursor if React moved it
+  useLayoutEffect(() => {
+    if (titleCursorPosRef.current === null) return;
+    if (document.activeElement !== titleRef.current) { titleCursorPosRef.current = null; return; }
+    const savedPos = titleCursorPosRef.current;
+    titleCursorPosRef.current = null;
+    const sel = window.getSelection();
+    if (!sel) return;
+    // Walk text nodes to find the node+offset for savedPos
+    const walker = document.createTreeWalker(titleRef.current, NodeFilter.SHOW_TEXT);
+    let remaining = savedPos;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (remaining <= node.length) break;
+      remaining -= node.length;
+    }
+    if (!node) return;
+    // Only restore if cursor actually moved (avoids stomping browser-intended moves)
+    const cur = sel.rangeCount ? sel.getRangeAt(0) : null;
+    if (cur && cur.startContainer === node && cur.startOffset === remaining) return;
+    const range = document.createRange();
+    range.setStart(node, remaining);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }, [docs]);
+
+  useEffect(() => {
+    renderedDocIdRef.current = activeDocId;
+  }, [activeDocId]);
+
+  // Dismiss sidebar peek only after cursor moves 30px past the sidebar edge.
+  // Don't dismiss while any submenu, context menu, or hover preview is open —
+  // those elements extend beyond the sidebar and the cursor must reach them.
+  useEffect(() => {
+    if (!isSidebarPeeking || isSidebarOpen) return;
+    const DISMISS_THRESHOLD = 30;
+    const SIDEBAR_WIDTH = 256;
+    const handleMouseMove = (e) => {
+      if (previewHoverGroupId || previewHoverDocId || contextMenu || groupMenuOpen || folderCustomizeOpen) return;
+      if (e.clientX > SIDEBAR_WIDTH + DISMISS_THRESHOLD) {
+        setIsSidebarPeeking(false);
+      }
+    };
+    document.addEventListener('mousemove', handleMouseMove);
+    return () => document.removeEventListener('mousemove', handleMouseMove);
+  }, [isSidebarPeeking, isSidebarOpen, previewHoverGroupId, previewHoverDocId, contextMenu, groupMenuOpen, folderCustomizeOpen]);
+
+  // Live-reorder docs during pointer drag (adopted target's groupId)
+  const liveReorderDocs = (idsToMove, targetId, position) => {
+    const key = `${idsToMove.join(',')}-${targetId}-${position}`;
+    if (lastReorderRef.current === key) return;
+    lastReorderRef.current = key;
+    setDocs(prev => {
+      const withoutDragged = prev.filter(d => !idsToMove.includes(d.id));
+      const targetIdx = withoutDragged.findIndex(d => d.id === targetId);
+      if (targetIdx === -1) return prev;
+      const targetDoc = withoutDragged[targetIdx];
+      const targetGroupId = targetDoc.isPinned ? null : targetDoc.groupId;
+      const docsToInsert = prev
+        .filter(d => idsToMove.includes(d.id))
+        .map(d => ({ ...d, groupId: targetGroupId, isPinned: targetDoc.isPinned }));
+      const result = [...withoutDragged];
+      result.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, ...docsToInsert);
+      docsRef.current = result;
+      return result;
+    });
+  };
+
+  const liveReorderGroups = (groupId, targetGroupId, position) => {
+    const key = `${groupId}-${targetGroupId}-${position}`;
+    if (groupLastReorderRef.current === key) return;
+    groupLastReorderRef.current = key;
+    setGroups(prev => {
+      const dragged = prev.find(g => g.id === groupId);
+      if (!dragged) return prev;
+      const without = prev.filter(g => g.id !== groupId);
+      const targetIdx = without.findIndex(g => g.id === targetGroupId);
+      if (targetIdx === -1) return prev;
+      const result = [...without];
+      result.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, dragged);
+      return result;
+    });
+  };
+
+  const FOLDER_COLORS = ['#9a9a97', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
+
+  const getNextFolderColor = () => {
+    const available = FOLDER_COLORS.filter(c => c !== lastFolderColorRef.current);
+    const color = available[Math.floor(Math.random() * available.length)];
+    lastFolderColorRef.current = color;
+    return color;
+  };
+
+  const nameGroupWithAI = (groupId, titles) => {
+    aiNamingInitiatedRef.current.add(groupId);
+    generateFolderName(titles).then(aiName => {
+      newlyNamedGroupsRef.current.add(groupId);
+      const autoIcon = getIconForFolderName(aiName || "");
+      if (autoIcon) {
+        setAnimatingIconGroupId(groupId);
+        setTimeout(() => setAnimatingIconGroupId(p => p === groupId ? null : p), 400);
+      }
+      setGroups(prev => prev.map(g =>
+        g.id === groupId
+          ? { ...g, name: aiName || "New Folder", isNaming: false, ...(autoIcon && !g.hasCustomIcon ? { icon: autoIcon } : {}) }
+          : g
+      ));
+    });
+  };
+
+  const handleInsetDrop = (idsToMove, targetDocId) => {
+    const targetDoc = docsRef.current.find(d => d.id === targetDocId);
+    if (!targetDoc) return;
+    let targetGroupId = targetDoc.groupId;
+    let isNewGroup = false;
+    if (!targetGroupId) {
+      targetGroupId = Math.random().toString(36).substring(2, 9);
+      isNewGroup = true;
+      const randomColor = getNextFolderColor();
+
+      // Capture titles before state changes, create group instantly with loading state
+      const involvedTitles = docsRef.current
+        .filter(d => [...idsToMove, targetDocId].includes(d.id))
+        .map(d => d.title);
+      setGroups(prev => [{ id: targetGroupId, name: "", isNaming: true, color: randomColor, isCollapsed: false }, ...prev]);
+      nameGroupWithAI(targetGroupId, involvedTitles);
+    }
+    setDocs(prev => {
+      let newDocs = [...prev];
+      const docsToMoveIds = isNewGroup ? [...idsToMove, targetDocId] : [...idsToMove];
+      docsToMoveIds.forEach(id => {
+        const idx = newDocs.findIndex(d => d.id === id);
+        if (idx !== -1) newDocs[idx] = { ...newDocs[idx], groupId: targetGroupId };
+      });
+      newDocs = newDocs.filter(d => !idsToMove.includes(d.id));
+      const targetIdx = newDocs.findIndex(d => d.id === targetDocId);
+      if (targetIdx !== -1) {
+        const docsToInsert = prev
+          .filter(d => idsToMove.includes(d.id))
+          .map(d => ({ ...d, groupId: targetGroupId }));
+        newDocs.splice(targetIdx + 1, 0, ...docsToInsert);
+      }
+      docsRef.current = newDocs;
+      return newDocs;
+    });
+  };
+
+  const startResize = useCallback((e) => {
+    snapBackRef.current = false;
+    cancelResizeRef.current = false; // clear any stale flag from a prior double-click
+    isResizingRef.current = true;
+    resizeDragRef.current = { startX: e.clientX, startWidth: sidebarWidthMV.get() };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    if (contentAreaRef.current) contentAreaRef.current.style.transition = 'none';
+    // Capture pointer on body (always in DOM) so events keep firing outside the window
+    const pointerId = e.pointerId;
+    try { document.body.setPointerCapture(pointerId); } catch (_) {}
+    const onMove = (moveE) => {
+      if (!isResizingRef.current) return;
+      const rawWidth = resizeDragRef.current.startWidth + (moveE.clientX - resizeDragRef.current.startX);
+      let newWidth;
+      if (rawWidth < SIDEBAR_MIN) {
+        const over = SIDEBAR_MIN - rawWidth;
+        newWidth = SIDEBAR_MIN - over * 0.08;
+        // Set squish as the actual compression ratio (how much narrower sidebar is vs min)
+        squishMV.set((SIDEBAR_MIN - newWidth) / SIDEBAR_MIN);
+      } else {
+        newWidth = Math.min(SIDEBAR_MAX, rawWidth);
+        squishMV.set(0);
+      }
+      sidebarWidthMV.set(newWidth);
+    };
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      try { document.body.releasePointerCapture(pointerId); } catch (_) {}
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('blur', onUp);
+      if (cancelResizeRef.current) {
+        cancelResizeRef.current = false;
+        return;
+      }
+      isResizingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      const finalWidth = sidebarWidthMV.get();
+      squishMV.set(0);
+      if (sidebarInnerRef.current) {
+        sidebarInnerRef.current.style.transform = '';
+        sidebarInnerRef.current.style.transformOrigin = '';
+        sidebarInnerRef.current.style.overflow = '';
+        sidebarInnerRef.current.style.minWidth = '';
+      }
+      if (finalWidth < SIDEBAR_MIN) {
+        // Instant set → single spring snap-back (no double-spring choppiness)
+        snapBackRef.current = true;
+        if (contentAreaRef.current) contentAreaRef.current.style.transition = 'none';
+        sidebarWidthMV.set(SIDEBAR_MIN);
+        setTimeout(() => {
+          snapBackRef.current = false;
+          setSidebarWidth(SIDEBAR_MIN);
+          try { localStorage.setItem('words_sidebar_width', String(SIDEBAR_MIN)); } catch {}
+          if (contentAreaRef.current) contentAreaRef.current.style.transition = '';
+          // marginLeft NOT cleared — React sets correct value, no transition flash
+        }, 500);
+      } else {
+        if (contentAreaRef.current) contentAreaRef.current.style.transition = '';
+        const committed = Math.round(finalWidth);
+        setSidebarWidth(committed);
+        try { localStorage.setItem('words_sidebar_width', String(committed)); } catch {}
+        // marginLeft NOT cleared — subscriber already set correct value
+      }
+    };
+    const onUp = () => cleanup();
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('blur', onUp);
+  }, [sidebarWidthMV, squishMV]);
+
+  const handleResizeDoubleClick = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    cancelResizeRef.current = true;
+    isResizingRef.current = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    squishMV.set(0);
+    if (sidebarInnerRef.current) {
+      sidebarInnerRef.current.style.transform = '';
+      sidebarInnerRef.current.style.transformOrigin = '';
+      sidebarInnerRef.current.style.overflow = '';
+    }
+    // Always restore transition that startResize may have disabled
+    if (contentAreaRef.current) contentAreaRef.current.style.transition = '';
+    // Nothing to do if already at default
+    if (Math.abs(sidebarWidthMV.get() - SIDEBAR_DEFAULT) < 2) return;
+    sidebarWidthMV.set(SIDEBAR_DEFAULT);
+    if (contentAreaRef.current) {
+      contentAreaRef.current.style.transition = 'margin-left 0.45s cubic-bezier(0.16, 1, 0.3, 1)';
+      contentAreaRef.current.style.marginLeft = `${SIDEBAR_DEFAULT}px`;
+    }
+    setTimeout(() => {
+      setSidebarWidth(SIDEBAR_DEFAULT);
+      try { localStorage.setItem('words_sidebar_width', String(SIDEBAR_DEFAULT)); } catch {}
+      if (contentAreaRef.current) {
+        contentAreaRef.current.style.transition = '';
+        // marginLeft NOT cleared — already at SIDEBAR_DEFAULT, React takes over same value
+      }
+    }, 480);
+  }, [sidebarWidthMV, squishMV]);
+
+  const startDocPointerDrag = (e, docId) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, a')) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragStarted = false;
+
+    const tryStart = (moveE) => {
+      const dx = moveE.clientX - startX;
+      const dy = moveE.clientY - startY;
+      if (!dragStarted && Math.sqrt(dx * dx + dy * dy) > 5) {
+        dragStarted = true;
+        cleanup();
+        initDocDrag(docId, moveE.clientX, moveE.clientY);
+      }
+    };
+    const cleanup = () => {
+      document.removeEventListener('pointermove', tryStart);
+      document.removeEventListener('pointerup', cleanup);
+    };
+    document.addEventListener('pointermove', tryStart);
+    document.addEventListener('pointerup', cleanup);
+  };
+
+  const initDocDrag = (docId, currentX, currentY) => {
+    const idsToMove = selectedDocIds.includes(docId) ? selectedDocIds : [docId];
+    if (!selectedDocIds.includes(docId)) setSelectedDocIds([docId]);
+
+    const el = document.querySelector(`[data-doc-id="${docId}"]`);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+
+    // Build a floating clone that looks like the real sidebar item
+    const clone = el.cloneNode(true);
+    // Remove any hover/focus states that may be stale
+    clone.removeAttribute('data-doc-id');
+    Object.assign(clone.style, {
+      position: 'fixed',
+      top: rect.top + 'px',
+      left: rect.left + 'px',
+      width: rect.width + 'px',
+      margin: '0',
+      pointerEvents: 'none',
+      zIndex: '9999',
+      borderRadius: '0.375rem',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08)',
+      background: 'var(--color-bg-secondary)',
+      opacity: '0.55',
+      backdropFilter: 'blur(2px)',
+      transform: 'scale(1.015)',
+      transition: 'none',
+    });
+    document.body.appendChild(clone);
+
+    // Store current drag target in ref so handleUp always reads the latest value
+    pointerDragRef.current = { docId, idsToMove, clone, offsetY: currentY - rect.top, currentTarget: null, folderHoverTimer: null, folderHoverTarget: null };
+    lastReorderRef.current = null;
+    setDraggedItem({ type: 'doc', id: docId });
+
+    const handleMove = (moveE) => {
+      if (!pointerDragRef.current) return;
+      const { clone, offsetY } = pointerDragRef.current;
+      clone.style.top = (moveE.clientY - offsetY) + 'px';
+
+      // Temporarily hide clone to hit-test what's underneath
+      clone.style.visibility = 'hidden';
+      const elBelow = document.elementFromPoint(moveE.clientX, moveE.clientY);
+      clone.style.visibility = 'visible';
+
+      if (!elBelow) {
+        pointerDragRef.current.currentTarget = null;
+        setDragTarget(null);
+        return;
+      }
+
+      const docEl = elBelow.closest('[data-doc-id]');
+      const groupHeaderEl = !docEl && elBelow.closest('[data-group-id]');
+
+      if (docEl) {
+        const targetId = docEl.getAttribute('data-doc-id');
+        if (pointerDragRef.current.idsToMove.includes(targetId)) {
+          clearTimeout(pointerDragRef.current.folderHoverTimer);
+          pointerDragRef.current.folderHoverTimer = null;
+          pointerDragRef.current.folderHoverTarget = null;
+          pointerDragRef.current.currentTarget = null;
+          setFolderPendingId(null);
+          setDragTarget(null);
+          return;
+        }
+        const targetRect = docEl.getBoundingClientRect();
+        const relY = moveE.clientY - targetRect.top;
+        const h = targetRect.height;
+
+        if (relY > h * 0.58) {
+          // Bottom zone — folder creation requires a brief hold
+          if (pointerDragRef.current.folderHoverTarget !== targetId) {
+            // New target — reset timer and start fresh
+            clearTimeout(pointerDragRef.current.folderHoverTimer);
+            pointerDragRef.current.folderHoverTarget = targetId;
+            pointerDragRef.current.currentTarget = null;
+            setDragTarget(null);
+            setFolderPendingId(targetId);
+            pointerDragRef.current.folderHoverTimer = setTimeout(() => {
+              if (pointerDragRef.current?.folderHoverTarget === targetId) {
+                const t = { id: targetId, position: 'inset', type: 'doc' };
+                pointerDragRef.current.currentTarget = t;
+                setFolderPendingId(null);
+                setDragTarget(t);
+              }
+            }, 350);
+          }
+          // else: timer already running for this target — do nothing
+        } else {
+          // Top zone — reorder before; clear any folder hover state
+          if (pointerDragRef.current.folderHoverTarget) {
+            clearTimeout(pointerDragRef.current.folderHoverTimer);
+            pointerDragRef.current.folderHoverTimer = null;
+            pointerDragRef.current.folderHoverTarget = null;
+            setFolderPendingId(null);
+          }
+          const position = 'before';
+          const t = { id: targetId, position, type: 'doc' };
+          pointerDragRef.current.currentTarget = t;
+          setDragTarget(t);
+          liveReorderDocs(pointerDragRef.current.idsToMove, targetId, position);
+        }
+      } else if (groupHeaderEl) {
+        clearTimeout(pointerDragRef.current.folderHoverTimer);
+        pointerDragRef.current.folderHoverTimer = null;
+        pointerDragRef.current.folderHoverTarget = null;
+        setFolderPendingId(null);
+        const targetGroupId = groupHeaderEl.getAttribute('data-group-id');
+        const t = { id: targetGroupId, position: 'inset', type: 'group' };
+        pointerDragRef.current.currentTarget = t;
+        setDragTarget(t);
+      } else {
+        if (pointerDragRef.current.folderHoverTarget) {
+          clearTimeout(pointerDragRef.current.folderHoverTimer);
+          pointerDragRef.current.folderHoverTimer = null;
+          pointerDragRef.current.folderHoverTarget = null;
+          setFolderPendingId(null);
+        }
+        pointerDragRef.current.currentTarget = null;
+        setDragTarget(null);
+      }
+    };
+
+    const handleUp = (upE) => {
+      if (!pointerDragRef.current) return;
+      pointerDragRef.current.clone.remove();
+      const { idsToMove, currentTarget } = pointerDragRef.current;
+
+      // Resolve the final drop action using the ref value (always fresh)
+      if (currentTarget?.position === 'inset' && currentTarget?.type === 'doc') {
+        handleInsetDrop(idsToMove, currentTarget.id);
+      } else if (currentTarget?.position === 'inset' && currentTarget?.type === 'group') {
+        setDocs(d => {
+          const newDocs = d.map(dd =>
+            idsToMove.includes(dd.id) ? { ...dd, groupId: currentTarget.id } : dd
+          );
+          docsRef.current = newDocs;
+          return newDocs;
+        });
+      } else if (!currentTarget) {
+        // Dropped over empty sidebar space → remove from any group
+        const sidebarEl = document.getElementById('sidebar-scroll-root');
+        if (sidebarEl && sidebarEl.contains(upE.target)) {
+          setDocs(d => {
+            const newDocs = d.map(dd =>
+              idsToMove.includes(dd.id) ? { ...dd, groupId: null } : dd
+            );
+            docsRef.current = newDocs;
+            return newDocs;
+          });
+        }
+      }
+
+      clearTimeout(pointerDragRef.current?.folderHoverTimer);
+      pointerDragRef.current = null;
+      lastReorderRef.current = null;
+      setFolderPendingId(null);
+      setDragTarget(null);
+      setDraggedItem(null);
+      document.removeEventListener('pointermove', handleMove);
+      document.removeEventListener('pointerup', handleUp);
+    };
+
+    document.addEventListener('pointermove', handleMove);
+    document.addEventListener('pointerup', handleUp);
+  };
+
+  const startGroupPointerDrag = (e, groupId) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, a')) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragStarted = false;
+    const tryStart = (moveE) => {
+      const dx = moveE.clientX - startX;
+      const dy = moveE.clientY - startY;
+      if (!dragStarted && Math.sqrt(dx * dx + dy * dy) > 5) {
+        dragStarted = true;
+        cleanup();
+        initGroupDrag(groupId, moveE.clientX, moveE.clientY);
+      }
+    };
+    const cleanup = () => {
+      document.removeEventListener('pointermove', tryStart);
+      document.removeEventListener('pointerup', cleanup);
+    };
+    document.addEventListener('pointermove', tryStart);
+    document.addEventListener('pointerup', cleanup);
+  };
+
+  const initGroupDrag = (groupId, currentX, currentY) => {
+    const containerEl = document.querySelector(`[data-group-id="${groupId}"]`);
+    const el = containerEl?.querySelector('[data-group-header]');
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+
+    const clone = el.cloneNode(true);
+    Object.assign(clone.style, {
+      position: 'fixed',
+      top: rect.top + 'px',
+      left: rect.left + 'px',
+      width: rect.width + 'px',
+      margin: '0',
+      pointerEvents: 'none',
+      zIndex: '9999',
+      borderRadius: '0.375rem',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08)',
+      background: 'var(--color-bg-secondary)',
+      opacity: '0.55',
+      backdropFilter: 'blur(2px)',
+      transform: 'scale(1.015)',
+      transition: 'none',
+    });
+    document.body.appendChild(clone);
+
+    groupPointerDragRef.current = { groupId, clone, offsetY: currentY - rect.top };
+    groupLastReorderRef.current = null;
+    setDraggedItem({ type: 'group', id: groupId });
+
+    const handleMove = (moveE) => {
+      if (!groupPointerDragRef.current) return;
+      const { clone, offsetY } = groupPointerDragRef.current;
+      clone.style.top = (moveE.clientY - offsetY) + 'px';
+
+      clone.style.visibility = 'hidden';
+      const elBelow = document.elementFromPoint(moveE.clientX, moveE.clientY);
+      clone.style.visibility = 'visible';
+
+      if (!elBelow) return;
+
+      const groupEl = elBelow.closest('[data-group-id]');
+      if (groupEl) {
+        const targetId = groupEl.getAttribute('data-group-id');
+        if (targetId === groupId) return;
+        const targetRect = groupEl.getBoundingClientRect();
+        const position = moveE.clientY - targetRect.top < targetRect.height / 2 ? 'before' : 'after';
+        liveReorderGroups(groupId, targetId, position);
+      }
+    };
+
+    const handleUp = () => {
+      if (!groupPointerDragRef.current) return;
+      groupPointerDragRef.current.clone.remove();
+      groupPointerDragRef.current = null;
+      groupLastReorderRef.current = null;
+      setDraggedItem(null);
+      document.removeEventListener('pointermove', handleMove);
+      document.removeEventListener('pointerup', handleUp);
+    };
+
+    document.addEventListener('pointermove', handleMove);
+    document.addEventListener('pointerup', handleUp);
+  };
+
+  const handleTitleInput = () => {
+    // Save cursor offset before any state update that could trigger a re-render
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && titleRef.current?.contains(sel.getRangeAt(0).startContainer)) {
+      const pre = sel.getRangeAt(0).cloneRange();
+      pre.selectNodeContents(titleRef.current);
+      pre.setEnd(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+      titleCursorPosRef.current = pre.toString().length;
+    }
+
+    const newTitle = titleRef.current?.textContent || "";
+
+    // Instantly sync the text typed to the document state
+    setDocs((prev) =>
+      prev.map((d) => (d.id === activeDocId ? { ...d, title: newTitle } : d))
+    );
+
+    // Clear any existing timeout since the user is still actively typing
+    if (titleTimeoutRef.current) {
+      clearTimeout(titleTimeoutRef.current);
+    }
+
+    // Wait 800ms after the user *stops* typing to evaluate the smart emoji
+    titleTimeoutRef.current = setTimeout(() => {
+      setDocs((prev) =>
+        prev.map((d) => {
+          if (d.id !== activeDocId) return d;
+          let nextEmoji = d.emoji;
+
+          if (!d.hasCustomEmoji) {
+            const autoEmoji = getEmojiForTitle(newTitle);
+            if (autoEmoji && autoEmoji !== d.emoji) {
+              nextEmoji = autoEmoji;
+
+              setAnimatingEmojiDocId(d.id);
+              setTimeout(() => {
+                setAnimatingEmojiDocId(prev => prev === d.id ? null : prev);
+              }, 200);
+            }
+          }
+
+          return { ...d, emoji: nextEmoji };
+        })
+      );
+    }, 800);
+
+    if (titleHistoryTimerRef.current) clearTimeout(titleHistoryTimerRef.current);
+    titleHistoryTimerRef.current = setTimeout(() => {
+      captureHistorySnapshot('title', `Renamed to "${newTitle}"`);
+    }, 5000);
+  };
+
+  const syncContentToState = useCallback(() => {
+    if (editorRef.current) {
+      // Enforce checklist inheritance on nested lists created via Tab indentation
+      const nestedUls = editorRef.current.querySelectorAll('ul.checklist ul:not(.checklist)');
+      nestedUls.forEach(ul => ul.classList.add('checklist'));
+      // Strip leading bare <br> nodes browsers insert before block-level elements
+      while (editorRef.current.firstChild && editorRef.current.firstChild.nodeName === 'BR') {
+        editorRef.current.removeChild(editorRef.current.firstChild);
+      }
+    }
+    const newContent = editorRef.current?.innerHTML || "<p><br></p>";
+    setDocs((prev) => {
+      const activeDoc = prev.find((d) => d.id === activeDocId);
+      if (activeDoc && activeDoc.content === newContent) {
+        return prev;
+      }
+      const updatedDocs = prev.map((d) =>
+        d.id === activeDocId ? { ...d, content: newContent } : d,
+      );
+      docsRef.current = updatedDocs;
+      return updatedDocs;
+    });
+  }, [activeDocId]);
+
+  useEffect(() => {
+    if (periodicHistoryRef.current) {
+      clearInterval(periodicHistoryRef.current);
+      periodicHistoryRef.current = null;
+    }
+  }, [activeDocId]);
+
+  // Exit diff preview whenever the history panel closes
+  useEffect(() => {
+    if (!historyPanelOpen) exitHistoryPreview();
+  }, [historyPanelOpen]); // eslint-disable-line
+
+  const captureHistorySnapshot = useCallback((type, label) => {
+    const content = editorRef.current?.innerHTML || "";
+    const title = titleRef.current?.textContent || "";
+    // Robust empty check — strip all tags and see if any real text remains
+    const textContent = content.replace(/<[^>]+>/g, '').trim();
+    if (!textContent) return;
+
+    setDocs(prev => {
+      const docId = activeDocId;
+      const docEntry = prev.find(d => d.id === docId);
+      if (!docEntry) return prev;
+      const history = docEntry.editHistory || [];
+      const last = history[history.length - 1];
+      // Skip if content and title are identical to the last snapshot
+      if (last && last.snapshot.content === content && last.snapshot.title === title) return prev;
+      const entry = {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        type,
+        label,
+        snapshot: { content, title },
+        authorName: null,
+      };
+      const updated = prev.map(d => {
+        if (d.id !== docId) return d;
+        return { ...d, editHistory: [...history, entry].slice(-150) };
+      });
+      docsRef.current = updated;
+      return updated;
+    });
+  }, [activeDocId]);
+
+  const restoreHistorySnapshot = useCallback((entry) => {
+    if (!editorRef.current || !titleRef.current) return;
+    // Exit any active preview first
+    if (historyPreviewSavedRef.current !== null) {
+      editorRef.current.innerHTML = historyPreviewSavedRef.current;
+      historyPreviewSavedRef.current = null;
+    }
+    captureHistorySnapshot('user', 'Before restore');
+    editorRef.current.innerHTML = entry.snapshot.content || "<p><br></p>";
+    titleRef.current.textContent = entry.snapshot.title || "";
+    const restored = { content: entry.snapshot.content || "<p><br></p>", title: entry.snapshot.title || "" };
+    setDocs(prev => {
+      const docId = activeDocId;
+      const updated = prev.map(d => d.id === docId ? { ...d, ...restored } : d);
+      docsRef.current = updated;
+      return updated;
+    });
+    setHistoryPanelOpen(false);
+  }, [activeDocId, captureHistorySnapshot]);
+
+  const enterHistoryPreview = useCallback((prevHtml, currHtml) => {
+    if (!editorRef.current) return;
+    if (historyPreviewSavedRef.current === null) {
+      historyPreviewSavedRef.current = editorRef.current.innerHTML;
+    }
+    editorRef.current.innerHTML = buildDiffHtml(prevHtml, currHtml);
+  }, []);
+
+  const exitHistoryPreview = useCallback(() => {
+    if (!editorRef.current || historyPreviewSavedRef.current === null) return;
+    editorRef.current.innerHTML = historyPreviewSavedRef.current;
+    historyPreviewSavedRef.current = null;
+  }, []);
+
+  const handleEditorInput = useCallback(() => {
+    if (isInternalEdit.current) return;
+    if (historyPreviewSavedRef.current !== null) return; // ignore input during diff preview
+    syncContentToState();
+
+    if (historySnapshotTimerRef.current) clearTimeout(historySnapshotTimerRef.current);
+    historySnapshotTimerRef.current = setTimeout(() => captureHistorySnapshot('user', 'Edited'), 15000);
+
+    // Periodic snapshot every 3 minutes while actively editing
+    if (!periodicHistoryRef.current) {
+      periodicHistoryRef.current = setInterval(() => captureHistorySnapshot('user', 'Edited'), 180000);
+    }
+
+    // Auto-title unnamed documents once enough content has been typed
+    const activeDoc = docsRef.current.find(d => d.id === activeDocId);
+    if (activeDoc && !activeDoc.title.trim() && !autoTitledDocsRef.current.has(activeDocId)) {
+      const plainText = (editorRef.current?.innerText || '').trim();
+      if (plainText.length >= 100) {
+        autoTitledDocsRef.current.add(activeDocId);
+        const docIdToName = activeDocId;
+        setAutoNamingDocId(docIdToName);
+        generateDocTitle(plainText).then(aiTitle => {
+          setAutoNamingDocId(prev => prev === docIdToName ? null : prev);
+          if (!aiTitle) {
+            autoTitledDocsRef.current.delete(docIdToName);
+            return;
+          }
+          newlyAutoTitledDocsRef.current.add(docIdToName);
+          setDocs(prev => prev.map(d => {
+            if (d.id !== docIdToName) return d;
+            if (d.title.trim()) return d; // user typed a title while AI was working
+            const autoEmoji = d.hasCustomEmoji ? d.emoji : (getEmojiForTitle(aiTitle) || d.emoji);
+            if (autoEmoji !== d.emoji) {
+              setAnimatingEmojiDocId(d.id);
+              setTimeout(() => setAnimatingEmojiDocId(p => p === d.id ? null : p), 200);
+            }
+            return { ...d, title: aiTitle, emoji: autoEmoji };
+          }));
+          if (titleRef.current && !titleRef.current.textContent.trim() && renderedDocIdRef.current === docIdToName) {
+            titleRef.current.textContent = aiTitle;
+          }
+        });
+      }
+    }
+
+    // Check selection natively
+    const selection = window.getSelection();
+    if (!selection || !selection.focusNode) return;
+
+    const node = selection.focusNode;
+    const text = node.textContent.substring(0, selection.focusOffset);
+
+    // Sentence-end detection: tighter 2s snapshot on sentence boundary
+    if (/[.!?]\s$/.test(text)) {
+      if (historySnapshotTimerRef.current) clearTimeout(historySnapshotTimerRef.current);
+      historySnapshotTimerRef.current = setTimeout(() => captureHistorySnapshot('user', 'Edited'), 2000);
+    }
+
+    // --- Clean Stale Math Previews ---
+    const stalePreviews = editorRef.current.querySelectorAll(".math-preview");
+    stalePreviews.forEach((p) => p.remove());
+
+    // --- Auto-Math Evaluation ---
+    const mathMatch = text.match(
+      /(?:^|[\s\u00A0])([0-9\.\+\-\*\/\^\(\)\s\u00A0]+)=$/,
+    );
+    if (mathMatch) {
+      const eq = mathMatch[1].trim();
+      if (eq.length > 0 && /\d/.test(eq) && /[\+\-\*\/\^]/.test(eq)) {
+        try {
+          const sanitized = eq.replace(/\^/g, "**").replace(/[\u00A0]/g, " ");
+          if (/^[\d\.\+\-\*\/\^\(\)\s\*\*]+$/.test(sanitized)) {
+            const ans = new Function("return " + sanitized)();
+            if (isFinite(ans)) {
+              isInternalEdit.current = true;
+
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount > 0) {
+                const range = sel.getRangeAt(0);
+                range.collapse(true);
+
+                const previewSpan = document.createElement('span');
+                previewSpan.className = 'math-preview';
+                previewSpan.setAttribute('contenteditable', 'false');
+                previewSpan.textContent = String(ans);
+                range.insertNode(previewSpan);
+
+                // Cursor stays before the preview — it's not real until confirmed
+                const cursorRange = document.createRange();
+                cursorRange.setStartBefore(previewSpan);
+                cursorRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(cursorRange);
+              }
+
+              isInternalEdit.current = false;
+              syncContentToState();
+            }
+          }
+        } catch (e) { }
+      }
+    }
+
+    // --- Link Preview Detection ---
+    const urlMatch = text.match(/(?:^|[\s\u00A0])(https?:\/\/[^\s\u00A0]+)[\s\u00A0]$/);
+    if (urlMatch) {
+      const url = urlMatch[1];
+
+      const range = selection.getRangeAt(0);
+
+      // Delete the typed URL + space
+      range.setStart(node, selection.focusOffset - url.length - 1);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand("delete", false, null);
+
+      // Insert placeholder map natively
+      const placeholderId = `link-preview-${Date.now()}`;
+      const placeholderHtml = `<div id="${placeholderId}" contenteditable="false" class="link-preview-loading"></div>`;
+      document.execCommand("insertHTML", false, placeholderHtml);
+      
+      const spaceHtml = `\u00A0`;
+      document.execCommand("insertHTML", false, spaceHtml);
+
+      syncContentToState();
+
+      // Fetch asynchronously
+      fetchLinkPreviewData(url).then(preview => {
+        const el = document.getElementById(placeholderId);
+        if (!el) return;
+
+        if (preview) {
+          el.outerHTML = `
+            <div class="link-preview-outer" contenteditable="false" id="${placeholderId}-resolved">
+              <a href="${preview.url}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
+                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" onerror="this.onerror=null; this.style.display='none';"/>` : ''}
+                <div class="link-preview-content">
+                  <div class="link-preview-title">${preview.title}</div>
+                  <div class="link-preview-domain">${preview.domain}</div>
+                </div>
+              </a>
+              <button class="link-remove-btn" title="Convert to plain link" data-url="${preview.url}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+            </div>
+          `;
+          setTimeout(() => {
+            const resolvedEl = document.getElementById(`${placeholderId}-resolved`);
+            if (resolvedEl) {
+              resolvedEl.removeAttribute('id');
+              const sel = window.getSelection();
+              const range = document.createRange();
+              range.setStartAfter(resolvedEl);
+              range.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          }, 10);
+        } else {
+          // If fetch fails, replace with simple text link
+          const link = document.createElement("a");
+          link.href = url;
+          link.textContent = url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.style.color = "var(--color-accent)";
+          link.style.textDecoration = "underline";
+          link.style.cursor = "pointer";
+          el.parentNode.replaceChild(link, el);
+        }
+        syncContentToState();
+      });
+      return;
+    }
+
+    // --- Slash command trigger ---
+    const slashMatch = text.match(/(?:^|\s)(\/)([^/\s]*)$/);
+    if (slashMatch) {
+      const coords = getCaretCoordinates();
+      if (coords) {
+        const isFreshSlash = slashMatch[2] === "";
+        let charRect = null;
+        let charFontSize = "16px";
+        let charFontFamily = "var(--font-sans)";
+        if (isFreshSlash) {
+          try {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0) {
+              const r = sel.getRangeAt(0).cloneRange();
+              r.setStart(r.startContainer, Math.max(0, r.startOffset - 1));
+              charRect = r.getBoundingClientRect().toJSON();
+              const anchorEl = sel.anchorNode?.parentElement;
+              if (anchorEl) {
+                const cs = window.getComputedStyle(anchorEl);
+                charFontSize = cs.fontSize;
+                charFontFamily = cs.fontFamily;
+              }
+            }
+          } catch (_) {}
+        }
+        setSlashState((prev) => ({
+          isOpen: true,
+          query: slashMatch[2],
+          x: coords.x,
+          y: coords.y,
+          charRect: isFreshSlash ? charRect : prev.charRect,
+          charFontSize: isFreshSlash ? charFontSize : prev.charFontSize,
+          charFontFamily: isFreshSlash ? charFontFamily : prev.charFontFamily,
+          activeIndex:
+            prev.isOpen && prev.query === slashMatch[2] ? prev.activeIndex : 0,
+        }));
+      }
+    } else {
+      setSlashState((prev) => {
+        if (!prev.isOpen) return prev;
+        return { ...prev, isOpen: false };
+      });
+    }
+  }, [syncContentToState, captureHistorySnapshot, activeDocId]);
+
+  const createNewDoc = (e, targetGroupId = null) => {
+    if (e) e.stopPropagation();
+    // Flush current doc before creating new one
+    flushCurrentDoc();
+    const newId = Math.random().toString(36).substring(2, 9);
+    const newDoc = {
+      id: newId,
+      title: "",
+      content: "<p><br></p>",
+      isPinned: false,
+      emoji: null,
+      hasCustomEmoji: false,
+      groupId: targetGroupId,
+      textAlign: "left",
+      hideTitle: false,
+      fullWidth: false,
+      lineSpacing: "1.5",
+    };
+
+    const newDocs = [newDoc, ...docsRef.current];
+    docsRef.current = newDocs;
+    setDocs(newDocs);
+
+    // Stop any in-flight animation before resetting — prevents the old animateMV RAF
+    // from overriding the set(0) on the very next frame
+    if (animControlRef.current) animControlRef.current.stop();
+    animProgress.set(0); // freeze content hidden before overlay mounts
+    setAnimatingDocId(newId);
+    setTimeout(() => {
+      setAnimatingDocId((prev) => (prev === newId ? null : prev));
+    }, 1700); // 300ms buffer past the 1.4s animation
+
+    prevActiveDocIdRef.current = newId;
+    setActiveDocId(newId);
+    setSelectedDocIds([newId]);
+
+    // Load the new doc into the editor directly
+    if (titleRef.current) titleRef.current.textContent = "";
+    if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
+
+    if (sidebarScrollRef.current && !targetGroupId) {
+      setTimeout(() => {
+        sidebarScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 10);
+    }
+
+    setTimeout(() => {
+      if (titleRef.current) {
+        titleRef.current.focus();
+        const range = document.createRange();
+        range.selectNodeContents(titleRef.current);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }, 50);
+  };
+
+  const createGroup = () => {
+    const newGroupId = Math.random().toString(36).substring(2, 9);
+    const randomColor = getNextFolderColor();
+    const has2PlusDocs = selectedDocIds.length >= 2;
+
+    // Gather selected doc titles before any state changes
+    let selectedTitles = [];
+    let newDocs = null;
+    if (selectedDocIds.length > 0) {
+      selectedTitles = docsRef.current
+        .filter(d => selectedDocIds.includes(d.id))
+        .map(d => d.title);
+      newDocs = docsRef.current.map(d =>
+        selectedDocIds.includes(d.id) ? { ...d, groupId: newGroupId } : d
+      );
+    }
+
+    // Only AI-name immediately if 2+ docs are being added; otherwise stay "New Folder"
+    const initialName = has2PlusDocs ? "" : "New Folder";
+    const initialIsNaming = has2PlusDocs;
+    setGroups(prev => [{ id: newGroupId, name: initialName, isNaming: initialIsNaming, color: randomColor, isCollapsed: false }, ...prev]);
+
+    if (has2PlusDocs) nameGroupWithAI(newGroupId, selectedTitles);
+
+    if (newDocs) {
+      docsRef.current = newDocs;
+      setDocs(newDocs);
+      setSelectedDocIds([]);
+    }
+  };
+
+  const updateGroup = (id, updates) => {
+    setGroups(prev => prev.map(g => g.id === id ? { ...g, ...updates } : g));
+  };
+
+  const deleteGroup = (e, id) => {
+    e.stopPropagation();
+    // Move all docs inside this group to no group
+    const newDocs = docsRef.current.map(d => d.groupId === id ? { ...d, groupId: null } : d);
+    docsRef.current = newDocs;
+    setDocs(newDocs);
+    setGroups(prev => prev.filter(g => g.id !== id));
+  };
+
+  const deleteDoc = (e, id) => {
+    e.stopPropagation();
+    const docToDelete = docsRef.current.find(d => d.id === id);
+    const isEmpty = !docToDelete?.title?.trim() && !getTextPreview(docToDelete?.content || '');
+    let trashedId = null;
+    if (docToDelete && !isEmpty) {
+      trashedId = id;
+      const trashedDoc = { ...docToDelete, deletedAt: Date.now() };
+      const nextTrash = [trashedDoc, ...trashedDocsRef.current];
+      trashedDocsRef.current = nextTrash;
+      setTrashedDocs(nextTrash);
+    }
+    const snapshot = { prevDocs: docsRef.current, prevActiveDocId: activeDocId, trashedId };
+    deletedDocInfoRef.current = snapshot;
+    setDeletedDocInfo(snapshot);
+    setDocs((prev) => {
+      if (prev.length === 1) {
+        const freshDoc = {
+          id: "1",
+          title: "",
+          content: "<p><br></p>",
+          isPinned: false,
+          emoji: null,
+          hasCustomEmoji: false,
+          groupId: null,
+        };
+        setActiveDocId("1");
+        if (titleRef.current) titleRef.current.textContent = "";
+        if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
+        docsRef.current = [freshDoc];
+        return [freshDoc];
+      }
+      const newDocs = prev.filter((d) => d.id !== id);
+      if (activeDocId === id) {
+        setActiveDocId(newDocs[0].id);
+      }
+      docsRef.current = newDocs;
+      return newDocs;
+    });
+    setSelectedDocIds(prev => prev.filter(selectedId => selectedId !== id));
+  };
+
+  const triggerDeleteAnimation = (e, id) => {
+    const now = Date.now();
+    const canAnimate = now - lastDeleteAnimationTs.current > 1000;
+
+    if (canAnimate) {
+      const docEl = document.querySelector(`[data-doc-id="${id}"]`);
+      const cloudEl = cloudButtonRef.current;
+      const docData = docsRef.current.find(d => d.id === id);
+
+      if (docEl && cloudEl && docData) {
+        lastDeleteAnimationTs.current = now;
+        const dRect = docEl.getBoundingClientRect();
+        const cRect = cloudEl.getBoundingClientRect();
+
+        docEl.style.opacity = '0';
+
+        setDeleteGhost({
+          id,
+          title: docData.title || '',
+          emoji: docData.emoji || null,
+          hasContent: !!(docData.content?.replace(/<[^>]*>/g, '').trim()),
+          rect: { top: dRect.top, left: dRect.left, width: dRect.width, height: dRect.height },
+          targetRect: { top: cRect.top, left: cRect.left, width: cRect.width, height: cRect.height },
+        });
+        setTimeout(() => setCloudIconPhase('trash'), 80);
+        setTimeout(() => setCloudIconPhase('idle'), 1450);
+      }
+    }
+
+    deleteDoc(e, id);
+  };
+
+  const restoreFromTrash = (id) => {
+    const trashedDoc = trashedDocsRef.current.find(d => d.id === id);
+    if (!trashedDoc) return;
+    const { deletedAt, ...restoredDoc } = trashedDoc;
+    const newDocs = [restoredDoc, ...docsRef.current];
+    docsRef.current = newDocs;
+    setDocs(newDocs);
+    setActiveDocId(restoredDoc.id);
+    const nextTrash = trashedDocsRef.current.filter(d => d.id !== id);
+    trashedDocsRef.current = nextTrash;
+    setTrashedDocs(nextTrash);
+  };
+
+  const permanentlyDeleteFromTrash = (id) => {
+    const nextTrash = trashedDocsRef.current.filter(d => d.id !== id);
+    trashedDocsRef.current = nextTrash;
+    setTrashedDocs(nextTrash);
+  };
+
+  const emptyTrash = () => {
+    trashedDocsRef.current = [];
+    setTrashedDocs([]);
+  };
+
+  const togglePinDoc = (e, id) => {
+    e.stopPropagation();
+    const wasUnpinned = !docsRef.current.find(d => d.id === id)?.isPinned;
+    if (wasUnpinned) {
+      recentlyPinnedRef.current.add(id);
+      setTimeout(() => recentlyPinnedRef.current.delete(id), 400);
+    }
+    const newDocs = docsRef.current.map((d) => (d.id === id ? { ...d, isPinned: !d.isPinned, pinnedAt: !d.isPinned ? Date.now() : d.pinnedAt } : d));
+    docsRef.current = newDocs;
+    setDocs(newDocs);
+  };
+
+  const toggleLockDoc = (docId) => {
+    const doc = docsRef.current.find(d => d.id === docId);
+    if (!doc) return;
+
+    if (doc.isLocked) {
+      // Unlock: prompt for passcode
+      setLockModal({ mode: 'unlock', docId, action: 'toggle' });
+      setPasscodeInput('');
+    } else {
+      // Lock: if no passcode exists yet, create one first
+      if (!lockPasscode) {
+        setLockModal({ mode: 'create', docId });
+        setPasscodeInput('');
+      } else {
+        const newDocs = docsRef.current.map(d => d.id === docId ? { ...d, isLocked: true } : d);
+        docsRef.current = newDocs;
+        setDocs(newDocs);
+      }
+    }
+    setContextMenu(null);
+  };
+
+  const handleDuplicateDoc = (docId) => {
+    const docToClone = docsRef.current.find((d) => d.id === docId);
+    if (!docToClone) return;
+
+    const newDocId = crypto.randomUUID();
+    const newDoc = {
+      ...docToClone,
+      id: newDocId,
+      title: "Copy of " + (docToClone.title || "New Page"),
+      createdAt: new Date().toISOString(),
+      isPinned: false,
+    };
+
+    setDocs((prev) => {
+      const idx = prev.findIndex((d) => d.id === docId);
+      const updated = [...prev];
+      if (idx >= 0) {
+        updated.splice(idx + 1, 0, newDoc);
+      } else {
+        updated.unshift(newDoc);
+      }
+      docsRef.current = updated;
+      return updated;
+    });
+
+    if (animControlRef.current) animControlRef.current.stop();
+    animProgress.set(0); // freeze content hidden before overlay mounts
+    setAnimatingDocId(newDocId);
+    setTimeout(() => {
+      setAnimatingDocId((prev) => (prev === newDocId ? null : prev));
+    }, 1700); // 300ms buffer past the 1.4s animation
+
+    setActiveDocId(newDocId);
+    setContextMenu(null);
+  };
+
+  const handleRenameSubmit = (docId, newTitle) => {
+    setDocs((prev) => {
+      const updated = prev.map((d) => {
+        if (d.id !== docId) return d;
+        let nextEmoji = d.emoji;
+        if (!d.hasCustomEmoji) {
+          const autoEmoji = getEmojiForTitle(newTitle);
+          if (autoEmoji && autoEmoji !== d.emoji) {
+            nextEmoji = autoEmoji;
+            setAnimatingEmojiDocId(d.id);
+            setTimeout(() => {
+              setAnimatingEmojiDocId(p => p === d.id ? null : p);
+            }, 200);
+          }
+        }
+        return { ...d, title: newTitle, emoji: nextEmoji };
+      });
+      docsRef.current = updated;
+      return updated;
+    });
+    
+    if (docId === activeDocId && titleRef.current) {
+      if (titleRef.current.textContent !== newTitle) {
+        titleRef.current.textContent = newTitle;
+      }
+    }
+    
+    setEditingDocId(null);
+  };
+
+  const handleExportToGoogleDocs = async () => {
+    if (!activeDoc) return;
+    setGdocsLoading(true);
+    try {
+      const content = editorRef.current?.innerHTML || activeDoc.content;
+      const url = await exportToGoogleDocs(activeDoc.title || 'Untitled Document', content);
+      window.open(url, '_blank');
+    } catch (e) {
+      alert('Export failed: ' + e.message);
+    } finally {
+      setGdocsLoading(false);
+    }
+  };
+
+
+  const handleShareDoc = async (docId) => {
+    if (!user) {
+      setAuthModal('login');
+      setContextMenu(null);
+      setShareMenuOpen(false);
+      return;
+    }
+
+    const docToShare = docsRef.current.find(d => d.id === docId);
+    if (!docToShare) return;
+
+    try {
+      const sharedByName = user.displayName || user.email || '';
+      const { editHistory: _editHistory, ...docToShareSlim } = docToShare;
+      await setDoc(doc(db, "shared_documents", docId), {
+        ...docToShareSlim,
+        sharedBy: user.uid,
+        sharedByName,
+        sharedAt: new Date().toISOString()
+      });
+      const shareUrl = `${window.location.origin}/share/${docId}`;
+      await navigator.clipboard.writeText(shareUrl);
+      setSharePopupInfo({ url: shareUrl });
+    } catch (e) {
+      console.error(e);
+      alert("Failed to share document. " + e.message);
+    }
+    setContextMenu(null);
+  };
+
+  const handlePasscodeSubmit = (code) => {
+    const pin = code || passcodeInput;
+    if (pin.length !== 4 || !/^\d{4}$/.test(pin)) return;
+
+    if (lockModal.mode === 'create') {
+      // Creating first passcode
+      localStorage.setItem('words_lock_passcode', pin);
+      setLockPasscode(pin);
+      const newDocs = docsRef.current.map(d => d.id === lockModal.docId ? { ...d, isLocked: true } : d);
+      docsRef.current = newDocs;
+      setDocs(newDocs);
+      setLockModal(null);
+      setPasscodeInput('');
+    } else if (lockModal.mode === 'unlock') {
+      if (pin === lockPasscode) {
+        if (lockModal.action === 'toggle') {
+          const newDocs = docsRef.current.map(d => d.id === lockModal.docId ? { ...d, isLocked: false } : d);
+          docsRef.current = newDocs;
+          setDocs(newDocs);
+        } else {
+          // Opening locked doc — flush first, then switch
+          flushCurrentDoc();
+          prevActiveDocIdRef.current = lockModal.docId;
+          setActiveDocId(lockModal.docId);
+          setSelectedDocIds([lockModal.docId]);
+          // Load the doc directly
+          const doc = docsRef.current.find(d => d.id === lockModal.docId);
+          if (doc && editorRef.current && titleRef.current) {
+            titleRef.current.textContent = doc.title;
+            editorRef.current.innerHTML = doc.content;
+          }
+          if (!isSidebarOpen) setIsSidebarPeeking(false);
+        }
+        setLockModal(null);
+        setPasscodeInput('');
+      } else {
+        setPasscodeInput('');
+      }
+    }
+  };
+
+  const handleContextMenu = (e, docId) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const isRightClick = e.type === 'contextmenu';
+    let x = isRightClick ? e.clientX : rect.right;
+    let y = isRightClick ? e.clientY : rect.top;
+
+    // Prevent off-screen rendering
+    if (y + 250 > window.innerHeight) {
+      y = Math.max(10, window.innerHeight - 260);
+    }
+
+    setContextMenu({
+      docId,
+      x,
+      y,
+      tailY: isRightClick ? 20 : rect.top + rect.height / 2 - y,
+    });
+  };
+
+  const handleGroupMenu = (e, groupId) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (groupMenuOpen?.id === groupId) {
+      setGroupMenuOpen(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    let x = rect.right - 176; // w-44 is 176px
+    let y = Math.min(rect.bottom + 4, window.innerHeight - 100);
+
+    setGroupMenuOpen({
+      id: groupId,
+      x,
+      y,
+    });
+  };
+
+  const handleDocClick = (e, id) => {
+    // Close context menu on any click
+    setContextMenu(null);
+    // Dismiss document preview on click
+    clearTimeout(hoverTimeoutRef.current);
+    setPreviewHoverDocId(null);
+
+    // Check if the doc is locked
+    const doc = docs.find(d => d.id === id);
+    if (doc?.isLocked && activeDocId !== id) {
+      e.preventDefault();
+      setLockModal({ mode: 'unlock', docId: id, action: 'open' });
+      setPasscodeInput('');
+      return;
+    }
+
+    if (e.shiftKey && selectedDocIds.length > 0) {
+      e.preventDefault();
+      // Simple range selection: select everything between last active and current
+      const lastSelectedIdx = docs.findIndex(d => d.id === activeDocId);
+      const currentIdx = docs.findIndex(d => d.id === id);
+
+      if (lastSelectedIdx !== -1 && currentIdx !== -1) {
+        const start = Math.min(lastSelectedIdx, currentIdx);
+        const end = Math.max(lastSelectedIdx, currentIdx);
+        const rangeIds = docs.slice(start, end + 1).map(d => d.id);
+
+        // Add rangeIds to existing selection, making sure not to duplicate
+        setSelectedDocIds(prev => [...new Set([...prev, ...rangeIds])]);
+      }
+    } else if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      // Toggle selection
+      setSelectedDocIds(prev => {
+        if (prev.includes(id)) {
+          return prev.filter(item => item !== id);
+        } else {
+          return [...prev, id];
+        }
+      });
+    } else {
+      // Normal click
+      setActiveDocId(id);
+      setSelectedDocIds([id]);
+      setLockModal(null);
+      setPasscodeInput('');
+      if (!isSidebarOpen) setIsSidebarPeeking(false);
+    }
+  };
+
+  // --- Drag and Drop Handlers ---
+  const handleDragStart = (e, type, id) => {
+    e.dataTransfer.effectAllowed = "move";
+    setDraggedItem({ type, id });
+
+    // If dragging a doc that isn't selected, select only it
+    // But don't switch to locked docs (would bypass passcode)
+    if (type === 'doc' && !selectedDocIds.includes(id)) {
+      const doc = docs.find(d => d.id === id);
+      setSelectedDocIds([id]);
+      if (!doc?.isLocked) {
+        setActiveDocId(id);
+      }
+    }
+
+    // Custom drag ghost
+    if (type === 'doc' && selectedDocIds.length > 1) {
+      const ghost = document.createElement("div");
+      ghost.className = "bg-[#E8572A] text-white px-3 py-1 rounded-md text-sm shadow-lg pointer-events-none fixed -top-10";
+      ghost.innerHTML = `Moving ${selectedDocIds.includes(id) ? selectedDocIds.length : 1} documents`;
+      document.body.appendChild(ghost);
+      e.dataTransfer.setDragImage(ghost, 15, 15);
+      setTimeout(() => document.body.removeChild(ghost), 0);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDragTarget(null);
+  };
+
+  const handleSidebarDragOver = (e, targetId = null, targetType = 'root') => {
+    if (draggedItem?.type === 'group' && targetType === 'doc') {
+      return; // allow bubble to group flex-col
+    }
+    e.preventDefault(); // Necessary to allow dropping
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    if (targetType === 'doc' && targetId) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const relativeY = e.clientY - rect.top;
+      const position = relativeY < rect.height * 0.5 ? 'before' : 'after';
+      setDragTarget({ id: targetId, position, type: 'doc' });
+    } else if (targetType === 'group' && targetId) {
+      // If dragging a group over another group, show before/after for reordering
+      if (draggedItem?.type === 'group') {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const position = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+        setDragTarget({ id: targetId, position, type: 'group' });
+      } else {
+        setDragTarget({ id: targetId, position: 'inset', type: 'group' });
+      }
+    } else {
+      setDragTarget(null);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragTarget(null);
+  };
+
+  const handleDropOnGroup = (e, groupId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragTarget(null);
+    if (!draggedItem) return;
+
+    if (draggedItem.type === 'doc') {
+      // Move all selected docs into this group
+      const idsToMove = selectedDocIds.includes(draggedItem.id) ? selectedDocIds : [draggedItem.id];
+      setDocs(prev => {
+        let newDocs = [...prev];
+        idsToMove.forEach(docId => {
+          const idx = newDocs.findIndex(d => d.id === docId);
+          if (idx !== -1) {
+            newDocs[idx] = { ...newDocs[idx], groupId };
+          }
+        });
+        docsRef.current = newDocs;
+        return newDocs;
+      });
+    } else if (draggedItem.type === 'group' && draggedItem.id !== groupId) {
+      // Reorder groups
+      const rect = e.currentTarget.getBoundingClientRect();
+      const position = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+      setGroups(prev => {
+        const draggedIdx = prev.findIndex(g => g.id === draggedItem.id);
+        if (draggedIdx === -1) return prev;
+        const newGroups = prev.filter(g => g.id !== draggedItem.id);
+        const targetIdx = newGroups.findIndex(g => g.id === groupId);
+        if (targetIdx === -1) return prev;
+        newGroups.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, prev[draggedIdx]);
+        return newGroups;
+      });
+    }
+    setDraggedItem(null);
+  };
+
+  const handleDropOnDoc = (e, targetDocId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragTarget(null);
+    if (!draggedItem) return;
+
+    if (draggedItem.type === 'doc') {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const relativeY = e.clientY - rect.top;
+      const position = relativeY < rect.height * 0.5 ? 'before' : 'after';
+
+      const idsToMove = selectedDocIds.includes(draggedItem.id) ? selectedDocIds : [draggedItem.id];
+      if (idsToMove.includes(targetDocId)) return; // Don't drop onto itself
+
+      setDocs(prev => {
+        let newDocs = prev.filter(d => !idsToMove.includes(d.id));
+
+        const targetIdx = newDocs.findIndex(d => d.id === targetDocId);
+        if (targetIdx === -1) return prev;
+
+        const tDoc = newDocs[targetIdx];
+        const targetGroupId = tDoc.groupId;
+
+        const docsToInsert = prev
+          .filter(d => idsToMove.includes(d.id))
+          .map(d => ({ ...d, groupId: targetGroupId }));
+
+        newDocs.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, ...docsToInsert);
+        docsRef.current = newDocs;
+        return newDocs;
+      });
+    } else if (draggedItem.type === 'group') {
+      // Group reordering logic if needed
+    }
+    setDraggedItem(null);
+  };
+
+  const handleDropOnSidebarRoot = (e) => {
+    e.preventDefault();
+    setDragTarget(null);
+    if (!draggedItem) return;
+
+    if (draggedItem.type === 'doc') {
+      // Move selected docs to root (no group)
+      const idsToMove = selectedDocIds.includes(draggedItem.id) ? selectedDocIds : [draggedItem.id];
+      setDocs(prev => {
+        let newDocs = [...prev];
+        idsToMove.forEach(docId => {
+          const idx = newDocs.findIndex(d => d.id === docId);
+          if (idx !== -1) {
+            newDocs[idx] = { ...newDocs[idx], groupId: null };
+          }
+        });
+        docsRef.current = newDocs;
+        return newDocs;
+      });
+    }
+    setDraggedItem(null);
+  };
+
+  const getCaretCoordinates = () => {
+    let x = 0, y = 0;
+    const isSupported = typeof window.getSelection !== "undefined";
+    if (isSupported) {
+      const selection = window.getSelection();
+      if (selection.rangeCount !== 0) {
+        const range = selection.getRangeAt(0).cloneRange();
+        range.collapse(true);
+        const rect = range.getBoundingClientRect();
+        if (rect.x === 0 && rect.y === 0) {
+          const span = document.createElement("span");
+          span.appendChild(document.createTextNode("\u200b"));
+          range.insertNode(span);
+          const spanRect = span.getBoundingClientRect();
+          x = spanRect.left;
+          y = spanRect.bottom;
+          const spanParent = span.parentNode;
+          spanParent.removeChild(span);
+          spanParent.normalize();
+        } else {
+          x = rect.left;
+          y = rect.bottom;
+        }
+      }
+    }
+    return { x, y };
+  };
+
+  const executeCommand = (command) => {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return;
+
+    const range = selection.getRangeAt(0);
+    const node = selection.focusNode;
+
+    const text = node.textContent.substring(0, selection.focusOffset);
+    const match = text.match(/(?:^|\s)(\/)([^/\s]*)$/);
+
+    if (match) {
+      const triggerIndex = text.lastIndexOf(match[1]);
+      range.setStart(node, triggerIndex);
+      range.setEnd(node, selection.focusOffset);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand("delete", false, null);
+    }
+
+    if (command.type === "buddy") {
+      setBuddyState({
+        show: true,
+        x: slashState.x,
+        y: slashState.y,
+        savedRange: range,
+        selectedText: "",
+        isCollapsed: true,
+      });
+      setSlashState((prev) => ({ ...prev, isOpen: false, query: "" }));
+      return;
+    }
+
+    if (command.type === "formatBlock") {
+      document.execCommand("formatBlock", false, `<${command.tag}>`);
+    } else if (command.type === "list") {
+      document.execCommand(command.tag, false, null);
+    } else if (command.type === "insertHTML") {
+      document.execCommand("insertHTML", false, command.tag);
+    } else if (command.type === "divider") {
+      const DIVIDER_TRASH = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
+      document.execCommand("insertHTML", false, `<div class="divider-block" contenteditable="false"><button class="divider-delete-btn" contenteditable="false" title="Delete divider">${DIVIDER_TRASH}</button><div class="divider-line"></div></div><p><br></p>`);
+    } else if (command.type === "checklist") {
+      document.execCommand("insertUnorderedList", false, null);
+      // Add class synchronously — selection is still inside the newly created UL
+      const sel = window.getSelection();
+      if (sel && sel.focusNode) {
+        const ul = (
+          sel.focusNode.nodeType === 3
+            ? sel.focusNode.parentElement
+            : sel.focusNode
+        ).closest("ul");
+        if (ul) ul.classList.add("checklist");
+      }
+    }
+
+    setSlashState((prev) => ({ ...prev, isOpen: false, query: "" }));
+
+    setTimeout(() => {
+      editorRef.current.focus();
+      syncContentToState();
+    }, 10);
+  };
+
+  const handleBuddyApply = (newText, op) => {
+    if (!editorRef.current) return;
+
+    const rawHtml =
+      typeof newText === "object" && newText !== null ? newText.generated_html : newText;
+    if (typeof rawHtml !== "string" || !rawHtml.trim()) return;
+
+    captureHistorySnapshot('user', 'Before Buddy edit');
+    const buddyDone = () => setTimeout(() => captureHistorySnapshot('buddy', 'Buddy edit'), 300);
+
+    const scrollY = window.scrollY;
+
+    // Walk up from a DOM node to find its direct-child-of-editor ancestor
+    const getEditorBlock = (node) => {
+      let n = node?.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+      while (n && n.parentNode !== editorRef.current) n = n.parentNode;
+      return n && editorRef.current.contains(n) ? n : null;
+    };
+
+    // ── replace_document ─────────────────────────────────────────────────────
+    // Set innerHTML directly — avoids execCommand selectAll/insertHTML artifacts
+    if (op === "replace_document") {
+      const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: true });
+      editorRef.current.innerHTML = html || "<p><br></p>";
+      window.scrollTo({ top: scrollY, behavior: "instant" });
+      syncContentToState();
+      buddyDone();
+      return;
+    }
+
+    // ── append (Insert button from chat panel) ────────────────────────────────
+    if (op === "append") {
+      editorRef.current.focus({ preventScroll: true });
+      const { html, hasBlockRoot } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: false });
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      if (buddyState.savedRange) {
+        const r = buddyState.savedRange.cloneRange();
+        sel.addRange(r);
+        sel.collapseToEnd();
+      } else {
+        const r = document.createRange();
+        r.selectNodeContents(editorRef.current);
+        r.collapse(false);
+        sel.addRange(r);
+      }
+      document.execCommand("insertHTML", false, hasBlockRoot ? html : `&nbsp;${html}` || "<p><br></p>");
+      window.scrollTo({ top: scrollY, behavior: "instant" });
+      syncContentToState();
+      buddyDone();
+      return;
+    }
+
+    // ── insert_at_cursor ──────────────────────────────────────────────────────
+    if (op === "insert_at_cursor") {
+      editorRef.current.focus({ preventScroll: true });
+      const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: false });
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      if (buddyState.savedRange) {
+        const r = buddyState.savedRange.cloneRange();
+        sel.addRange(r);
+        sel.collapseToStart();
+      } else {
+        const r = document.createRange();
+        r.selectNodeContents(editorRef.current);
+        r.collapse(false);
+        sel.addRange(r);
+      }
+      document.execCommand("insertHTML", false, html || "<p><br></p>");
+      window.scrollTo({ top: scrollY, behavior: "instant" });
+      syncContentToState();
+      buddyDone();
+      return;
+    }
+
+    // ── replace_selection ─────────────────────────────────────────────────────
+    if (op === "replace_selection" && buddyState.savedRange) {
+      const { html, hasBlockRoot } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: true });
+      const range = buddyState.savedRange.cloneRange();
+      const startBlock = getEditorBlock(range.startContainer);
+      const endBlock = getEditorBlock(range.endContainer);
+
+      // Determine if the selection covers whole block(s) vs. a partial inline range
+      const isFullSingleBlock =
+        startBlock &&
+        startBlock === endBlock &&
+        startBlock.textContent.trim() === buddyState.selectedText.trim();
+      const isMultiBlock = startBlock && endBlock && startBlock !== endBlock;
+
+      if (hasBlockRoot && (isFullSingleBlock || isMultiBlock) && startBlock) {
+        // DOM-level swap: insert new nodes, remove old blocks — no execCommand, no artifacts
+        const tmpDiv = document.createElement("div");
+        tmpDiv.innerHTML = html || "<p><br></p>";
+        const newNodes = Array.from(tmpDiv.childNodes);
+
+        const toRemove = [];
+        let cursor = startBlock;
+        while (cursor) {
+          toRemove.push(cursor);
+          if (cursor === endBlock) break;
+          cursor = cursor.nextSibling;
+        }
+
+        newNodes.forEach((n) => editorRef.current.insertBefore(n, startBlock));
+        toRemove.forEach((b) => b.remove());
+      } else {
+        // Inline / partial-block: execCommand works correctly for non-block replacements
+        editorRef.current.focus({ preventScroll: true });
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand("insertHTML", false, html || "");
+      }
+
+      window.scrollTo({ top: scrollY, behavior: "instant" });
+      syncContentToState();
+      buddyDone();
+      return;
+    }
+
+    // ── fallback: insert at end ───────────────────────────────────────────────
+    editorRef.current.focus({ preventScroll: true });
+    const { html } = createNativeHtmlPayload(rawHtml, { forceBlockRoots: true });
+    const sel = window.getSelection();
+    const r = document.createRange();
+    r.selectNodeContents(editorRef.current);
+    r.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    document.execCommand("insertHTML", false, html || "<p><br></p>");
+    window.scrollTo({ top: scrollY, behavior: "instant" });
+    syncContentToState();
+    buddyDone();
+  };
+
+  const formatText = (e, format, value = null) => {
+    e.preventDefault();
+    document.execCommand(format, false, value);
+    syncContentToState();
+  };
+
+  // --- Image Insertion Utilities ---
+  const RESIZE_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><line x1="3" y1="13.5" x2="13.5" y2="3" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="8.5" y1="13.5" x2="13.5" y2="8.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>`;
+  const DELETE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
+  const createImgWrapperHTML = (src) => {
+    return `<div class="image-outer" contenteditable="false" style="display:block;width:320px;margin:0.75em 0;position:relative;"><div class="image-wrapper"><img src="${src}" style="width:100%;height:auto;display:block;pointer-events:none;" /></div><button class="image-delete-btn" contenteditable="false" title="Delete image">${DELETE_SVG}</button><div class="image-resize-handle" contenteditable="false">${RESIZE_SVG}</div></div>&nbsp;`;
+  };
+
+  const insertImageFile = (file, targetNodeToReplace = null) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+        const max_size = 1200;
+
+        if (width > max_size || height > max_size) {
+          if (width > height) {
+            height = Math.round((height * max_size) / width);
+            width = max_size;
+          } else {
+            width = Math.round((width * max_size) / height);
+            height = max_size;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+
+        const html = createImgWrapperHTML(dataUrl);
+        if (targetNodeToReplace) {
+          targetNodeToReplace.outerHTML = html;
+        } else {
+          document.execCommand("insertHTML", false, html);
+        }
+        syncContentToState();
+
+        // Entrance animation + contrast detection — both programmatic, nothing extra persisted
+        requestAnimationFrame(() => {
+          const allImgs = editorRef.current?.querySelectorAll('.image-wrapper img');
+          if (!allImgs?.length) return;
+          const newImg = allImgs[allImgs.length - 1];
+
+          // Blur/fade-in — Web Animations API, never touches the DOM/HTML
+          newImg.animate(
+            [
+              { opacity: 0, filter: 'blur(7px)', transform: 'scale(0.983)' },
+              { opacity: 1, filter: 'blur(0px)', transform: 'scale(1)' },
+            ],
+            { duration: 300, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'forwards' }
+          );
+
+          // Contrast detection — decode() is more reliable than load event for data URLs
+          newImg.decode().catch(() => {}).finally(() => {
+            applyImageContrast(newImg);
+            syncContentToState(); // persist data-br-dark attribute
+          });
+        });
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // --- Editor Wide Interactivity ---
+  const handleEditorMouseDown = (e) => {
+    if (e.target.closest(".link-remove-btn")) {
+      e.preventDefault();
+      const btn = e.target.closest(".link-remove-btn");
+      const url = btn.getAttribute("data-url");
+      const wrapper = e.target.closest(".link-preview-outer");
+      if (wrapper) {
+        // Create a plain span that looks like a link or standard slate text
+        // Slate might overwrite standard <a> tags if not configured correctly,
+        // but since we rely on `contenteditable="false"`, an <a> tag is fine.
+        const link = document.createElement("a");
+        link.href = url;
+        link.textContent = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        // Ensure it looks like a standard hyperlink within the editor
+        link.style.color = "var(--color-accent)";
+        link.style.textDecoration = "underline";
+        link.style.cursor = "pointer";
+
+        wrapper.parentNode.replaceChild(link, wrapper);
+
+        syncContentToState();
+      }
+      return;
+    }
+
+    if (e.target.closest(".image-delete-btn")) {
+      e.preventDefault();
+      const wrapper = e.target.closest(".image-outer") || e.target.closest(".image-wrapper");
+      if (wrapper) {
+        if (
+          wrapper.nextSibling &&
+          wrapper.nextSibling.nodeType === 3 &&
+          wrapper.nextSibling.textContent === "\u00A0"
+        ) {
+          wrapper.nextSibling.remove();
+        }
+        wrapper.remove();
+        syncContentToState();
+      }
+      return;
+    }
+
+    if (e.target.closest(".image-resize-handle")) {
+      e.preventDefault();
+      const outer = e.target.closest(".image-outer");
+      if (!outer) return;
+      const startX = e.clientX;
+      const startWidth = outer.offsetWidth;
+
+      const onMouseMove = (moveEvent) => {
+        const dx = moveEvent.clientX - startX;
+        outer.style.width = Math.max(80, startWidth + dx) + "px";
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        syncContentToState();
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+      return;
+    }
+
+    if (e.target.closest(".table-delete-btn")) {
+      e.preventDefault();
+      const container = e.target.closest(".table-container");
+      if (container) {
+        container.remove();
+        syncContentToState();
+      }
+      return;
+    }
+
+    if (e.target.closest(".divider-delete-btn")) {
+      e.preventDefault();
+      const divider = e.target.closest(".divider-block");
+      if (divider) {
+        divider.remove();
+        syncContentToState();
+      }
+      return;
+    }
+
+    if (e.target.tagName === "LI") {
+      const ul = e.target.closest("ul");
+      if (ul && ul.classList.contains("checklist")) {
+        const rect = e.target.getBoundingClientRect();
+        if (e.clientX >= rect.left && e.clientX <= rect.left + 24) {
+          e.target.classList.toggle("checked");
+          syncContentToState();
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+    if (e.target.closest(".table-resize-handle")) {
+      e.preventDefault();
+      const wrapper = e.target.closest(".table-wrapper");
+      const table = wrapper.querySelector("table");
+      const tbody = table.querySelector("tbody");
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const allTrs = Array.from(tbody.querySelectorAll("tr"));
+      const visibleTrs = allTrs.filter(tr => tr.style.display !== 'none');
+      const startRows = visibleTrs.length;
+      const startCols = visibleTrs[0] ? Array.from(visibleTrs[0].querySelectorAll("td")).filter(td => td.style.display !== 'none').length : 1;
+
+      const onMouseMove = (moveEvent) => {
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+
+        const newCols = Math.max(1, startCols + Math.round(dx / 80));
+        const newRows = Math.max(1, startRows + Math.round(dy / 36));
+
+        const currentTrs = Array.from(tbody.querySelectorAll("tr"));
+        const maxCols = currentTrs[0] ? currentTrs[0].querySelectorAll("td").length : newCols;
+
+        while (currentTrs.length < newRows) {
+          const tr = document.createElement("tr");
+          for (let i = 0; i < Math.max(newCols, maxCols); i++) {
+            const td = document.createElement("td");
+            td.innerHTML = "<br>";
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+          currentTrs.push(tr);
+        }
+
+        for (let r = 0; r < currentTrs.length; r++) {
+          currentTrs[r].style.display = (r < newRows) ? '' : 'none';
+        }
+
+        currentTrs.forEach((tr) => {
+          const tds = Array.from(tr.querySelectorAll("td"));
+          while (tds.length < newCols) {
+            const td = document.createElement("td");
+            td.innerHTML = "<br>";
+            tr.appendChild(td);
+            tds.push(td);
+          }
+          for (let c = 0; c < tds.length; c++) {
+            tds[c].style.display = (c < newCols) ? '' : 'none';
+          }
+        });
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        syncContentToState();
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+      return;
+    }
+  };
+
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    // Handle image paste
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf("image") !== -1) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        insertImageFile(file);
+        return;
+      }
+    }
+
+    const html = e.clipboardData.getData('text/html');
+    const textData = e.clipboardData.getData('text/plain');
+    const isExactUrl = /^https?:\/\/[^\s]+$/.test(textData.trim());
+
+    if (isExactUrl) {
+      e.preventDefault();
+      const url = textData.trim();
+
+      const selection = window.getSelection();
+      if (!selection.rangeCount) return;
+      const range = selection.getRangeAt(0);
+
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand("delete", false, null);
+      
+      const placeholderId = `link-preview-${Date.now()}`;
+      const placeholderHtml = `<div id="${placeholderId}" contenteditable="false" class="link-preview-loading"></div>`;
+      
+      document.execCommand("insertHTML", false, placeholderHtml);
+
+      document.execCommand('insertParagraph', false);
+
+      syncContentToState();
+
+      fetchLinkPreviewData(url).then(preview => {
+        const el = document.getElementById(placeholderId);
+        if (!el) return;
+
+        if (preview) {
+          el.outerHTML = `
+            <div class="link-preview-outer" contenteditable="false" id="${placeholderId}-resolved">
+              <a href="${preview.url}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
+                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" onerror="this.onerror=null; this.style.display='none';" />` : ''}
+                <div class="link-preview-content">
+                  <div class="link-preview-title">${preview.title}</div>
+                  <div class="link-preview-domain">${preview.domain}</div>
+                </div>
+              </a>
+              <button class="link-remove-btn" contenteditable="false" title="Convert to plain link" data-url="${preview.url}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+            </div>
+          `;
+          setTimeout(() => {
+            const resolvedEl = document.getElementById(`${placeholderId}-resolved`);
+            if (resolvedEl) {
+              resolvedEl.removeAttribute('id');
+            }
+          }, 10);
+        } else {
+          // Fallback
+          const link = document.createElement("a");
+          link.href = url;
+          link.textContent = url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.style.color = "var(--color-accent)";
+          link.style.textDecoration = "underline";
+          link.style.cursor = "pointer";
+          el.parentNode.replaceChild(link, el);
+        }
+        syncContentToState();
+      });
+      return;
+    }
+
+    if (html) {
+      e.preventDefault();
+      const nativePaste = createNativeHtmlPayload(html);
+      const sel = window.getSelection();
+      if (sel.rangeCount && nativePaste.html) {
+        document.execCommand("insertHTML", false, nativePaste.html);
+      }
+
+      syncContentToState();
+      return;
+    }
+
+    if (textData) {
+      e.preventDefault();
+
+      if (textData.includes("\n")) {
+        const nativeTextPaste = createNativeHtmlPayload(textData, { forceBlockRoots: true });
+        document.execCommand("insertHTML", false, nativeTextPaste.html || "<p><br></p>");
+      } else {
+        document.execCommand("insertText", false, textData);
+      }
+
+      syncContentToState();
+    }
+  };
+  const handleEditorDragStart = (e) => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !editorRef.current?.contains(sel.anchorNode)) {
+      isInternalTextDragRef.current = false;
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const fragment = range.cloneContents();
+    const div = document.createElement('div');
+    div.appendChild(fragment);
+    draggedTextHtmlRef.current = div.innerHTML;
+    dragSourceRangeRef.current = range.cloneRange();
+    isInternalTextDragRef.current = true;
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleEditorDragEnd = () => {
+    isInternalTextDragRef.current = false;
+    draggedTextHtmlRef.current = null;
+    dragSourceRangeRef.current = null;
+    if (dragCursorRef.current) dragCursorRef.current.style.display = 'none';
+  };
+
+  const handleDrop = (e) => {
+    if (dragCursorRef.current) dragCursorRef.current.style.display = 'none';
+
+    if (isInternalTextDragRef.current && draggedTextHtmlRef.current) {
+      e.preventDefault();
+
+      const dropRange = document.caretRangeFromPoint?.(e.clientX, e.clientY);
+      const sourceRange = dragSourceRangeRef.current;
+      if (!dropRange || !sourceRange) { handleEditorDragEnd(); return; }
+
+      // Bail if dropping inside the source selection
+      try {
+        const cmp = sourceRange.comparePoint(dropRange.startContainer, dropRange.startOffset);
+        if (cmp === 0) { handleEditorDragEnd(); return; }
+      } catch (_) { /* cross-document or detached range — proceed */ }
+
+      const html = draggedTextHtmlRef.current;
+      const sel = window.getSelection();
+
+      // Is the drop point after the source?
+      const dropIsAfter = sourceRange.compareBoundaryPoints(Range.END_TO_START, dropRange) < 0;
+
+      // Use execCommand so the entire operation lands on the browser's native undo stack.
+      // Cmd+Z will revert the move in one step.
+      if (dropIsAfter) {
+        // Insert at target first (before source), so source offsets stay valid
+        sel.removeAllRanges();
+        const insertRange = dropRange.cloneRange();
+        insertRange.collapse(true);
+        sel.addRange(insertRange);
+        document.execCommand('insertHTML', false, html);
+        // Now delete source content
+        sel.removeAllRanges();
+        sel.addRange(sourceRange);
+        document.execCommand('insertHTML', false, '');
+      } else {
+        // Delete source first, then re-resolve drop position and insert
+        sel.removeAllRanges();
+        sel.addRange(sourceRange);
+        document.execCommand('insertHTML', false, '');
+        const reRange = document.caretRangeFromPoint?.(e.clientX, e.clientY) || dropRange;
+        sel.removeAllRanges();
+        const insertRange = reRange.cloneRange();
+        insertRange.collapse(true);
+        sel.addRange(insertRange);
+        document.execCommand('insertHTML', false, html);
+      }
+
+      syncContentToState();
+      handleEditorDragEnd();
+      return;
+    }
+
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.type.startsWith("image/")) {
+        e.preventDefault();
+        const placeholder = e.target.closest(".image-placeholder");
+
+        if (!placeholder && document.caretRangeFromPoint) {
+          const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+          if (range) {
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }
+        insertImageFile(file, placeholder);
+      }
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+
+    if (isInternalTextDragRef.current && dragCursorRef.current && document.caretRangeFromPoint) {
+      e.dataTransfer.dropEffect = 'move';
+      const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+      if (range) {
+        // Insert a zero-width marker to get an accurate bounding rect
+        isInternalEdit.current = true;
+        const marker = document.createElement('span');
+        marker.textContent = '\u200b';
+        range.insertNode(marker);
+        const rect = marker.getBoundingClientRect();
+        marker.parentNode?.removeChild(marker);
+        isInternalEdit.current = false;
+
+        if (rect.height > 0) {
+          const cursor = dragCursorRef.current;
+          cursor.style.left = rect.left + 'px';
+          cursor.style.top = rect.top + 'px';
+          cursor.style.height = rect.height + 'px';
+          cursor.style.display = 'block';
+        }
+      }
+    } else {
+      e.dataTransfer.dropEffect = "copy";
+      if (dragCursorRef.current) dragCursorRef.current.style.display = 'none';
+    }
+  };
+
+  const handleKeyDown = useCallback(
+    (e) => {
+      // Paragraph-break snapshot: 1 second after Enter key pressed
+      if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        if (historySnapshotTimerRef.current) clearTimeout(historySnapshotTimerRef.current);
+        historySnapshotTimerRef.current = setTimeout(() => captureHistorySnapshot('user', 'Edited'), 1000);
+      }
+
+      // --- Table Highlight Deletion ---
+      if ((e.key === "Backspace" || e.key === "Delete") && window.getSelection() && !window.getSelection().isCollapsed) {
+        const sel = window.getSelection();
+        const range = sel.getRangeAt(0);
+        const startEl = range.startContainer.nodeType === 3 ? range.startContainer.parentElement : range.startContainer;
+        const endEl = range.endContainer.nodeType === 3 ? range.endContainer.parentElement : range.endContainer;
+
+        const tables = editorRef.current?.querySelectorAll('.table-container') || [];
+        let deletedAny = false;
+
+        tables.forEach(t => {
+          if (sel.containsNode(t, true)) {
+            t.remove();
+            deletedAny = true;
+          }
+        });
+
+        const startTable = startEl.closest('.table-container');
+        const endTable = endEl.closest('.table-container');
+
+        if (startTable && startTable === endTable) {
+          const startTd = startEl.closest('td') || startEl.closest('.table-title');
+          const endTd = endEl.closest('td') || endEl.closest('.table-title');
+          if (startTd && endTd && startTd !== endTd) {
+            e.preventDefault();
+            isInternalEdit.current = true;
+            startTable.remove();
+            syncContentToState();
+            return;
+          }
+        } else if (deletedAny) {
+          setTimeout(() => syncContentToState(), 10);
+        }
+      }
+
+      // --- 1. Math Preview Interceptor & Cleanup ---
+      const preview = editorRef.current?.querySelector(".math-preview");
+      if (preview) {
+        // Let standard navigation arrows pass through unhindered (but strip the preview to prevent stale ghost blocks)
+        if (["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(e.key))
+          return;
+        const isNav = [
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "ArrowDown",
+        ].includes(e.key);
+
+        const ans = preview.textContent;
+
+        if ([" ", "Enter", "Tab"].includes(e.key)) {
+          e.preventDefault(); // Do not insert the space/tab! Use it strictly to commit the answer.
+          isInternalEdit.current = true;
+
+          // Clean up the DOM string naturally
+          if (
+            preview.nextSibling &&
+            preview.nextSibling.nodeType === 3 &&
+            preview.nextSibling.textContent.includes("\u200B")
+          ) {
+            preview.nextSibling.textContent =
+              preview.nextSibling.textContent.replace(/\u200B/g, "");
+          }
+
+          // Reposition cursor safely before preview so removal is clean
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.setStartBefore(preview);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+
+          preview.remove();
+
+          // Insert Answer as raw text
+          document.execCommand("insertText", false, ans);
+
+          isInternalEdit.current = false;
+          syncContentToState();
+          return;
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          isInternalEdit.current = true;
+
+          if (
+            preview.nextSibling &&
+            preview.nextSibling.nodeType === 3 &&
+            preview.nextSibling.textContent.includes("\u200B")
+          ) {
+            preview.nextSibling.textContent =
+              preview.nextSibling.textContent.replace(/\u200B/g, "");
+          }
+
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.setStartBefore(preview);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+
+          preview.remove();
+
+          // Also delete the '=' sign that triggered it
+          document.execCommand("delete", false, null);
+
+          isInternalEdit.current = false;
+          syncContentToState();
+          return;
+        } else if (!isNav) {
+          // Typing another character kills the preview and types over it
+          if (
+            preview.nextSibling &&
+            preview.nextSibling.nodeType === 3 &&
+            preview.nextSibling.textContent.includes("\u200B")
+          ) {
+            preview.nextSibling.textContent =
+              preview.nextSibling.textContent.replace(/\u200B/g, "");
+          }
+
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.setStartBefore(preview);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+
+          preview.remove();
+          // Character natively inserts itself here since we didn't block it
+          setTimeout(() => syncContentToState(), 0);
+        }
+      }
+
+      // --- 2. Slash Commands Menu Navigation ---
+      if (slashState.isOpen) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSlashState((prev) => ({
+            ...prev,
+            activeIndex: (prev.activeIndex + 1) % filteredCommands.length,
+          }));
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSlashState((prev) => ({
+            ...prev,
+            activeIndex:
+              (prev.activeIndex - 1 + filteredCommands.length) %
+              filteredCommands.length,
+          }));
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          const selectedCommand =
+            filteredCommands[slashState.activeIndex] || filteredCommands[0];
+          if (selectedCommand) executeCommand(selectedCommand);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          setSlashState((prev) => ({ ...prev, isOpen: false }));
+        }
+        return;
+      }
+
+      // --- Formatting & Color Shortcuts ---
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+        if (e.key.toLowerCase() === 'b') {
+          e.preventDefault();
+          document.execCommand('bold', false, null);
+          syncContentToState();
+          return;
+        }
+        if (e.key.toLowerCase() === 'i') {
+          e.preventDefault();
+          document.execCommand('italic', false, null);
+          syncContentToState();
+          return;
+        }
+        if (e.key.toLowerCase() === 'u') {
+          e.preventDefault();
+          document.execCommand('underline', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+\ — Clear formatting
+        if (e.key === '\\') {
+          e.preventDefault();
+          document.execCommand('removeFormat', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+. — Superscript
+        if (e.key === '.') {
+          e.preventDefault();
+          document.execCommand('superscript', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+, — Subscript
+        if (e.key === ',') {
+          e.preventDefault();
+          document.execCommand('subscript', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+] — Increase indent
+        if (e.key === ']') {
+          e.preventDefault();
+          document.execCommand('indent', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+[ — Decrease indent
+        if (e.key === '[') {
+          e.preventDefault();
+          document.execCommand('outdent', false, null);
+          syncContentToState();
+          return;
+        }
+      }
+
+      // --- Heading & Block Format Shortcuts (Cmd/Ctrl+Alt+0–6) ---
+      if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey) {
+        const headingMap = { '0': 'P', '1': 'H1', '2': 'H2', '3': 'H3', '4': 'H4', '5': 'H5', '6': 'H6' };
+        if (headingMap[e.key] !== undefined) {
+          e.preventDefault();
+          document.execCommand('formatBlock', false, headingMap[e.key]);
+          syncContentToState();
+          return;
+        }
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey) {
+        // Cmd+Shift+X — Strikethrough
+        if (e.key.toLowerCase() === 'x') {
+          e.preventDefault();
+          document.execCommand('strikeThrough', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+L — Left align
+        if (e.key.toLowerCase() === 'l') {
+          e.preventDefault();
+          document.execCommand('justifyLeft', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+E — Center align
+        if (e.key.toLowerCase() === 'e') {
+          e.preventDefault();
+          document.execCommand('justifyCenter', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+R — Right align
+        if (e.key.toLowerCase() === 'r') {
+          e.preventDefault();
+          document.execCommand('justifyRight', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+J — Justify
+        if (e.key.toLowerCase() === 'j') {
+          e.preventDefault();
+          document.execCommand('justifyFull', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+7 — Ordered list
+        if (e.key === '7') {
+          e.preventDefault();
+          document.execCommand('insertOrderedList', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+8 — Unordered list
+        if (e.key === '8') {
+          e.preventDefault();
+          document.execCommand('insertUnorderedList', false, null);
+          syncContentToState();
+          return;
+        }
+        // Cmd+Shift+9 — Blockquote
+        if (e.key === '9') {
+          e.preventDefault();
+          document.execCommand('formatBlock', false, 'BLOCKQUOTE');
+          syncContentToState();
+          return;
+        }
+
+        // Highlight color shortcuts
+        let hColor = null;
+        if (e.key.toLowerCase() === 'h') {
+          hColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#716215' : '#fef08a'; // Yellow
+        } else if (e.key.toLowerCase() === 'g') {
+          hColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#14532d' : '#bbf7d0'; // Green
+        }
+
+        if (hColor) {
+          e.preventDefault();
+          document.execCommand('backColor', false, hColor);
+          syncContentToState();
+          return;
+        }
+      }
+
+      // --- 3. Markdown Formatting Shortcuts ---
+      const selection = window.getSelection();
+
+      if (e.key === " " || e.key === "Enter") {
+        if (selection && selection.focusNode) {
+          const focusNode = selection.focusNode;
+          const text = focusNode.textContent.substring(
+            0,
+            selection.focusOffset,
+          );
+          const cleanText = text.replace(/[\u200B]/g, '').trimStart();
+
+          if (cleanText === "1." && e.key === " ") {
+            e.preventDefault();
+            const range = selection.getRangeAt(0);
+            range.setStart(focusNode, selection.focusOffset - 2);
+            range.setEnd(focusNode, selection.focusOffset);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand("delete", false, null);
+            document.execCommand("insertOrderedList", false, null);
+            syncContentToState();
+            return;
+          } else if (
+            (cleanText === "-" || cleanText === "*") &&
+            e.key === " "
+          ) {
+            e.preventDefault();
+            const range = selection.getRangeAt(0);
+            range.setStart(focusNode, selection.focusOffset - 1);
+            range.setEnd(focusNode, selection.focusOffset);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand("delete", false, null);
+            document.execCommand("insertUnorderedList", false, null);
+            syncContentToState();
+            return;
+          } else if (cleanText === "[]" && e.key === " ") {
+            e.preventDefault();
+            const range = selection.getRangeAt(0);
+            range.setStart(focusNode, selection.focusOffset - 2);
+            range.setEnd(focusNode, selection.focusOffset);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand("delete", false, null);
+            document.execCommand("insertUnorderedList", false, null);
+            const sel2 = window.getSelection();
+            if (sel2 && sel2.focusNode) {
+              const ul = (
+                sel2.focusNode.nodeType === 3
+                  ? sel2.focusNode.parentElement
+                  : sel2.focusNode
+              ).closest("ul");
+              if (ul) ul.classList.add("checklist");
+            }
+            syncContentToState();
+            return;
+          } else if (
+            cleanText === "/table" &&
+            (e.key === " " || e.key === "Enter")
+          ) {
+            e.preventDefault();
+            const range = selection.getRangeAt(0);
+            range.setStart(focusNode, selection.focusOffset - 6);
+            range.setEnd(focusNode, selection.focusOffset);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand("delete", false, null);
+            const cmd = COMMANDS.find((c) => c.id === "table");
+            document.execCommand("insertHTML", false, cmd.tag);
+            syncContentToState();
+            return;
+          }
+        }
+      }
+
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const isList = selection && selection.focusNode && 
+          (selection.focusNode.nodeType === 3 ? selection.focusNode.parentElement : selection.focusNode).closest('li');
+        
+        if (isList) {
+          document.execCommand(e.shiftKey ? "outdent" : "indent", false, null);
+          // Strip inline margin/padding the browser adds during indent/outdent,
+          // which can cause bullets to overlap or layer on top of each other.
+          if (editorRef.current) {
+            editorRef.current.querySelectorAll('ul, ol, li').forEach(el => {
+              el.style.removeProperty('margin-left');
+              el.style.removeProperty('margin-right');
+              el.style.removeProperty('padding-left');
+              if (!el.getAttribute('style')) el.removeAttribute('style');
+            });
+          }
+        } else if (!e.shiftKey) {
+          document.execCommand("insertHTML", false, "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;");
+        }
+        syncContentToState();
+        return;
+      }
+
+      if (e.key === "Enter" && !e.shiftKey) {
+        if (selection && selection.focusNode) {
+          const focusNode = selection.focusNode;
+          const element =
+            focusNode.nodeType === 3 ? focusNode.parentElement : focusNode;
+          const blockElement = element.closest("h1, h2, h3, blockquote");
+
+          if (blockElement) {
+            setTimeout(() => {
+              const newSelection = window.getSelection();
+              if (newSelection && newSelection.focusNode) {
+                const newNode = newSelection.focusNode;
+                const newElement =
+                  newNode.nodeType === 3 ? newNode.parentElement : newNode;
+
+                if (
+                  newElement &&
+                  newElement.closest("h1, h2, h3, blockquote") &&
+                  (newElement.textContent.trim() === "" ||
+                    newElement.innerHTML === "<br>")
+                ) {
+                  document.execCommand("formatBlock", false, "P");
+                  syncContentToState();
+                }
+              }
+            }, 0);
+          }
+
+          const liElement = element.closest("li");
+          if (liElement) {
+            setTimeout(() => {
+              const newSel = window.getSelection();
+              if (newSel && newSel.focusNode) {
+                const newNode =
+                  newSel.focusNode.nodeType === 3
+                    ? newSel.focusNode.parentElement
+                    : newSel.focusNode;
+                const newLi = newNode.closest("li");
+                if (
+                  newLi &&
+                  newLi !== liElement &&
+                  newLi.classList.contains("checked") &&
+                  newLi.textContent.trim() === ""
+                ) {
+                  newLi.classList.remove("checked");
+                  syncContentToState();
+                }
+              }
+            }, 10);
+          }
+        }
+      }
+    },
+    [slashState, filteredCommands, syncContentToState, captureHistorySnapshot],
+  );
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        slashMenuRef.current &&
+        !slashMenuRef.current.contains(event.target)
+      ) {
+        setSlashState((prev) => ({ ...prev, isOpen: false }));
+      }
+      if (
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(event.target)
+      ) {
+        setIsEmojiPickerOpen(false);
+      }
+      if (!event.target.closest('.words-context-menu')) {
+        setContextMenu(null);
+        setGroupMenuOpen(null);
+        setShareMenuOpen(false);
+        setShareDocMenuOpen(false);
+        setUserMenuOpen(false);
+        setTrashViewOpen(false);
+        setTrashHoverDocId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const pinnedDocs = docs.filter((d) => d.isPinned).sort((a, b) => (a.pinnedAt || 0) - (b.pinnedAt || 0));
+  const regularDocs = docs.filter((d) => !d.isPinned);
+  // A document is considered "ungrouped" if it has no groupId, OR if its groupId doesn't exist in the current groups array.
+  const ungroupedDocs = regularDocs.filter((d) => !d.groupId || !groups.some(g => g.id === d.groupId));
+  const activeDoc = docs.find((d) => d.id === activeDocId) || docs[0];
+  const docFont = activeDoc?.docFont || 'sans';
+
+  const renderDocItem = (doc) => {
+    const isSelected = selectedDocIds.includes(doc.id);
+    const isActive = activeDocId === doc.id;
+    return (
+      <motion.div
+        layout
+        initial={{ opacity: 0, height: 0, scale: 0.95, filter: 'blur(4px)', marginBottom: 0 }}
+        animate={{ opacity: 1, height: "auto", scale: 1, filter: 'blur(0px)', marginBottom: 1 }}
+        exit={{ opacity: 0, height: 0, scale: 0.95, filter: 'blur(2px)', marginBottom: 0 }}
+        transition={{ type: "spring", stiffness: 450, damping: 35, mass: 1 }}
+        style={{ overflow: "hidden", transformOrigin: "top" }}
+        key={doc._isTemp ? `temp-${doc.id}` : doc.id}
+      >
+        <motion.div
+          data-doc-id={doc.id}
+          data-sidebar-item
+          onPointerDown={(e) => startDocPointerDrag(e, doc.id)}
+          onMouseEnter={(e) => {
+            clearTimeout(hoverTimeoutRef.current);
+            setPreviewHoverGroupId(null);
+            if (previewHoverDocId !== doc.id) setPreviewHoverDocId(null);
+
+            if (activeDocId === doc.id || doc.isLocked) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            hoverTimeoutRef.current = setTimeout(() => {
+              setPreviewPos({ top: rect.top, left: rect.right + 16 });
+              setPreviewHoverDocId(doc.id);
+            }, 600);
+          }}
+          onMouseLeave={() => {
+            clearTimeout(hoverTimeoutRef.current);
+            hoverTimeoutRef.current = setTimeout(() => {
+              setPreviewHoverDocId(null);
+            }, 300);
+          }}
+          style={(() => {
+            if (draggedItem?.type === 'doc' && draggedItem?.id === doc.id) return { opacity: 0, pointerEvents: 'none' };
+            if (dragTarget?.id === doc.id && dragTarget?.position === 'inset') return { boxShadow: 'inset 0 0 0 1.5px rgba(232, 87, 42, 0.65)' };
+            return undefined;
+          })()}
+          onMouseDown={(e) => { dragStartPosRef.current = { x: e.clientX, y: e.clientY }; handleDocClick(e, doc.id); }}
+          onContextMenu={(e) => handleContextMenu(e, doc.id)}
+          className={`doc-item group relative flex items-center justify-between px-3 py-[6px] rounded-md ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} select-none ${isSelected
+            ? "bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)] font-medium"
+            : isActive ? "text-[var(--color-text-primary)] font-medium bg-black/[0.02] dark:bg-white/[0.04]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+            }`}
+        >
+          <div
+            ref={(el) => {
+              if (el) {
+                const isOverflowing = el.scrollWidth > el.clientWidth;
+                if (isOverflowing) {
+                  el.classList.add('sidebar-doc-text');
+                } else {
+                  el.classList.remove('sidebar-doc-text');
+                }
+              }
+            }}
+            className="flex items-center gap-2.5 flex-1 min-w-0 overflow-hidden"
+          >
+            <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+              {doc.isLocked ? (
+                <Lock
+                  size={16}
+                  className={isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"}
+                />
+              ) : doc.emoji ? (
+                <span
+                  key={animatingEmojiDocId === doc.id ? `anim-${doc.emoji}` : doc.emoji}
+                  className={`emoji-glyph ${animatingEmojiDocId === doc.id ? 'animate-tasteful-pop' : ''} inline-block leading-none`}
+                >
+                  {doc.emoji}
+                </span>
+              ) : (
+                <DocPageIcon
+                  hasContent={!!(doc.content && doc.content.replace(/<[^>]*>/g, '').trim().length > 0)}
+                  size={16}
+                  className={isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"}
+                />
+              )}
+            </div>
+            {editingDocId === doc.id ? (
+              <input
+                autoFocus
+                type="text"
+                value={editingDocTitle}
+                onChange={(e) => setEditingDocTitle(e.target.value)}
+                onBlur={() => handleRenameSubmit(doc.id, editingDocTitle)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleRenameSubmit(doc.id, editingDocTitle);
+                  if (e.key === 'Escape') { setEditingDocId(null); setEditingDocTitle(''); }
+                }}
+                className="bg-transparent text-[14px] text-[var(--color-text-primary)] outline-none w-full min-w-0"
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+              />
+            ) : autoNamingDocId === doc.id ? (
+              <div className="flex-1 overflow-hidden flex items-center">
+                <div className="relative h-[11px] w-[80px] rounded-[4px] overflow-hidden bg-[var(--color-border-primary)]">
+                  <motion.div
+                    className="absolute inset-y-0 w-[55%]"
+                    style={{ background: 'linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-text-primary) 18%, transparent) 50%, transparent 100%)' }}
+                    animate={{ x: ['-100%', '280%'] }}
+                    transition={{ duration: 1.3, repeat: Infinity, ease: [0.4, 0, 0.6, 1] }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <motion.span
+                key={doc.id + '-title'}
+                className="text-[14px] select-none whitespace-nowrap"
+                initial={newlyAutoTitledDocsRef.current.has(doc.id) ? { clipPath: 'inset(0 100% 0 0)', opacity: 0.5 } : false}
+                animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
+                transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                onAnimationComplete={() => newlyAutoTitledDocsRef.current.delete(doc.id)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setEditingDocId(doc.id);
+                  setEditingDocTitle(doc.title || '');
+                }}
+              >
+                {doc.title || "New Page"}
+              </motion.span>
+            )}
+          </div>
+          <div
+            className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+            onMouseEnter={() => {
+              clearTimeout(hoverTimeoutRef.current);
+              setPreviewHoverDocId(null);
+            }}
+            onMouseLeave={(e) => {
+              if (activeDocId === doc.id || doc.isLocked) return;
+              const rect = e.currentTarget.closest('.group').getBoundingClientRect();
+              hoverTimeoutRef.current = setTimeout(() => {
+                setPreviewPos({ top: rect.top, left: rect.right + 16 });
+                setPreviewHoverDocId(doc.id);
+              }, 600);
+            }}
+          >
+            <button
+              onClick={(e) => {
+                if (isAltHeld) {
+                  triggerDeleteAnimation(e, doc.id);
+                  setContextMenu(null);
+                } else {
+                  handleContextMenu(e, doc.id);
+                }
+              }}
+              className={`words-context-menu p-1 rounded transition-colors ${isAltHeld ? 'text-red-500 hover:text-red-600' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
+              title={isAltHeld ? "Delete" : "More options"}
+            >
+              {isAltHeld ? <Trash2 size={14} /> : <MoreHorizontal size={14} />}
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    )
+  };
+
+  return (
+    <div className="flex h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans selection:bg-[#E8572A33] overflow-hidden relative w-full">
+      {/* Dynamic Editor Typography */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: ` .editor-content { outline: none; padding-bottom: 30vh; color: var(--color-text-primary); ${isSpacingAnimating ? 'transition: line-height 0.3s cubic-bezier(0.16, 1, 0.3, 1);' : ''} }
+              .editor-content::after { content: "" ; display: table; clear: both; }
+              .hdiff-add { background: rgba(52,211,153,0.18); color: #059669; border-radius: 2px; }
+              @media (prefers-color-scheme: dark) { .hdiff-add { background: rgba(52,211,153,0.2); color: #34d399; } }
+              .hdiff-del { text-decoration: line-through; color: #dc2626; opacity: 0.75; background: rgba(220,60,60,0.1); border-radius: 2px; }
+              @media (prefers-color-scheme: dark) { .hdiff-del { color: #f87171; background: rgba(248,113,113,0.12); } } 
+              .editor-content > * {
+                margin-top: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
+                margin-bottom: ${activeDoc?.lineSpacing === '1.0' ? '2px' : activeDoc?.lineSpacing === '2.0' ? '8px' : '4px'};
+                line-height: inherit;
+                ${isSpacingAnimating ? 'transition: margin-top 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin-bottom 0.3s cubic-bezier(0.16, 1, 0.3, 1);' : ''}
+              }
+
+              .editor-content h1,
+              .editor-content h2,
+              .editor-content h3,
+              .editor-content .table-container,
+              .editor-content blockquote {
+                clear: both;
+              }
+
+              .editor-content h1 {
+                font-size: 1.875rem;
+                font-weight: 600;
+                margin-top: 1.4em;
+                margin-bottom: 0.25em;
+                line-height: 1.3;
+              }
+
+              .editor-content h2 {
+                font-size: 1.5rem;
+                font-weight: 600;
+                margin-top: 1.4em;
+                margin-bottom: 0.25em;
+                line-height: 1.3;
+              }
+
+              .editor-content h3 {
+                font-size: 1.25rem;
+                font-weight: 600;
+                margin-top: 1em;
+                margin-bottom: 0.25em;
+              }
+
+              .editor-content p {
+                font-size: 1rem;
+                min-height: 1.5em;
+                margin-top: 4px;
+                margin-bottom: 4px;
+              }
+
+              .editor-content > * {
+                transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+              }
+
+              .editor-content ul {
+                list-style-type: disc;
+                list-style-position: outside;
+                padding-left: 1.5em !important;
+                margin-left: 0 !important;
+                margin-top: 0.5em;
+                margin-bottom: 0.5em;
+              }
+
+              .editor-content ul li {
+                padding-left: 0.1em;
+                margin-left: 0 !important;
+              }
+
+              .editor-content ul ul {
+                list-style-type: circle;
+                padding-left: 1.5em;
+                margin-top: 0.25em;
+                margin-bottom: 0.25em;
+              }
+
+              .editor-content ul ul ul {
+                list-style-type: square;
+              }
+
+              .editor-content ul.checklist {
+                list-style: none;
+                padding-left: 0 !important;
+              }
+
+              .editor-content ul.checklist>li {
+                position: relative;
+                padding-left: 1.8em;
+                margin-bottom: 4px;
+              }
+
+              .editor-content ul.checklist>li::before {
+                content: '';
+                position: absolute;
+                left: 0.1em;
+                top: calc(0.24em + 2px);
+                width: 16px;
+                height: 16px;
+                box-shadow: inset 0 0 0 1.5px var(--color-icon-muted);
+                ${squircle('4px')};
+                cursor: pointer;
+                background-color: transparent;
+                transition: all 0.2s ease;
+              }
+
+              .editor-content ul.checklist>li.checked::before {
+                background-color: var(--color-accent);
+                box-shadow: inset 0 0 0 1.5px var(--color-accent);
+              }
+
+              .editor-content ul.checklist>li::after {
+                content: '';
+                position: absolute;
+                left: calc(0.1em + 5.5px);
+                top: calc(0.24em + 4.5px);
+                width: 5px;
+                height: 9px;
+                border: solid white;
+                border-width: 0 2px 2px 0;
+                transform: rotate(45deg);
+                clip-path: circle(0% at 0% 100%);
+                opacity: 0;
+                transition: clip-path 0.2s ease-out, opacity 0.2s ease-out;
+              }
+
+              .editor-content ul.checklist>li.checked::after {
+                clip-path: circle(150% at 0% 100%);
+                opacity: 1;
+              }
+
+              .editor-content ul.checklist>li.checked {
+                text-decoration: line-through;
+                color: var(--color-text-muted);
+              }
+
+              .editor-content ol {
+                list-style-type: decimal !important;
+                padding-left: 1.5em !important;
+                margin-left: 0 !important;
+                margin-top: 0.5em;
+                margin-bottom: 0.5em;
+              }
+
+              .editor-content ol li {
+                display: list-item;
+                list-style-type: decimal !important;
+                margin-left: 0 !important;
+              }
+
+              .editor-content ol ol {
+                list-style-type: lower-alpha !important;
+              }
+
+              .editor-content ol ol ol {
+                list-style-type: lower-roman !important;
+              }
+
+              .editor-content li {
+                display: list-item !important;
+                font-size: 1rem;
+                margin-bottom: 0.25em;
+              }
+
+              .editor-content a {
+                color: var(--color-accent);
+                text-decoration: underline;
+                cursor: pointer;
+              }
+
+              .editor-content blockquote {
+                border-left: 3px solid var(--color-text-primary);
+                padding-left: 0.9em;
+                margin-top: 0.8em;
+                margin-bottom: 0.8em;
+                font-size: 1rem;
+              }
+              
+              .editor-content blockquote p {
+                margin-top: 0;
+                margin-bottom: 0;
+              }
+
+              .editor-content span[style*="background-color"] {
+                padding: 0.1em 0.2em;
+                ${squircle('3px')};
+              }
+
+              /* Strict Inline Math Preview Styling */
+              .editor-content .math-preview {
+                display: inline !important;
+                color: var(--color-text-muted) !important;
+                pointer-events: none !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+                white-space: pre !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+
+              /* Images */
+              .image-outer {
+                position: relative;
+                max-width: 100%;
+              }
+
+              .image-wrapper {
+                ${squircle('8px')};
+                overflow: hidden;
+                width: 100%;
+              }
+
+              .image-delete-btn {
+                position: absolute;
+                top: -9px;
+                right: -9px;
+                width: 22px;
+                height: 22px;
+                background: var(--color-bg-secondary, #fff);
+                color: var(--color-text-muted, #888);
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                opacity: 0;
+                transition: opacity 0.15s, background 0.15s, color 0.15s;
+                cursor: pointer;
+                border: 1px solid var(--color-border-primary, #e5e7eb);
+                box-shadow: 0 1px 6px rgba(0,0,0,0.12);
+                z-index: 20;
+              }
+
+              .image-outer:hover .image-delete-btn {
+                opacity: 1;
+              }
+
+              .image-delete-btn:hover {
+                background: rgba(220, 38, 38, 0.9) !important;
+                color: white !important;
+                border-color: transparent !important;
+              }
+
+              .image-resize-handle {
+                position: absolute;
+                bottom: 5px;
+                right: 5px;
+                width: 24px;
+                height: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: se-resize;
+                color: transparent;
+                transition: color 0.15s;
+                z-index: 10;
+                border-radius: 4px;
+              }
+
+              /* Light image → dark grabber lines */
+              .image-outer:hover .image-resize-handle {
+                color: rgba(30, 30, 30, 0.45);
+              }
+              .image-resize-handle:hover {
+                color: rgba(20, 20, 20, 0.82) !important;
+              }
+
+              /* Dark image corner → white grabber lines */
+              [data-br-dark="1"]:hover .image-resize-handle {
+                color: rgba(255, 255, 255, 0.55);
+              }
+              [data-br-dark="1"] .image-resize-handle:hover {
+                color: rgba(255, 255, 255, 0.95) !important;
+              }
+
+              /* Sidebar doc text fade */
+              .sidebar-doc-text {
+                -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+                mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+                transition: -webkit-mask-image 0.15s, mask-image 0.15s;
+              }
+              .group:hover .sidebar-doc-text {
+                -webkit-mask-image: linear-gradient(to right, black calc(100% - 40px), transparent calc(100% - 8px));
+                mask-image: linear-gradient(to right, black calc(100% - 40px), transparent calc(100% - 8px));
+              }
+              /* Sidebar folder text fade */
+              .sidebar-folder-text {
+                -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+                mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+                transition: -webkit-mask-image 0.15s, mask-image 0.15s;
+              }
+              .group:hover .sidebar-folder-text {
+                -webkit-mask-image: linear-gradient(to right, black calc(100% - 62px), transparent calc(100% - 8px));
+                mask-image: linear-gradient(to right, black calc(100% - 62px), transparent calc(100% - 8px));
+              }
+
+              /* Clean Tables */
+              .editor-content .table-container {
+                margin: 1.5em 0;
+                clear: both;
+              }
+
+              .editor-content .table-title {
+                font-size: 1.125rem;
+                font-weight: 600;
+                color: var(--color-text-primary);
+                outline: none;
+                margin-bottom: 0.5em;
+                display: block;
+              }
+
+              .editor-content .table-title:empty:before {
+                content: attr(data-placeholder);
+                color: var(--color-text-muted);
+                pointer-events: none;
+              }
+
+              .editor-content .table-wrapper {
+                position: relative;
+                display: block;
+                width: 100%;
+                box-shadow: none !important;
+                outline: none !important;
+              }
+
+              .editor-content .table-scroll {
+                overflow-x: auto;
+                width: 100%;
+                padding-bottom: 2px;
+              }
+
+              .editor-content table {
+                width: 100%;
+                border-collapse: collapse;
+                outline: none !important;
+                box-shadow: none !important;
+                table-layout: auto;
+              }
+
+              .editor-content tr {
+                outline: none !important;
+              }
+
+              .editor-content td {
+                border: 1px solid var(--color-border-primary);
+                padding: 6px 10px;
+                min-width: 60px;
+                vertical-align: top;
+                word-break: break-word;
+                overflow-wrap: anywhere;
+                outline: none !important;
+                transition: background 0.1s ease;
+                font-size: 0.875em;
+              }
+
+              .editor-content td:focus-within {
+                background: var(--color-bg-tertiary);
+              }
+
+              .table-resize-handle {
+                position: absolute;
+                bottom: 5px;
+                right: 5px;
+                width: 24px;
+                height: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: se-resize;
+                color: transparent;
+                transition: color 0.15s;
+                z-index: 10;
+                border-radius: 4px;
+              }
+
+              .table-wrapper:hover .table-resize-handle {
+                color: rgba(120, 120, 120, 0.5);
+              }
+
+              .table-resize-handle:hover {
+                color: rgba(60, 60, 60, 0.85) !important;
+              }
+
+              .table-delete-btn {
+                position: absolute;
+                top: -9px;
+                right: -9px;
+                width: 22px;
+                height: 22px;
+                background: var(--color-bg-secondary, #fff);
+                color: var(--color-text-muted, #888);
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                opacity: 0;
+                transition: opacity 0.15s, background 0.15s, color 0.15s;
+                cursor: pointer;
+                border: 1px solid var(--color-border-primary, #e5e7eb);
+                box-shadow: 0 1px 6px rgba(0,0,0,0.12);
+                z-index: 20;
+              }
+
+              .table-wrapper:hover .table-delete-btn {
+                opacity: 1;
+              }
+
+              .table-delete-btn:hover {
+                background: rgba(220, 38, 38, 0.9) !important;
+                color: white !important;
+                border-color: transparent !important;
+              }
+
+              .editor-content p:only-child:empty::before,
+              .editor-content p:only-child:has(> br:only-child)::before,
+              .editor-content:empty::before {
+                content: "Type '/' for commands";
+                color: var(--color-text-faint);
+                pointer-events: none;
+                position: absolute;
+              }
+
+              .title-input:empty::before {
+                content: "New Page";
+                color: var(--color-text-faint);
+                
+                pointer-events: none;
+                display: block;
+              }
+
+              .no-scrollbar::-webkit-scrollbar {
+                display: none;
+              }
+
+              .no-scrollbar {
+                -ms-overflow-style: none;
+                scrollbar-width: none;
+              }
+
+              /* Divider */
+              .divider-block {
+                position: relative;
+                padding: 1.25em 0;
+                margin: 0.25em 0;
+                user-select: none;
+                cursor: default;
+                display: block;
+              }
+
+              .divider-line {
+                height: 1px;
+                background: var(--color-border-primary);
+                width: 100%;
+                border-radius: 999px;
+                transition: background 0.2s ease;
+              }
+
+              .divider-block:hover .divider-line {
+                background: var(--color-border-hover);
+              }
+
+              .divider-block + h1,
+              .divider-block + h2,
+              .divider-block + h3 {
+                margin-top: 0.25rem;
+              }
+
+              .divider-delete-btn {
+                position: absolute;
+                left: -30px;
+                top: 50%;
+                transform: translateY(-50%);
+                width: 22px;
+                height: 22px;
+                background: var(--color-bg-secondary);
+                color: var(--color-text-muted);
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                opacity: 0;
+                transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+                cursor: pointer;
+                border: 1px solid var(--color-border-primary);
+                box-shadow: 0 1px 6px rgba(0,0,0,0.10);
+                z-index: 20;
+              }
+
+              .divider-block:hover .divider-delete-btn {
+                opacity: 1;
+              }
+
+              .divider-delete-btn:hover {
+                background: rgba(220, 38, 38, 0.9) !important;
+                color: white !important;
+                border-color: transparent !important;
+                transform: translateY(-50%) scale(1.1);
+              }
+
+              `,
+        }}
+      />{" "}
+      {/* Sidebar Hover Trigger Zone (Active when closed) */}
+      {!isSidebarOpen && !isSidebarPeeking && !historyPanelOpen && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-4 z-40"
+          onMouseEnter={() => setIsSidebarPeeking(true)}
+        />
+      )}
+      {/* Options Menu */}
+      <div className={`absolute top-3 right-4 z-30 print:hidden transition-opacity duration-300 ${historyPanelOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        <div className="flex items-center gap-2">
+          {/* Options (…) button */}
+          <div className="relative">
+            <button
+              onClick={() => { setShareMenuOpen(!shareMenuOpen); setShareDocMenuOpen(false); }}
+              className={`words-context-menu p-1.5 rounded-md transition-colors ${shareMenuOpen ? 'bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+              title="Options"
+            >
+              <MoreHorizontal size={20} />
+            </button>
+          <AnimatePresence>
+          {shareMenuOpen && (
+            <motion.div
+              key="options-menu"
+              className="words-context-menu absolute right-0 top-full mt-2 z-[40]"
+              initial={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(4px)' }}
+              transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, y: { type: 'spring', stiffness: 450, damping: 28 } }}
+              style={{ transformOrigin: 'top right' }}
+            >
+              <svg className="absolute -top-[9px] right-4 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10 Z" fill="var(--color-bg-primary)"/><path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
+              <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-56 overflow-hidden">
+                <div className="px-2 py-1.5">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <button 
+                      className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
+                      onClick={() => { captureHistorySnapshot('user', 'Changed to Default font'); setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'sans' } : d)); }}
+                    >
+                      <span className={`text-[22px] leading-none mb-1 ${docFont === 'sans' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
+                      <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Default</span>
+                    </button>
+                    <button 
+                      className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
+                      onClick={() => { captureHistorySnapshot('user', 'Changed to Serif font'); setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'serif' } : d)); }}
+                    >
+                      <span className={`text-[22px] leading-none mb-1 font-serif ${docFont === 'serif' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
+                      <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Serif</span>
+                    </button>
+                    <button 
+                      className="flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-lg transition-all hover:bg-[var(--color-bg-hover)] bg-transparent"
+                      onClick={() => { captureHistorySnapshot('user', 'Changed to Mono font'); setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, docFont: 'mono' } : d)); }}
+                    >
+                      <span className={`text-[22px] leading-none mb-1 font-mono ${docFont === 'mono' ? 'text-[#E8572A]' : 'text-[var(--color-text-primary)]'}`}>Ag</span>
+                      <span className="text-[11px] text-[var(--color-text-muted)] font-medium">Mono</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
+                <button
+                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center justify-between text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => setStyleAccordionOpen(!styleAccordionOpen)}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Paintbrush size={14} /> Style
+                  </div>
+                  <ChevronDown size={14} className={`transition-transform duration-200 text-[var(--color-text-muted)] ${styleAccordionOpen ? 'rotate-180' : ''}`} />
+                </button>
+                <AnimatePresence>
+                  {styleAccordionOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="pt-2 pb-1 flex flex-col gap-3 px-3">
+                        {/* Text Alignment */}
+                        <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md p-1 items-center justify-between">
+                          {['left', 'center', 'right', 'justify'].map((align) => {
+                            const active = activeDoc?.textAlign === align || (!activeDoc?.textAlign && align === 'left');
+                            return (
+                              <button
+                                key={align}
+                                onClick={() => {
+                                  captureHistorySnapshot('user', `Aligned ${align}`);
+                                  setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: align } : d));
+                                  if (editorRef.current) {
+                                    editorRef.current.querySelectorAll('*').forEach(el => {
+                                      if (el.style) el.style.textAlign = '';
+                                      if (el.hasAttribute('align')) el.removeAttribute('align');
+                                    });
+                                    syncContentToState();
+                                  }
+                                }}
+                                className={`flex-1 flex justify-center py-1.5 rounded-sm transition-colors ${active ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'} hover:bg-[var(--color-bg-hover)]`}
+                              >
+                                {align === 'left' && <AlignLeft size={16} />}
+                                {align === 'center' && <AlignCenter size={16} />}
+                                {align === 'right' && <AlignRight size={16} />}
+                                {align === 'justify' && <AlignJustify size={16} />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {/* Line Spacing UI */}
+                        <div className="flex flex-col border border-[var(--color-border-primary)] rounded-md overflow-hidden bg-[var(--color-bg-secondary)]">
+                          {['1.0', '1.5', '2.0'].map((space, idx) => {
+                            const lbl = space === '1.0' ? 'Compact' : space === '1.5' ? 'Standard' : 'Spacious';
+                                const active = activeDoc?.lineSpacing === space || (!activeDoc?.lineSpacing && space === '1.5');
+                                return (
+                                  <button
+                                    key={space}
+                                    onClick={() => {
+                                      captureHistorySnapshot('user', `Changed spacing to ${lbl}`);
+                                      setIsSpacingAnimating(true);
+                                      setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, lineSpacing: space } : d));
+                                      setTimeout(() => setIsSpacingAnimating(false), 350);
+                                    }}
+                                className={`text-[12px] py-1.5 px-3 text-left hover:bg-[var(--color-bg-hover)] transition-colors ${active ? 'bg-[var(--color-bg-primary)] text-[#E8572A] font-medium' : 'text-[var(--color-text-muted)]'} ${idx > 0 ? 'border-t border-[var(--color-border-primary)]' : ''}`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="flex flex-col opacity-70" style={{ gap: space === '1.0' ? '1px' : space === '1.5' ? '2px' : '4px' }}>
+                                    <div className="w-3 h-0.5 bg-current rounded-full" />
+                                    <div className="w-3 h-0.5 bg-current rounded-full" />
+                                    <div className="w-2 h-0.5 bg-current rounded-full" />
+                                  </div>
+                                  {lbl}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      
+                      {/* Sub Divider */}
+                      <div className="h-px bg-[var(--color-border-primary)] mx-3 my-1" />
+
+                      {/* Hide Title */}
+                      <button
+                        className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, hideTitle: !d.hideTitle } : d))}
+                      >
+                        <EyeOff size={14} className={activeDoc?.hideTitle ? "text-[#E8572A]" : "text-[var(--color-text-muted)]"} />
+                        <span className={activeDoc?.hideTitle ? "text-[#E8572A]" : ""}>Hide title</span>
+                      </button>
+
+                      {/* Full Width Layout */}
+                      <button
+                        className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, fullWidth: !d.fullWidth } : d))}
+                      >
+                        {activeDoc?.fullWidth ? <Minimize2 size={14} className="text-[#E8572A]" /> : <Maximize2 size={14} className="text-[var(--color-text-muted)]" />}
+                        <span className={activeDoc?.fullWidth ? "text-[#E8572A]" : ""}>Full width page</span>
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
+                <button
+                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => { setShareMenuOpen(false); setHistoryPanelOpen(true); }}
+                >
+                  <Clock size={14} /> Edit history
+                </button>
+                <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
+                <button
+                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => { setShareMenuOpen(false); handleShareDoc(activeDocId); }}
+                >
+                  <Link size={14} /> Share a copy
+                </button>
+                <button
+                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => { setShareMenuOpen(false); setTimeout(() => window.print(), 100); }}
+                >
+                  <File size={14} /> Export as PDF
+                </button>
+                <button
+                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => { setShareMenuOpen(false); setTimeout(() => window.print(), 100); }}
+                >
+                  <Printer size={14} /> Print
+                </button>
+              </div>
+            </motion.div>
+          )}
+          </AnimatePresence>
+          </div>{/* end ... relative */}
+        </div>{/* end flex row */}
+      </div>
+      {/* Hamburger Menu */}
+      <div
+        className={`absolute top-3 left-4 z-30 transition-opacity duration-300 ${!isSidebarOpen && !isSidebarPeeking && !historyPanelOpen
+          ? "opacity-100"
+          : "opacity-0 pointer-events-none"
+          }`}
+      >
+        <button
+          onClick={() => setIsSidebarOpen(true)}
+          className="p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+        >
+          <Menu size={20} />
+        </button>
+      </div>{" "}
+      {/* Collapsible Sidebar */}
+      <motion.div
+        className={`absolute top-0 bottom-0 left-0 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border-primary)] flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] z-50 overflow-hidden ${(isSidebarOpen || isSidebarPeeking) && !historyPanelOpen
+          ? "translate-x-0"
+          : "-translate-x-full"
+          } ${isSidebarPeeking && !isSidebarOpen && !historyPanelOpen
+            ? "shadow-[4px_0_24px_rgba(0,0,0,0.1)]"
+            : "shadow-none"
+          }`}
+        style={{ width: displaySidebarWidth }}
+      >
+        <div ref={sidebarInnerRef} className="w-full h-full flex flex-col">
+          {" "}
+          {/* Sidebar Header with Image Logo */}
+          <div className="h-14 px-5 flex items-center justify-between group text-[var(--color-text-primary)]">
+            <div className="flex items-center select-none">
+              <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                <img src="/logolight.png" alt="Words Logo" className="w-full h-full object-contain dark:hidden" />
+                <img src="/logodark.png" alt="Words Logo" className="w-full h-full object-contain hidden dark:block" />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className="p-1 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
+                title="Search"
+              >
+                <Search size={18} />
+              </button>
+              <button
+                onClick={() => {
+                  if (isSidebarPeeking) {
+                    setIsSidebarOpen(true);
+                    setIsSidebarPeeking(false);
+                  } else {
+                    setIsSidebarOpen(false);
+                    setIsSidebarPeeking(false);
+                  }
+                }}
+                className="p-1 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
+              >
+                {isSidebarPeeking ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+              </button>
+            </div>
+          </div>
+          <div
+            id="sidebar-scroll-root"
+            ref={sidebarScrollRef}
+            className="flex-1 overflow-y-auto no-scrollbar pb-6 flex flex-col h-full px-2"
+            onScroll={(e) => setIsSidebarScrolled(e.currentTarget.scrollTop > 5)}
+            onDragOver={handleSidebarDragOver}
+            onDrop={handleDropOnSidebarRoot}
+            onDoubleClick={(e) => {
+              // Only create new doc if double-clicking truly empty sidebar space
+              // Skip if clicking on any sidebar content item
+              if (e.target.closest('button, input, a, [draggable], [data-sidebar-item]')) return;
+              createNewDoc(e);
+            }}
+            onContextMenu={(e) => {
+              if (e.target.closest('button, input, a, [data-sidebar-item]')) return;
+              e.preventDefault();
+              setSidebarContextMenu({ isOpen: true, x: e.clientX, y: e.clientY });
+            }}
+          >
+            {isAuthLoading ? (
+              <div className="px-3 py-2 space-y-3">
+                {[1, 2, 3, 4, 5].map(i => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-[calc(4px+var(--radius-bonus))] bg-[var(--color-bg-hover)] animate-pulse" />
+                    <div className="flex-1 h-3 rounded-[calc(4px+var(--radius-bonus))] bg-[var(--color-bg-hover)] animate-pulse opacity-60" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Sticky Header Zone */}
+                <div className="sticky top-0 z-20 bg-[var(--color-bg-secondary)] pb-1 pt-0 -mt-2">
+                  <div className={`absolute top-full left-0 right-0 h-8 pointer-events-none transition-opacity duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isSidebarScrolled ? 'opacity-100' : 'opacity-0'}`}>
+                    <GradualBlur position="top" height="100%" strength={0.15} divCount={4} zIndex={0} />
+                    <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-bg-secondary)] to-transparent z-10" />
+                  </div>
+
+                  {/* Pinned Tabs (Icons Only) */}
+                  <AnimatePresence initial={false}>
+                  {pinnedDocs.length > 0 && (
+                    <motion.div
+                      key="pinned-section"
+                      initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                      animate={{ opacity: 1, height: "auto", marginBottom: -6 }}
+                      exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                      transition={{
+                        opacity: { type: "spring", stiffness: 450, damping: 40, mass: 1 },
+                        marginBottom: { type: "spring", stiffness: 450, damping: 40, mass: 1 },
+                        height: { type: "tween", duration: 0.32, ease: [0.22, 1, 0.36, 1] },
+                      }}
+                      style={{ overflow: "hidden" }}
+                      className="-mx-2"
+                    >
+                      <div className="grid gap-1 px-2 pt-2 pb-4" style={{ gridTemplateColumns: `repeat(${Math.min(pinnedDocs.length, 4)}, 1fr)` }}>
+                      <AnimatePresence initial={false}>
+                      {pinnedDocs.map((doc) => {
+                            const isActive = activeDocId === doc.id;
+                            const isSelected = selectedDocIds.includes(doc.id);
+                            const isDraggingThis = draggedItem?.type === 'doc' && draggedItem?.id === doc.id;
+                            return (
+                              <motion.div
+                                key={doc.id}
+                                initial={{ opacity: 1 }}
+                                animate={{ opacity: isDraggingThis ? 0 : 1 }}
+                                exit={pinnedDocs.length > 1 ? {} : { opacity: 0, transition: { duration: 0.08 } }}
+                                data-doc-id={doc.id}
+                                data-sidebar-item
+                                onPointerDown={(e) => startDocPointerDrag(e, doc.id)}
+                                onMouseEnter={(e) => {
+                                  clearTimeout(hoverTimeoutRef.current);
+                                  setPreviewHoverGroupId(null);
+                                  if (previewHoverDocId !== doc.id) setPreviewHoverDocId(null);
+                                  if (activeDocId === doc.id || doc.isLocked) return;
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  hoverTimeoutRef.current = setTimeout(() => {
+                                    setPreviewPos({ top: rect.top, left: 272 });
+                                    setPreviewHoverDocId(doc.id);
+                                  }, 600);
+                                }}
+                                onMouseLeave={() => {
+                                  clearTimeout(hoverTimeoutRef.current);
+                                  hoverTimeoutRef.current = setTimeout(() => {
+                                    setPreviewHoverDocId(null);
+                                  }, 300);
+                                }}
+                                style={isDraggingThis ? { pointerEvents: 'none' } : undefined}
+                                onMouseDown={(e) => {
+                                  dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+                                  handleDocClick(e, doc.id);
+                                  const id = doc.id;
+                                  const t0 = Date.now();
+                                  setPressedPinId(id);
+                                  const onUp = () => {
+                                    document.removeEventListener('mouseup', onUp);
+                                    const delay = Math.max(0, 160 - (Date.now() - t0));
+                                    setTimeout(() => setPressedPinId(p => p === id ? null : p), delay);
+                                  };
+                                  document.addEventListener('mouseup', onUp);
+                                }}
+                                onContextMenu={(e) => handleContextMenu(e, doc.id)}
+                                className={`pin-item${pressedPinId === doc.id ? ' pin-pressed' : ''} group relative flex items-center justify-center py-3 px-2 rounded-lg ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} border select-none ${isSelected || isActive
+                                  ? "pin-active text-[var(--color-text-primary)] z-10"
+                                  : "pin-inactive text-[var(--color-text-muted)]"
+                                  }`}
+                                title={doc.title || "New Page"}
+                              >
+                                <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
+                                  {doc.emoji ? (
+                                    <span className={`emoji-glyph${recentlyPinnedRef.current.has(doc.id) ? " animate-in zoom-in spin-in-12 duration-300" : ""}`}>
+                                      {doc.emoji}
+                                    </span>
+                                  ) : (
+                                    <DocPageIcon
+                                      hasContent={!!(doc.content && doc.content.replace(/<[^>]*>/g, '').trim().length > 0)}
+                                      size={20}
+                                      className={isSelected || isActive ? "text-[var(--color-text-muted)]" : "text-[var(--color-icon-muted)]"}
+                                    />
+                                  )}
+                                </div>
+                              </motion.div>
+                            )
+                          })}
+                      </AnimatePresence>
+                      </div>
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
+
+                </div>
+
+                <div className="flex-1 flex flex-col relative z-0 mt-2">
+                  {/* Document Groups */}
+                  <div className="space-y-[2px]">
+                    <AnimatePresence initial={false}>
+                    {groups.map((group) => {
+                      const groupDocs = regularDocs.filter((d) => d.groupId === group.id);
+                      return (
+                        <motion.div
+                          key={group.id}
+                          layout="position"
+                          transition={{ type: "spring", stiffness: 500, damping: 40, mass: 1 }}
+                          data-group-id={group.id}
+                          className="flex flex-col relative rounded-md"
+                          style={{ backgroundColor: group.color && !group.isCollapsed ? group.color + '10' : 'transparent', transition: 'background-color 300ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+                          onMouseEnter={() => setHoverGroupId(group.id)}
+                          onMouseLeave={() => setHoverGroupId(null)}
+                        >
+                          <div
+                            data-group-header={group.id}
+                            className={`group relative flex items-center justify-between px-3 py-[6px] rounded-md text-[var(--color-text-muted)] transition-colors ${isGrabbing ? 'cursor-grabbing' : 'cursor-pointer'} ${hoverGroupId === group.id ? (group.color ? '' : 'bg-[var(--color-bg-hover)]') : ''}`}
+                            style={{ backgroundColor: group.color && hoverGroupId === group.id && group.isCollapsed ? group.color + '10' : 'transparent', transition: 'background-color 300ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+                            data-sidebar-item
+                            onPointerDown={(e) => startGroupPointerDrag(e, group.id)}
+                            onMouseEnter={(e) => {
+                              clearTimeout(hoverTimeoutRef.current);
+                              setPreviewHoverDocId(null);
+                              if (previewHoverGroupId !== group.id) setPreviewHoverGroupId(null);
+
+                              if (!group.isCollapsed) return;
+
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              hoverTimeoutRef.current = setTimeout(() => {
+                                setGroupPreviewPos({ top: rect.top, left: rect.right + 16 });
+                                setPreviewHoverGroupId(group.id);
+                              }, 600);
+                            }}
+                            onMouseLeave={() => {
+                              clearTimeout(hoverTimeoutRef.current);
+                              hoverTimeoutRef.current = setTimeout(() => {
+                                setPreviewHoverGroupId(null);
+                              }, 300);
+                            }}
+                          >
+                            <div
+                              ref={(el) => {
+                                if (el) {
+                                  if (el.scrollWidth > el.clientWidth) el.classList.add('sidebar-folder-text');
+                                  else el.classList.remove('sidebar-folder-text');
+                                }
+                              }}
+                              className="flex items-center gap-2.5 flex-1 cursor-pointer overflow-hidden"
+                              onClick={() => {
+                                updateGroup(group.id, { isCollapsed: !group.isCollapsed });
+                                setPreviewHoverGroupId(null);
+                                setPreviewHoverDocId(null);
+                              }}
+                            >
+                              <div
+                                className="relative flex-shrink-0 select-none flex items-center justify-center w-[22px] h-[22px]"
+                              >
+                                <AnimatedFolder
+                                  isOpen={!group.isCollapsed}
+                                  color={group.color || 'var(--color-icon-muted)'}
+                                  fill={group.color ? group.color + '40' : 'none'}
+                                  icon={group.icon}
+                                  animating={animatingIconGroupId === group.id}
+                                />
+                              </div>
+                              {editingGroupId === group.id ? (
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  value={group.name}
+                                  onChange={(e) => {
+                                    const newName = e.target.value;
+                                    updateGroup(group.id, { name: newName });
+                                    // Auto-assign icon from name, like emoji auto-assign on pages
+                                    if (folderIconTimeoutRef.current) clearTimeout(folderIconTimeoutRef.current);
+                                    folderIconTimeoutRef.current = setTimeout(() => {
+                                      const gId = group.id;
+                                      setGroups(prev => prev.map(g => {
+                                        if (g.id !== gId || g.hasCustomIcon) return g;
+                                        const autoIcon = getIconForFolderName(newName);
+                                        if (autoIcon) {
+                                          setAnimatingIconGroupId(gId);
+                                          setTimeout(() => setAnimatingIconGroupId(p => p === gId ? null : p), 400);
+                                          return { ...g, icon: autoIcon };
+                                        }
+                                        return g;
+                                      }));
+                                    }, 600);
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  draggable={false}
+                                  onDragStart={(e) => e.stopPropagation()}
+                                  onBlur={() => setEditingGroupId(null)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') setEditingGroupId(null);
+                                  }}
+                                  className="bg-transparent border-none outline-none text-[13px] font-medium w-full text-[var(--color-text-primary)] truncate"
+                                />
+                              ) : group.isNaming ? (
+                                <div className="flex-1 overflow-hidden flex items-center">
+                                  <div className="relative h-[11px] w-[72px] rounded-[4px] overflow-hidden bg-[var(--color-border-primary)]">
+                                    <motion.div
+                                      className="absolute inset-y-0 w-[55%]"
+                                      style={{ background: 'linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-text-primary) 18%, transparent) 50%, transparent 100%)' }}
+                                      animate={{ x: ['-100%', '280%'] }}
+                                      transition={{ duration: 1.3, repeat: Infinity, ease: [0.4, 0, 0.6, 1] }}
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <motion.span
+                                  key={group.id + '-name'}
+                                  className="text-[13px] font-medium text-[var(--color-text-primary)] whitespace-nowrap select-none inline-block"
+                                  initial={newlyNamedGroupsRef.current.has(group.id) ? { clipPath: 'inset(0 100% 0 0)', opacity: 0.5 } : false}
+                                  animate={{ clipPath: 'inset(0 0% 0 0)', opacity: 1 }}
+                                  transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                                  onAnimationComplete={() => newlyNamedGroupsRef.current.delete(group.id)}
+                                >
+                                  {group.name}
+                                </motion.span>
+                              )}
+                            </div>
+                            <div
+                              className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1 z-10"
+                              onMouseEnter={() => {
+                                clearTimeout(hoverTimeoutRef.current);
+                                if (previewHoverGroupId !== group.id) {
+                                  setPreviewHoverGroupId(null);
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                const rect = e.currentTarget.closest('.group').getBoundingClientRect();
+                                hoverTimeoutRef.current = setTimeout(() => {
+                                  setGroupPreviewPos({ top: rect.top, left: rect.right + 16 });
+                                  setPreviewHoverGroupId(group.id);
+                                }, 600);
+                              }}
+                            >
+                              <button
+                                onClick={(e) => { e.stopPropagation(); createNewDoc(e, group.id); }}
+                                className="p-1 hover:opacity-70 transition-opacity rounded"
+                                style={{ color: group.color || 'var(--color-icon-muted)' }}
+                                title="New doc in folder"
+                              >
+                                <Plus size={13} />
+                              </button>
+                              <div className="relative">
+                                <button
+                                  onClick={(e) => handleGroupMenu(e, group.id)}
+                                  className="words-context-menu p-1 hover:opacity-70 transition-opacity rounded"
+                                  style={{ color: group.color || 'var(--color-icon-muted)' }}
+                                  title="More options"
+                                >
+                                  <MoreHorizontal size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Docs mapping inside this group */}
+                          <div
+                            className={`grid ${group.isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
+                            style={{ transition: 'grid-template-rows 300ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+                          >
+                            <div className="overflow-hidden">
+                              <motion.div
+                                animate={{ y: group.isCollapsed ? -12 : 0 }}
+                                transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                                className="pl-4 pr-1 pt-0.5 pb-1"
+                                style={group.color ? { '--color-bg-hover': 'rgba(0,0,0,0.04)', '--color-bg-hover-strong': group.color + '30' } : undefined}
+                              >
+                                <AnimatePresence initial={false}>
+                                  {groupDocs.length > 0 ? (
+                                    groupDocs.map(renderDocItem)
+                                  ) : (
+                                    <div className="pl-4 py-1.5 text-[12px] text-[var(--color-text-faint)] italic select-none">
+                                      Empty
+                                    </div>
+                                  )}
+                                </AnimatePresence>
+                              </motion.div>
+                            </div>
+                          </div>
+
+                          {/* Active doc quick-view when collapsed */}
+                          <AnimatePresence>
+                            {group.isCollapsed && groupDocs.some(d => d.id === activeDocId) && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ type: "spring", stiffness: 450, damping: 35, mass: 1 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="pl-4 pr-1 pt-0.5 pb-1">
+                                  {renderDocItem({ ...groupDocs.find(d => d.id === activeDocId), _isTemp: true })}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </motion.div>
+                      );
+                    })}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* Divider between folders and New Page — only when folders exist */}
+                  <AnimatePresence initial={false}>
+                    {groups.length > 0 && (
+                      <motion.div
+                        key="folder-divider"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="mx-3 mt-2.5 mb-2 h-px bg-[var(--color-border-primary)]/50"
+                      />
+                    )}
+                  </AnimatePresence>
+
+                  {/* New Page / Group N items button */}
+                  <div className="space-y-[1px]">
+                    {selectedDocIds.length > 1 ? (
+                      <div
+                        data-sidebar-item
+                        onClick={createGroup}
+                        className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+                      >
+                        <div className="flex items-center gap-2.5 overflow-hidden">
+                          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                            <Folder size={16} className="text-[var(--color-icon-muted)]" />
+                          </div>
+                          <span className="text-[14px] truncate select-none font-medium text-[var(--color-text-primary)]">
+                            Group {selectedDocIds.length} items
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <motion.div
+                        data-sidebar-item
+                        onClick={createNewDoc}
+                        className="group relative flex items-center justify-between px-3 py-[6px] rounded-md cursor-pointer transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+                        whileTap={{ scale: 0.96 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 22, mass: 0.8 }}
+                      >
+                        <div className="flex items-center gap-2.5 overflow-hidden">
+                          <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                            <Plus size={16} className="text-[var(--color-icon-muted)]" />
+                          </div>
+                          <span className="text-[14px] truncate select-none text-[var(--color-icon-muted)] group-hover:text-[var(--color-text-primary)] transition-colors">
+                            New Page
+                          </span>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+
+                  {/* Ungrouped Documents */}
+                  <div className="mt-[2px]">
+                    <AnimatePresence initial={false}>
+                      {ungroupedDocs.map(renderDocItem)}
+                    </AnimatePresence>
+                  </div>
+
+                  <div className="h-24 w-full flex-shrink-0" data-sidebar-empty-zone onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Bottom styling fade */}
+          <div className="absolute bottom-0 left-0 right-0 h-24 pointer-events-none z-30">
+            <GradualBlur position="bottom" height="100%" strength={0.4} divCount={5} zIndex={0} />
+            <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-secondary)] to-transparent z-10" />
+          </div>
+
+          {/* Cloud Sync Toggle */}
+          <div ref={cloudButtonRef} className="absolute bottom-4 left-4 z-40">
+            <button
+              onClick={() => user ? setUserMenuOpen(!userMenuOpen) : setAuthModal('login')}
+              className={`words-context-menu p-1.5 rounded-md transition-colors hover:bg-[var(--color-bg-hover-strong)] ${user ? "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]" : "flex items-center gap-1.5 text-[var(--color-text-primary)] bg-[var(--color-bg-hover)]"}`}
+              title={user ? "Cloud Sync Active" : "Sign up to sync your notes"}
+            >
+              {user ? (
+                <div style={{ width: 16, height: 16, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {cloudIconPhase === 'idle' ? (
+                      <motion.span
+                        key="cloud-icon"
+                        style={{ display: 'flex', alignItems: 'center' }}
+                        initial={{ scale: 0.3, opacity: 0, filter: 'blur(5px)' }}
+                        animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
+                        exit={{ scale: 0.3, opacity: 0, filter: 'blur(5px)' }}
+                        transition={{ type: 'spring', stiffness: 540, damping: 24 }}
+                      >
+                        <Cloud size={18} />
+                      </motion.span>
+                    ) : (
+                      <motion.span
+                        key="trash-icon"
+                        style={{ display: 'flex', alignItems: 'center', color: '#ef4444' }}
+                        initial={{ scale: 0.3, opacity: 0, filter: 'blur(5px)' }}
+                        animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
+                        exit={{ scale: 0.3, opacity: 0, filter: 'blur(5px)' }}
+                        transition={{ type: 'spring', stiffness: 540, damping: 24 }}
+                      >
+                        <span ref={trashIconRef} style={{ display: 'flex', alignItems: 'center' }}>
+                          <Trash2 size={16} />
+                        </span>
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </div>
+              ) : (
+                <>
+                  <CloudOff size={18} className="shrink-0" />
+                  <span className="text-xs font-medium whitespace-nowrap">Sign up to sync</span>
+                </>
+              )}
+            </button>
+
+            <AnimatePresence>
+            {userMenuOpen && user && (
+              <motion.div
+                key="user-menu"
+                className="words-context-menu absolute left-0 bottom-full mb-2 z-[60]"
+                initial={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(4px)' }}
+                animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(4px)' }}
+                transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, y: { type: 'spring', stiffness: 450, damping: 28 } }}
+                style={{ transformOrigin: 'bottom left' }}
+              >
+              <svg className="absolute -bottom-[9px] left-4 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0 Z" fill="var(--color-bg-primary)"/><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
+              <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl z-[60] w-[220px] py-1 px-1">
+
+                {/* User row */}
+                <div className="flex items-center gap-2.5 px-2.5 py-2 mb-0.5">
+                  <div
+                    className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-semibold text-white select-none"
+                    style={{ backgroundColor: `hsl(${(user.email.charCodeAt(0) * 47 + user.email.charCodeAt(1) * 13) % 360}, 40%, 55%)` }}
+                  >
+                    {user.email[0].toUpperCase()}
+                  </div>
+                  <p className="text-[12px] text-[var(--color-text-muted)] truncate flex-1 min-w-0" title={user.email}>{user.email}</p>
+                </div>
+
+                <div className="h-px bg-[var(--color-border-primary)] mx-1 mb-1" />
+
+                {/* Trash collapsible section */}
+                <button
+                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center justify-between text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => setTrashViewOpen(v => !v)}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Trash2 size={14} className="text-[var(--color-text-muted)]" />
+                    Trash
+                    {trashedDocs.length > 0 && (
+                      <span className="text-[11px] text-[var(--color-text-faint)]">{trashedDocs.length}</span>
+                    )}
+                  </div>
+                  <ChevronDown size={13} className={`transition-transform duration-200 text-[var(--color-text-muted)] ${trashViewOpen ? 'rotate-180' : ''}`} />
+                </button>
+                <AnimatePresence>
+                  {trashViewOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="overflow-hidden"
+                    >
+                      {trashedDocs.length === 0 ? (
+                        <p className="px-2.5 py-2 text-[12px] text-[var(--color-text-faint)] italic">Nothing in trash</p>
+                      ) : (
+                        <>
+                          <div className="max-h-[180px] overflow-y-auto">
+                            {trashedDocs.map(d => (
+                              <div
+                                key={d.id}
+                                className="group/ti flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--color-bg-hover)] transition-colors"
+                                onMouseEnter={(e) => {
+                                  clearTimeout(trashHoverTimeoutRef.current);
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  trashHoverTimeoutRef.current = setTimeout(() => {
+                                    setTrashHoverPos({ top: rect.top, left: rect.right + 10 });
+                                    setTrashHoverDocId(d.id);
+                                  }, 350);
+                                }}
+                                onMouseLeave={() => {
+                                  clearTimeout(trashHoverTimeoutRef.current);
+                                  trashHoverTimeoutRef.current = setTimeout(() => setTrashHoverDocId(null), 200);
+                                }}
+                              >
+                                <span className="text-[var(--color-text-faint)] flex-shrink-0">
+                                  {d.emoji ? <span className="text-[12px]">{d.emoji}</span> : <File size={12} />}
+                                </span>
+                                <span className="text-[12px] text-[var(--color-text-muted)] truncate flex-1 min-w-0 group-hover/ti:text-[var(--color-text-primary)] transition-colors">
+                                  {d.title || 'Untitled'}
+                                </span>
+                                <div className="flex items-center gap-0.5 opacity-0 group-hover/ti:opacity-100 transition-opacity flex-shrink-0">
+                                  <button
+                                    onClick={() => { restoreFromTrash(d.id); setUserMenuOpen(false); setTrashViewOpen(false); setTrashHoverDocId(null); }}
+                                    className="p-1 rounded text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors"
+                                    title="Restore"
+                                  >
+                                    <RotateCcw size={11} />
+                                  </button>
+                                  <button
+                                    onClick={() => { permanentlyDeleteFromTrash(d.id); setTrashHoverDocId(null); }}
+                                    className="p-1 rounded text-[var(--color-text-faint)] hover:text-red-500 transition-colors"
+                                    title="Delete forever"
+                                  >
+                                    <X size={11} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <button
+                            onClick={emptyTrash}
+                            className="w-full text-center text-[11px] text-[var(--color-text-faint)] hover:text-red-400 transition-colors py-1.5 mt-0.5"
+                          >
+                            Empty Trash
+                          </button>
+                        </>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="h-px bg-[var(--color-border-primary)] mx-1 mt-1 mb-1" />
+
+                {/* Sign out */}
+                <button
+                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-muted)] hover:text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => { handleLogout(); setUserMenuOpen(false); setTrashViewOpen(false); setTrashHoverDocId(null); }}
+                >
+                  <LogOut size={14} /> Sign out
+                </button>
+
+              </div>
+              </motion.div>
+            )}
+            </AnimatePresence>
+          </div>
+        </div>
+        {/* Squish blur layers — band-based masks (same algorithm as GradualBlur).
+            opacity+backdropFilter are on the SAME element so backdrop-filter sees the sidebar content. */}
+        {Array.from({ length: 8 }, (_, idx) => {
+          const n = 8;
+          const inc = 100 / n;
+          const i = idx + 1;
+          const t = i / n;
+          // Exponential blur: weak on left band → strong on right band
+          const blurVal = (Math.pow(2, t * 4) * 0.0625 * 0.35).toFixed(3);
+          // Band mask with feathered edges, covering right 65% of sidebar
+          const p1 = +((inc * i - inc) * 10 / 10).toFixed(1);
+          const p2 = +(inc * i).toFixed(1);
+          const p3 = +(inc * (i + 1)).toFixed(1);
+          const p4 = +(inc * (i + 2)).toFixed(1);
+          let grad = `transparent ${Math.max(0, p1)}%, black ${p2}%`;
+          if (p3 <= 100) grad += `, black ${p3}%`;
+          if (p4 <= 100) grad += `, transparent ${p4}%`;
+          return (
+            <motion.div
+              key={`sq-blur-${idx}`}
+              className="absolute pointer-events-none"
+              style={{
+                right: 0, top: 0, bottom: 0, width: '65%',
+                backdropFilter: `blur(${blurVal}rem)`,
+                WebkitBackdropFilter: `blur(${blurVal}rem)`,
+                maskImage: `linear-gradient(to right, ${grad})`,
+                WebkitMaskImage: `linear-gradient(to right, ${grad})`,
+                opacity: squishOpacity,
+                zIndex: 10 + idx,
+              }}
+            />
+          );
+        })}
+        {/* Soft gradient fade — right→left, intentionally subtle */}
+        <motion.div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: 'linear-gradient(to left, var(--color-bg-secondary) 0%, transparent 52%)',
+            opacity: squishOpacity,
+            zIndex: 19,
+          }}
+        />
+      </motion.div>
+      {/* Sidebar Resize Handle */}
+      {isSidebarOpen && !historyPanelOpen && (
+        <motion.div
+          className="absolute top-0 bottom-0 z-[60] w-4 flex items-center justify-center"
+          style={{ left: displaySidebarWidth, x: -8, cursor: resizeCursorActive ? 'col-resize' : 'default' }}
+          onPointerDown={startResize}
+          onDoubleClick={handleResizeDoubleClick}
+          onMouseEnter={() => {
+            resizeCursorTimerRef.current = setTimeout(() => setResizeCursorActive(true), 220);
+          }}
+          onMouseLeave={() => {
+            clearTimeout(resizeCursorTimerRef.current);
+            setResizeCursorActive(false);
+          }}
+        >
+          <motion.div
+            className="w-[3px] h-10 rounded-full bg-[var(--color-border-primary)]"
+            animate={{ opacity: resizeCursorActive ? 1 : 0, scaleY: resizeCursorActive ? 1 : 0.4 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+          />
+        </motion.div>
+      )}
+      {/* Main Content Area */}
+      <div
+        ref={contentAreaRef}
+        className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] ${historyPanelOpen ? "mr-[280px]" : ""} print:!ml-0`}
+        style={{ marginLeft: historyPanelOpen ? 0 : isSidebarOpen ? sidebarWidth : 0 }}
+        onClick={() => {
+          if (isSidebarPeeking && !isSidebarOpen) {
+            setIsSidebarPeeking(false);
+          }
+        }}
+      >
+        {lockModal && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-12 z-30 bg-[var(--color-bg-primary)]">
+            <div className="w-full max-w-xs flex flex-col items-center">
+              <Lock size={24} className="text-[var(--color-text-faint)] mb-4" />
+              <p className="text-[15px] text-[var(--color-text-muted)] text-center mb-1">
+                {lockModal.mode === 'create' ? 'Create a passcode' : 'Locked Page'}
+              </p>
+              <p className="text-[12px] text-[var(--color-text-faint)] text-center mb-8">
+                {lockModal.mode === 'create'
+                  ? 'This will be used for all locked pages'
+                  : 'Enter passcode to continue'}
+              </p>
+              <div className="relative flex justify-center gap-4 mb-8">
+                {[0, 1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className={`w-4 h-4 rounded-full transition-all pointer-events-none ${passcodeInput.length > i
+                      ? 'bg-[var(--color-text-primary)] scale-110'
+                      : 'bg-[var(--color-border-primary)]'
+                      }`}
+                  />
+                ))}
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={4}
+                  autoFocus
+                  value={passcodeInput}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                    setPasscodeInput(val);
+                    if (val.length === 4) {
+                      setTimeout(() => handlePasscodeSubmit(val), 150);
+                    }
+                  }}
+                  className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  setLockModal(null);
+                  setPasscodeInput('');
+                  // Reload active doc to restore editor content
+                  const doc = docsRef.current.find(d => d.id === activeDocId);
+                  if (doc && editorRef.current && titleRef.current) {
+                    titleRef.current.textContent = doc.title;
+                    editorRef.current.innerHTML = doc.content;
+                  }
+                }}
+                className="text-[12px] text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        <motion.main style={{ opacity: contentOpacity }} className={`w-full ${activeDoc?.fullWidth ? 'max-w-[1200px] px-8 sm:px-16' : 'max-w-3xl px-12'} mx-auto pt-24 pb-32 print:pt-0 print:pb-0 flex-grow bg-[var(--color-bg-primary)] ${docFont === 'mono' ? 'font-mono' : ''} ${docFont === 'serif' ? 'font-serif theme-font-serif' : ''}`}>
+          {/* Print Logo */}
+          <div className="hidden print:flex mb-6 items-center gap-2">
+            <img src="/faviconlight.png" alt="Logo" className="w-5 h-5 object-contain" />
+            <span className="font-semibold text-[13px] text-[var(--color-text-muted)]">usewords.app</span>
+          </div>
+          {" "}
+          {/* From chip — zero-height so it doesn't shift the title position */}
+          {activeDoc?.sharedFrom && (
+            <div className="relative h-0 print:hidden">
+              <div className="absolute left-0 bottom-3.5 group/chip inline-flex items-center px-2.5 py-1 rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-xs font-medium text-[var(--color-text-muted)] select-none whitespace-nowrap cursor-default" style={{ fontFamily: 'var(--font-sans)' }}>
+                From {activeDoc.sharedFrom}
+                <button
+                  onClick={() => {
+                    const updated = docsRef.current.map(d => d.id === activeDocId ? { ...d, sharedFrom: null } : d);
+                    docsRef.current = updated;
+                    setDocs(updated);
+                  }}
+                  className="max-w-0 overflow-hidden group-hover/chip:max-w-[16px] ml-0 group-hover/chip:ml-1.5 transition-all duration-200 text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] flex-shrink-0 flex items-center"
+                  title="Dismiss"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Title Field / Header */}
+          <>
+          <div
+            ref={emojiPickerRef}
+            className={`relative group print:mb-4 ${!activeDoc.title && !activeDoc.emoji ? 'print:hidden' : ''}`}
+            style={{ display: activeDoc.hideTitle ? 'none' : 'block', marginBottom: '2rem' }}
+          >
+            {/* "Add icon" button — zero-height, absolutely floats above title on hover */}
+            {!activeDoc.emoji && (
+              <div className="relative h-0 print:hidden">
+                <button
+                  className="absolute bottom-1 left-0 flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-all duration-150 opacity-0 group-hover:opacity-100 whitespace-nowrap"
+                  style={{ fontSize: 12 }}
+                  onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M8 14s1.5 2 4 2 4-2 4-2" stroke="var(--color-bg-primary)" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+                    <circle cx="9" cy="10" r="1.2" fill="var(--color-bg-primary)"/>
+                    <circle cx="15" cy="10" r="1.2" fill="var(--color-bg-primary)"/>
+                  </svg>
+                  Add icon
+                </button>
+              </div>
+            )}
+
+            {/* Title row: emoji + title text */}
+            <div className="flex items-start">
+              {/* Animated emoji button — always mounted, driven by animate props so doc-switch transition applies instantly */}
+              <motion.div
+                initial={{ width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }}
+                animate={activeDoc.emoji
+                  ? { width: 48, opacity: 1, marginRight: 6, marginLeft: -8 }
+                  : { width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }
+                }
+                transition={renderedDocIdRef.current !== activeDocId ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 38 }}
+                className="flex-shrink-0 overflow-hidden print:overflow-visible"
+              >
+                {activeDoc.emoji && (
+                  <button
+                    className="w-[48px] h-[48px] mt-1 flex items-center justify-center hover:bg-[var(--color-bg-hover)] rounded-md transition-colors select-none cursor-pointer"
+                    style={{ fontSize: 30 }}
+                    onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                  >
+                    <span
+                      key={animatingEmojiDocId === activeDoc.id ? `anim-${activeDoc.emoji}` : activeDoc.emoji}
+                      className={`${animatingEmojiDocId === activeDoc.id ? 'animate-tasteful-pop' : ''} block leading-none print:translate-y-1`}
+                    >
+                      {activeDoc.emoji}
+                    </span>
+                  </button>
+                )}
+              </motion.div>
+
+              <h1
+                ref={titleRef}
+                className="flex-1 title-input text-[36px] sm:text-[42px] font-bold leading-tight outline-none w-full break-words tracking-tight mt-0"
+                style={{ textAlign: activeDoc.textAlign || "left" }}
+                contentEditable
+                suppressContentEditableWarning
+                spellCheck={true}
+                autoCapitalize="off"
+                autoCorrect="on"
+                onInput={handleTitleInput}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    editorRef.current.focus();
+                  }
+                }}
+              ></h1>
+            </div>
+
+            {/* Emoji picker dropdown */}
+            <AnimatePresence>
+              {isEmojiPickerOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -6 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                  transition={{ duration: 0.12, ease: [0.16, 1, 0.3, 1] }}
+                  className="absolute left-0 mt-2 z-50"
+                  style={{ top: activeDoc.emoji ? 'calc(100% - 8px)' : '100%' }}
+                >
+                  <EmojiPickerPanel
+                    hasEmoji={!!activeDoc.emoji}
+                    onSelect={(emoji) => {
+                      setDocs(prev => prev.map(d =>
+                        d.id === activeDocId ? { ...d, emoji, hasCustomEmoji: true } : d
+                      ));
+                      setIsEmojiPickerOpen(false);
+                    }}
+                    onRemove={() => {
+                      setDocs(prev => prev.map(d =>
+                        d.id === activeDocId ? { ...d, emoji: null, hasCustomEmoji: false } : d
+                      ));
+                      setIsEmojiPickerOpen(false);
+                    }}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+          </>{" "}
+          {/* Body Field */}
+          <>
+          <div
+            ref={editorRef}
+            className={`editor-content w-full ${activeDoc.lineSpacing === '1.0' ? 'leading-none' : activeDoc.lineSpacing === '2.0' ? 'leading-loose' : 'leading-relaxed'}`}
+            style={{ 
+              textAlign: activeDoc.textAlign || "left"
+            }}
+            contentEditable
+            suppressContentEditableWarning
+            spellCheck={true}
+            autoCapitalize="off"
+            autoCorrect="on"
+            onInput={handleEditorInput}
+            onKeyDown={handleKeyDown}
+            onMouseDown={handleEditorMouseDown}
+            onPaste={handlePaste}
+            onDragStart={handleEditorDragStart}
+            onDragEnd={handleEditorDragEnd}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onClick={(e) => {
+              setSlashState((prev) => ({
+                ...prev,
+                isOpen: false,
+              }));
+              // Hide popover if clicking outside of a link
+              if (e.target.tagName !== "A") {
+                setLinkPopoverState(prev => prev.show ? { ...prev, show: false } : prev);
+              }
+            }}
+          ></div>
+          </>
+        </motion.main>
+
+        {/* New doc reveal — 5-column chevron cascade sweeps bottom-to-top, outer leads */}
+        <AnimatePresence>
+          {animatingDocId === activeDocId && activeDoc && (
+            <motion.div
+              key={`newdoc-overlay-${activeDocId}`}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 20,
+                pointerEvents: 'none',
+                overflow: 'hidden',
+              }}
+              exit={{ opacity: 0, transition: { duration: 0 } }}
+            >
+              {/* scaleX(1.25) stretches the 10%-90% cluster to fill full width */}
+              {/* Render order: middle (bottom) → sides → left/right (top) */}
+              <div style={{ position: 'absolute', inset: 0, transform: 'scaleX(1.25)', transformOrigin: 'center' }}>
+              {[
+                { src: 'middle',    y: imageYMiddle, left: '30%',   width: '40%' },
+                { src: 'leftside',  y: imageYSide,   left: '15%',   width: '34%' },
+                { src: 'rightside', y: imageYSide,   left: '51%',   width: '34%' },
+                { src: 'left',      y: imageYOuter,  left: '10%',   width: '30%' },
+                { src: 'right',     y: imageYOuter,  left: '60%',   width: '30%' },
+              ].map(({ src, y, left, width }) => (
+                <motion.div
+                  key={src}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    height: '100%',
+                    left,
+                    width,
+                    y,
+                    scale: imageScaleN,
+                    opacity: imageOpFinal,
+                    filter: imageFilter,
+                    willChange: 'transform',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <img
+                    src={`/newdoceffect/${isDark ? 'darkassets' : 'lightassets'}/${src}${isDark ? 'dark' : ''}.png`}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'fill',
+                      display: 'block',
+                      userSelect: 'none',
+                    }}
+                    alt=""
+                    draggable={false}
+                  />
+                  {/* Fade overlay — white in light mode, dark in dark mode */}
+                  <motion.div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      backgroundColor: isDark ? '#191919' : 'white',
+                      opacity: imageWhiteOp,
+                      pointerEvents: 'none',
+                    }}
+                  />
+                </motion.div>
+              ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>{" "}
+      {/* Orange text-drag insertion cursor */}
+      <div
+        ref={dragCursorRef}
+        style={{
+          position: 'fixed',
+          display: 'none',
+          width: '2px',
+          backgroundColor: '#f97316',
+          pointerEvents: 'none',
+          zIndex: 9999,
+          borderRadius: '1px',
+          boxShadow: '0 0 4px #f9731680',
+        }}
+      />
+      {/* Floating Formatting Toolbar */}
+      <AnimatePresence>
+        {linkPopoverState.show && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: -4, x: "-50%", filter: 'blur(2px)' }}
+            animate={{ opacity: 1, scale: 1, y: 0, x: "-50%", filter: 'blur(0px)' }}
+            exit={{ opacity: 0, transition: { duration: 0 } }}
+            transition={{ duration: 0.15 }}
+            className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-md px-3 py-2 flex items-center gap-2"
+            style={{
+              top: linkPopoverState.y,
+              left: linkPopoverState.x,
+              transformOrigin: "top center"
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {linkPopoverState.url && (() => {
+              try {
+                const urlObj = new URL(linkPopoverState.url);
+                return (
+                  <img
+                    src={`https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`}
+                    alt=""
+                    className="w-4 h-4 rounded-sm"
+                    onError={(e) => e.target.style.display = 'none'}
+                  />
+                );
+              } catch (e) { return null; }
+            })()}
+            <a
+              href={linkPopoverState.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-[var(--color-accent)] hover:underline truncate max-w-[200px]"
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey) return; // Let default new tab behavior happen
+                e.preventDefault();
+                window.open(linkPopoverState.url, "_blank");
+              }}
+            >
+              {linkPopoverState.url}
+            </a>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {toolbarState.show && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 4, x: "-50%", filter: 'blur(2px)' }}
+            animate={{ opacity: 1, scale: 1, y: 0, x: "-50%", filter: 'blur(0px)' }}
+            exit={{ opacity: 0, transition: { duration: 0 } }}
+            transition={{ duration: 0.15 }}
+            className="fixed z-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-lg rounded-lg px-1 py-1 flex items-center gap-0.5"
+            style={{
+              top: toolbarState.y - 44,
+              left: toolbarState.x,
+              transformOrigin: "bottom center"
+            }}
+            onMouseDown={(e) => {
+              if (!e.target.closest('input')) e.preventDefault();
+            }}
+          >
+            {toolbarState.showLinkInput ? (
+              <div className="flex items-center gap-2 px-1 py-1 bg-[var(--color-bg-primary)]">
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setToolbarState(p => ({ ...p, showLinkInput: false }));
+                  }}
+                  className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-md transition-all"
+                  title="Back"
+                >
+                  <ArrowLeft size={14} />
+                </button>
+                <input
+                  autoFocus
+                  type="text"
+                  value={toolbarState.linkUrl}
+                  onChange={(e) => setToolbarState(p => ({ ...p, linkUrl: e.target.value }))}
+                  placeholder="Paste or type a link..."
+                  className="bg-transparent text-sm text-[var(--color-text-primary)] outline-none min-w-[200px]"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (toolbarState.savedRange) {
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(toolbarState.savedRange);
+                        let url = toolbarState.linkUrl;
+                        if (url && !url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+                        if (url) {
+                          document.execCommand('createLink', false, url);
+                          syncContentToState();
+                        }
+                        setToolbarState(p => ({ ...p, show: false, showLinkInput: false, showColorPicker: false }));
+                      }
+                    } else if (e.key === 'Escape') {
+                      setToolbarState(p => ({ ...p, show: false, showLinkInput: false, showColorPicker: false }));
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={(e) => formatText(e, "bold")}
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isBold ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                  title="Bold"
+                >
+                  <Bold size={14} />
+                </button>
+                <button
+                  onClick={(e) => formatText(e, "italic")}
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isItalic ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                  title="Italic"
+                >
+                  <Italic size={14} />
+                </button>
+                <button
+                  onClick={(e) => formatText(e, "underline")}
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isUnderline ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                  title="Underline"
+                >
+                  <Underline size={14} />
+                </button>
+                <button
+                  onClick={(e) => formatText(e, "strikeThrough")}
+                  className={`p-1.5 rounded-md transition-colors ${toolbarState.isStrikethrough ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                  title="Strikethrough"
+                >
+                  <Strikethrough size={14} />
+                </button>
+                <div className="w-px h-4 bg-[var(--color-border-primary)] mx-0.5" />
+                {toolbarState.isLinkActive ? (
+                  <button
+                    onClick={(e) => {
+                      document.execCommand('unlink', false, null);
+                      syncContentToState();
+                      setToolbarState(p => ({ ...p, show: false, showLinkInput: false, isLinkActive: false }));
+                    }}
+                    className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                    title="Unlink"
+                  >
+                    <Unlink size={14} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => setToolbarState(p => ({ ...p, showLinkInput: true }))}
+                    className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                    title="Insert Link"
+                  >
+                    <Link size={14} />
+                  </button>
+                )}
+                
+                <div className="w-px h-4 bg-[var(--color-border-primary)] mx-0.5" />
+                
+                <div className="flex items-center gap-0.5 relative">
+                  <button
+                    onClick={(e) => {
+                      if (toolbarState.savedRange) {
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(toolbarState.savedRange);
+                      }
+
+                      const expectedHex = (toolbarState.activeHighlightColor || '#fef08a') + '40';
+                      const dummy = document.createElement('div');
+                      dummy.style.backgroundColor = expectedHex;
+                      const expectedRgba = dummy.style.backgroundColor;
+
+                      let isHighlighted = false;
+                      let currentColor = null;
+                      let node = window.getSelection().anchorNode;
+                      if (node?.nodeType === 3) node = node.parentNode;
+                      while (node && node !== editorRef.current && node.tagName !== 'ARTICLE' && node.tagName !== 'MAIN') {
+                        if (node.style?.backgroundColor && node.style.backgroundColor !== 'transparent' && node.style.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+                          isHighlighted = true;
+                          currentColor = node.style.backgroundColor;
+                          break;
+                        }
+                        node = node.parentNode;
+                      }
+
+                      if (isHighlighted && currentColor === expectedRgba) {
+                        formatText(e, "backColor", "transparent");
+                      } else {
+                        const existingSpans = new Set(
+                          Array.from(editorRef.current.querySelectorAll('[style*="background-color"]'))
+                        );
+                        e.preventDefault();
+                        document.execCommand('backColor', false, expectedHex);
+                        const newSpans = Array.from(editorRef.current.querySelectorAll('[style*="background-color"]'))
+                          .filter(el => !existingSpans.has(el) && el.style.backgroundColor && el.style.backgroundColor !== 'transparent' && el.style.backgroundColor !== 'rgba(0, 0, 0, 0)');
+                        if (newSpans.length === 0) {
+                          syncContentToState();
+                        } else {
+                          let pending = newSpans.length;
+                          newSpans.forEach(span => {
+                            const color = span.style.backgroundColor;
+                            span.style.backgroundColor = 'transparent';
+                            span.style.backgroundImage = `linear-gradient(${color}, ${color})`;
+                            span.style.backgroundSize = '0% 100%';
+                            span.style.backgroundRepeat = 'no-repeat';
+                            span.style.backgroundPosition = 'left center';
+                            requestAnimationFrame(() => {
+                              // Force the browser to commit the initial 0% state before transitioning
+                              void getComputedStyle(span).backgroundSize;
+                              span.style.transition = 'background-size 200ms cubic-bezier(0.4, 0, 0.2, 1)';
+                              span.style.backgroundSize = '100% 100%';
+                              let cleaned = false;
+                              const cleanup = () => {
+                                if (cleaned) return;
+                                cleaned = true;
+                                span.style.backgroundColor = color;
+                                span.style.backgroundImage = '';
+                                span.style.backgroundSize = '';
+                                span.style.backgroundRepeat = '';
+                                span.style.backgroundPosition = '';
+                                span.style.transition = '';
+                                if (--pending === 0) syncContentToState();
+                              };
+                              span.addEventListener('transitionend', cleanup, { once: true });
+                              setTimeout(cleanup, 350);
+                            });
+                          });
+                        }
+                      }
+                    }}
+                    className={`p-1.5 rounded-md transition-colors ${toolbarState.isHighlighted ? 'text-[var(--color-accent)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                    title="Toggle Highlight"
+                  >
+                    <Highlighter size={14} />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setToolbarState(p => ({ ...p, showColorPicker: !p.showColorPicker, showAlignPicker: false }));
+                    }}
+                    className={`p-1.5 w-[26px] h-[26px] flex items-center justify-center rounded-md transition-colors ${toolbarState.showColorPicker ? 'bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)]' : 'text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                    title="Color Picker"
+                  >
+                    <div className="w-[10px] h-[10px] rounded-full border border-black/10 dark:border-white/10" style={{ backgroundColor: toolbarState.activeHighlightColor || '#fef08a' }} />
+                  </button>
+                  
+                  {/* Color Context Menus */}
+                  {toolbarState.showColorPicker && (
+                    <div className="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-md px-1 py-1 flex items-center gap-0.5 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-100">
+                      {['#9ca3af', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'].map(color => (
+                        <button
+                          key={color}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setToolbarState(p => ({ ...p, showColorPicker: false, activeHighlightColor: color }));
+                          }}
+                          className={`p-1.5 flex items-center justify-center rounded-md transition-colors hover:bg-[var(--color-bg-hover-strong)]`}
+                          title="Select highlight color"
+                        >
+                          <div 
+                            className={`w-3.5 h-3.5 rounded-full transition-opacity hover:opacity-80 ${toolbarState.activeHighlightColor === color ? 'ring-2 ring-offset-1 ring-[var(--color-border-primary)] dark:ring-offset-gray-900' : ''}`}
+                            style={{ backgroundColor: color }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="w-px h-4 bg-[var(--color-border-primary)] mx-0.5" />
+                
+                <div className="relative flex items-center">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setToolbarState(p => ({ ...p, showAlignPicker: !p.showAlignPicker, showColorPicker: false }));
+                    }}
+                    className={`p-1.5 flex items-center gap-0.5 rounded-md transition-colors ${toolbarState.showAlignPicker ? 'bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                    title="Alignment"
+                  >
+                    {toolbarState.activeAlign === 'center' ? <AlignCenter size={14} /> :
+                     toolbarState.activeAlign === 'right' ? <AlignRight size={14} /> :
+                     toolbarState.activeAlign === 'justify' ? <AlignJustify size={14} /> :
+                     <AlignLeft size={14} />}
+                    <ChevronDown size={10} strokeWidth={3} className="text-[var(--color-icon-muted)]" />
+                  </button>
+                  
+                  {/* Alignment Context Menus */}
+                  {toolbarState.showAlignPicker && (
+                    <div className="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-md px-1 py-1 flex items-center animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-100">
+                      <button
+                        onClick={(e) => { formatText(e, "justifyLeft"); setToolbarState(p => ({ ...p, showAlignPicker: false, show: false })); }}
+                        className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                        title="Align Left"
+                      >
+                        <AlignLeft size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => { formatText(e, "justifyCenter"); setToolbarState(p => ({ ...p, showAlignPicker: false, show: false })); }}
+                        className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                        title="Align Center"
+                      >
+                        <AlignCenter size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => { formatText(e, "justifyRight"); setToolbarState(p => ({ ...p, showAlignPicker: false, show: false })); }}
+                        className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                        title="Align Right"
+                      >
+                        <AlignRight size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => { formatText(e, "justifyFull"); setToolbarState(p => ({ ...p, showAlignPicker: false, show: false })); }}
+                        className="p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+                        title="Justify"
+                      >
+                        <AlignJustify size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Sidebar Context Menu Overlay */}
+      {sidebarContextMenu.isOpen && (
+        <div
+          className="fixed inset-0 z-[140]"
+          onClick={() => setSidebarContextMenu({ isOpen: false, x: 0, y: 0 })}
+          onContextMenu={(e) => { e.preventDefault(); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); }}
+        />
+      )}
+      {/* Sidebar Context Menu */}
+      <AnimatePresence>
+      {sidebarContextMenu.isOpen && (
+        <motion.div
+          key="sidebar-ctx"
+          className="fixed z-[150] w-44 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1"
+          style={{ top: sidebarContextMenu.y, left: sidebarContextMenu.x }}
+          initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+          transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 } }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => { e.stopPropagation(); createNewDoc(e); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); }}
+          >
+            <File size={14} /> New Page
+          </button>
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => { e.stopPropagation(); createGroup(); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); }}
+          >
+            <Folder size={14} /> New Folder
+          </button>
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {/* Document Hover Preview Popover */}
+      <AnimatePresence>
+        {previewHoverDocId && (() => {
+          const previewDoc = docs.find(d => d.id === previewHoverDocId);
+          if (!previewDoc) return null;
+
+          return (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              transition={{ type: "spring", stiffness: 450, damping: 30 }}
+              className="fixed z-[100] w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-3 pointer-events-none"
+              style={{ top: previewPos.top, left: previewPos.left, transformOrigin: "-16px 20px" }}
+            >
+              <svg className="absolute pointer-events-none z-10" style={{ top: '13px', left: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
+                <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)"/>
+                <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/>
+              </svg>
+              <h3 className="font-semibold text-[13px] text-[var(--color-text-primary)] mb-1.5 break-words">
+                {previewDoc.emoji && <span className="mr-1.5">{previewDoc.emoji}</span>}
+                {previewDoc.title || "New Page"}
+              </h3>
+              <div className="leading-relaxed relative overflow-hidden" style={{ maxHeight: '140px' }}>
+                <div
+                  className="editor-content !pb-0 scale-[0.6] origin-top-left w-[166.666%] pointer-events-none text-[22px] [&_p]:!text-[22px] [&_li]:!text-[22px] [&_h3]:!text-[22px] [&_blockquote]:!text-[22px] [&_span]:!text-[22px] [&>div]:!text-[22px] [&_a]:!text-[22px] [&>*:first-child]:!mt-0 [&>p:first-child:empty]:!hidden"
+                  dangerouslySetInnerHTML={{ __html: (previewDoc.content || "No content").replace(/^(<p><br><\/p>|<p>\s*<\/p>)+/gi, '') }}
+                />
+                <div className="absolute left-0 right-0 bottom-0 h-10 bg-gradient-to-t from-[var(--color-bg-primary)] to-transparent pointer-events-none" />
+              </div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+      {/* Group Hover Preview Popover */}
+      <AnimatePresence>
+        {previewHoverGroupId && (() => {
+          const previewGroup = groups.find(g => g.id === previewHoverGroupId);
+          if (!previewGroup) return null;
+          const groupDocs = docs.filter(d => !d.isPinned && d.groupId === previewGroup.id);
+
+          return (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              transition={{ type: "spring", stiffness: 450, damping: 30 }}
+              className="fixed z-[100] w-56 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg py-1 px-1 pointer-events-auto"
+              style={{ top: groupPreviewPos.top, left: groupPreviewPos.left, transformOrigin: "-16px 20px" }}
+              onMouseEnter={() => {
+                clearTimeout(hoverTimeoutRef.current);
+                setPreviewHoverDocId(null);
+              }}
+              onMouseLeave={() => {
+                clearTimeout(hoverTimeoutRef.current);
+                hoverTimeoutRef.current = setTimeout(() => {
+                  setPreviewHoverGroupId(null);
+                  setPreviewHoverDocId(null);
+                }, 300);
+              }}
+            >
+              <svg className="absolute pointer-events-none z-10" style={{ top: '13px', left: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
+                <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)"/>
+                <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/>
+              </svg>
+              <div className="overflow-y-auto overflow-x-hidden flex flex-col custom-scrollbar" style={{ maxHeight: '320px' }}>
+
+                {groupDocs.length === 0 ? (
+                  <div className="px-3 py-3 text-[13px] text-[var(--color-text-muted)] italic text-center opacity-70">Folder is empty</div>
+                ) : (
+                  groupDocs.map((doc, idx) => (
+                    <motion.div
+                      key={doc.id}
+                      className="group relative flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] shrink-0"
+                      onMouseDown={(e) => {
+                        handleDocClick(e, doc.id);
+                        setPreviewHoverGroupId(null);
+                        setPreviewHoverDocId(null);
+                      }}
+                      onMouseEnter={(e) => {
+                        e.stopPropagation();
+                        clearTimeout(hoverTimeoutRef.current);
+                        if (doc.isLocked) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        hoverTimeoutRef.current = setTimeout(() => {
+                          setPreviewPos({ top: rect.top, left: rect.right + 16 });
+                          setPreviewHoverDocId(doc.id);
+                        }, 600);
+                      }}
+                      onMouseLeave={() => {
+                        clearTimeout(hoverTimeoutRef.current);
+                        hoverTimeoutRef.current = setTimeout(() => {
+                          setPreviewHoverDocId(null);
+                        }, 300);
+                      }}
+                    >
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0 overflow-hidden">
+                        <div className="text-base flex-shrink-0 leading-none select-none flex items-center justify-center w-5 h-5">
+                          {doc.isLocked ? (
+                            <Lock size={16} className="text-[var(--color-icon-muted)]" />
+                          ) : doc.emoji ? (
+                            <span className="inline-block leading-none">{doc.emoji}</span>
+                          ) : (
+                            <DocPageIcon
+                              hasContent={!!(doc.content && doc.content.replace(/<[^>]*>/g, '').trim().length > 0)}
+                              size={16}
+                              className="text-[var(--color-icon-muted)]"
+                            />
+                          )}
+                        </div>
+                        <span className="text-[13px] font-medium w-full truncate select-none">
+                          {doc.title || "New Page"}
+                        </span>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+      {/* Trash Hover Preview */}
+      <AnimatePresence>
+        {trashHoverDocId && (() => {
+          const previewDoc = trashedDocs.find(d => d.id === trashHoverDocId);
+          if (!previewDoc) return null;
+          return (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              transition={{ type: "spring", stiffness: 450, damping: 30 }}
+              className="fixed z-[100] w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-3 pointer-events-none"
+              style={{ top: trashHoverPos.top, left: trashHoverPos.left, transformOrigin: "-16px 20px" }}
+            >
+              <svg className="absolute pointer-events-none z-10" style={{ top: '13px', left: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
+                <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)"/>
+                <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/>
+              </svg>
+              <h3 className="font-semibold text-[13px] text-[var(--color-text-primary)] mb-1.5 break-words">
+                {previewDoc.emoji && <span className="mr-1.5">{previewDoc.emoji}</span>}
+                {previewDoc.title || 'Untitled'}
+              </h3>
+              <div className="leading-relaxed relative overflow-hidden" style={{ maxHeight: '140px' }}>
+                <div
+                  className="editor-content !pb-0 scale-[0.6] origin-top-left w-[166.666%] pointer-events-none text-[22px] [&_p]:!text-[22px] [&_li]:!text-[22px] [&_h3]:!text-[22px] [&_blockquote]:!text-[22px] [&_span]:!text-[22px] [&>div]:!text-[22px] [&_a]:!text-[22px] [&>*:first-child]:!mt-0 [&>p:first-child:empty]:!hidden"
+                  dangerouslySetInnerHTML={{ __html: (previewDoc.content || '').replace(/^(<p><br><\/p>|<p>\s*<\/p>)+/gi, '') || '<p style="opacity:0.4">No content</p>' }}
+                />
+                <div className="absolute left-0 right-0 bottom-0 h-10 bg-gradient-to-t from-[var(--color-bg-primary)] to-transparent pointer-events-none" />
+              </div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+      {/* Glowing slash overlay */}
+      {slashState.isOpen && slashState.charRect && (
+        <span
+          className="slash-glow-char"
+          style={{
+            position: "fixed",
+            top: slashState.charRect.top,
+            left: slashState.charRect.left,
+            width: slashState.charRect.width,
+            height: slashState.charRect.height,
+            fontSize: slashState.charFontSize,
+            fontFamily: slashState.charFontFamily,
+            lineHeight: `${slashState.charRect.height}px`,
+            pointerEvents: "none",
+            zIndex: 49,
+            userSelect: "none",
+            display: "inline-block",
+            overflow: "hidden",
+            textAlign: "center",
+          }}
+        >
+          /
+        </span>
+      )}
+      {/* Unified Slash Command Menu Popover */}
+      <AnimatePresence>
+        {slashState.isOpen && filteredCommands.length > 0 && (
+          <motion.div
+            ref={slashMenuRef}
+            key="slash-menu"
+            initial={{ opacity: 0, scale: 0.95, filter: "blur(4px)" }}
+            animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+            exit={{ opacity: 0, scale: 0.95, filter: "blur(4px)" }}
+            transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: "spring", stiffness: 450, damping: 28 } }}
+            className="fixed z-50"
+            style={{
+              top: `${slashState.y + 10}px`,
+              left: `min(${slashState.x}px, calc(100vw - 232px - 8px))`,
+              transformOrigin: "top left",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-56 max-h-72 overflow-y-auto no-scrollbar">
+              {filteredCommands.map((cmd, index) => {
+                const Icon = cmd.icon;
+                const isActive = index === slashState.activeIndex;
+                return (
+                  <button
+                    key={cmd.id}
+                    className={`w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] transition-colors ${isActive ? "bg-[var(--color-bg-hover)]" : "hover:bg-[var(--color-bg-hover)]"}`}
+                    onClick={() => executeCommand(cmd)}
+                    onMouseEnter={() => setSlashState((prev) => ({ ...prev, activeIndex: index }))}
+                  >
+                    <Icon size={14} className={isActive ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"} />
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-medium leading-tight">{cmd.title}</span>
+                      <span className="text-[11px] text-[var(--color-text-faint)] truncate leading-tight">{cmd.description}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Context Menu for Documents */}
+      <AnimatePresence>
+      {contextMenu && (
+        <motion.div
+          key="doc-ctx"
+          className="words-context-menu fixed z-[60]"
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x + 10}px`, transformOrigin: 'left center' }}
+          initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+          transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 } }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <svg
+            className="absolute pointer-events-none z-10"
+            style={{ top: `${Math.max((contextMenu.tailY ?? 20) - 10, 4)}px`, left: '-9px' }}
+            width="10" height="20" viewBox="0 0 10 20" fill="none"
+          >
+            <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)"/>
+            <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/>
+          </svg>
+          <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-44">
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingDocId(contextMenu.docId);
+              setEditingDocTitle(docs.find(d => d.id === contextMenu.docId)?.title || "");
+              setContextMenu(null);
+            }}
+          >
+            <Pencil size={14} /> Rename
+          </button>
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => { e.stopPropagation(); setActiveDocId(contextMenu.docId); setIsEmojiPickerOpen(true); setContextMenu(null); }}
+          >
+            <Smile size={14} className="flex-shrink-0" /> Change icon
+          </button>
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => { togglePinDoc(e, contextMenu.docId); setContextMenu(null); }}
+          >
+            {docs.find(d => d.id === contextMenu.docId)?.isPinned ? <><PinOff size={14} /> Unpin</> : <><Pin size={14} /> Pin</>}
+          </button>
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={() => toggleLockDoc(contextMenu.docId)}
+          >
+            {docs.find(d => d.id === contextMenu.docId)?.isLocked ? <><Unlock size={14} /> Unlock</> : <><Lock size={14} /> Lock</>}
+          </button>
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={() => handleDuplicateDoc(contextMenu.docId)}
+          >
+            <Copy size={14} /> Duplicate
+          </button>
+          <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => { triggerDeleteAnimation(e, contextMenu.docId); setContextMenu(null); }}
+          >
+            <Trash2 size={14} /> Delete
+          </button>
+          </div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+
+      {/* Group Context Menu (rendered at root to escape sidebar transform/overflow) */}
+      {groupMenuOpen && (() => {
+        const menuGroup = groups.find(g => g.id === groupMenuOpen.id);
+        if (!menuGroup) return null;
+        return (
+          <>
+            <div
+              className="fixed inset-0 z-[59]"
+              onClick={() => setGroupMenuOpen(null)}
+            />
+            <motion.div
+              key="group-ctx"
+              className="words-context-menu fixed bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 z-[60] w-44"
+              style={{ top: groupMenuOpen.y, left: groupMenuOpen.x }}
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 } }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const panelW = 272, panelH = 400;
+                  let x = groupMenuOpen.x + 184;
+                  let y = groupMenuOpen.y;
+                  if (x + panelW > window.innerWidth - 8) x = groupMenuOpen.x - panelW - 8;
+                  x = Math.max(8, x);
+                  if (y + panelH > window.innerHeight - 8) y = Math.max(8, window.innerHeight - panelH - 8);
+                  setGroupMenuOpen(null);
+                  setFolderCustomizeOpen({ id: menuGroup.id, x, y });
+                }}
+              >
+                <Paintbrush size={14} /> Customize
+              </button>
+              <button
+                className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                onClick={(e) => { e.stopPropagation(); setEditingGroupId(menuGroup.id); setGroupMenuOpen(null); }}
+              >
+                <Pencil size={14} /> Rename
+              </button>
+              <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
+              <button
+                className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+                onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(null); deleteGroup(e, menuGroup.id); }}
+              >
+                <FolderMinus size={14} /> Ungroup
+              </button>
+            </motion.div>
+          </>
+        );
+      })()}
+
+      {/* Folder Customize Panel */}
+      {folderCustomizeOpen && (() => {
+        const customizeGroup = groups.find(g => g.id === folderCustomizeOpen.id);
+        if (!customizeGroup) return null;
+        return (
+          <>
+            <div
+              className="fixed inset-0 z-[59]"
+              onClick={() => setFolderCustomizeOpen(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 } }}
+              className="fixed z-[60]"
+              style={{ top: folderCustomizeOpen.y, left: folderCustomizeOpen.x }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <FolderIconPicker
+                currentColor={customizeGroup.color}
+                currentIcon={customizeGroup.icon}
+                onSelectColor={(color) => updateGroup(customizeGroup.id, { color })}
+                onSelectIcon={(iconName) => updateGroup(customizeGroup.id, { icon: iconName, hasCustomIcon: true })}
+                onRemoveIcon={() => updateGroup(customizeGroup.id, { icon: null, hasCustomIcon: false })}
+              />
+            </motion.div>
+          </>
+        );
+      })()}
+
+      {/* Auth Modal */}
+      {authModal && (
+        <>
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] transition-opacity" onClick={() => { setAuthModal(false); setAuthError(''); setAuthPassword(''); }} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[var(--color-bg-primary)] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-6 w-full max-w-[320px] z-[101] border border-[var(--color-border-primary)] animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start mb-6">
+              <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+                Sync with Cloud
+              </h2>
+              <button onClick={() => { setAuthModal(false); setAuthError(''); setAuthPassword(''); }} className="text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)] rounded-md p-1 transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="text-sm text-[var(--color-text-muted)] mb-6 text-center">
+              Back up your documents and access them from anywhere.
+            </p>
+
+            {authError && authModal !== 'email' && (
+              <p className="text-red-500 text-xs text-center mb-4">{authError}</p>
+            )}
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              className="btn-tactile-dark w-full flex items-center justify-center gap-2 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] py-2.5 px-4 rounded-lg mb-4 hover:opacity-90 font-medium text-sm"
+            >
+              <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z" /><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z" /><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z" /><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z" /></svg>
+              Continue with Google
+            </button>
+
+            {authModal === 'email' ? (
+              <form onSubmit={(e) => { e.preventDefault(); handleEmailAuth(); }} className="space-y-3 animate-in fade-in duration-200">
+                <input
+                  type="email"
+                  placeholder="Email address"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-text-primary)] transition-colors"
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-text-primary)] transition-colors"
+                  required
+                />
+                {authError && <p className="text-red-500 text-xs text-center">{authError}</p>}
+                <button
+                  type="submit"
+                  className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] py-2 rounded-lg text-sm font-medium hover:bg-[var(--color-bg-hover)] transition-colors"
+                >
+                  Continue
+                </button>
+              </form>
+            ) : (
+              <button
+                onClick={() => setAuthModal('email')}
+                className="w-full bg-transparent border border-[var(--color-border-primary)] text-[var(--color-text-primary)] py-2.5 px-4 rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors shadow-sm font-medium text-sm"
+              >
+                Continue with Email
+              </button>
+            )}
+
+          </div>
+        </>
+      )}
+
+      {/* Terms of Service Popup */}
+      {termsPopupAction && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200]" />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[201] w-full max-w-[400px] animate-in zoom-in-95 fade-in duration-200">
+            {/* Card — no overflow:hidden so GradualBlur backdrop-filter sees behind the modal (not just card bg) */}
+            <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-[0_24px_60px_rgb(0,0,0,0.28)]">
+
+              {/* Scrollable content — overflow-y-auto + rounded-2xl clips its own corners */}
+              <div
+                className="overflow-y-auto rounded-2xl px-5 pt-5 space-y-4 text-[12.5px] leading-relaxed text-[var(--color-text-muted)]"
+                style={{ maxHeight: '72vh', paddingBottom: '96px' }}
+              >
+                <p className="text-[var(--color-text-primary)] font-medium text-[13px]">
+                  To use Cloud Sync, please review and accept our Terms of Service and Privacy Policy.
+                </p>
+
+                <section>
+                  <h3 className="text-[10.5px] font-semibold uppercase tracking-widest text-[var(--color-text-faint)] mb-2">Terms of Service</h3>
+                  <div className="space-y-2">
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">Your content.</span> You own everything you write. We store it only to power your sync — we never read or use it for any other purpose.</p>
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">Acceptable use.</span> Don't use Words to store illegal content, attempt to breach our systems, or disrupt the service.</p>
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">Service availability.</span> Words is a personal project provided as-is. Features may change or be discontinued — keep local backups of important work.</p>
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">AI features.</span> Gemini-powered features (auto-naming, Buddy) may be inaccurate. Review suggestions before relying on them.</p>
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">Eligibility.</span> You must be at least 13 years old to use Cloud Sync.</p>
+                  </div>
+                </section>
+
+                <div className="border-t border-[var(--color-border-primary)]" />
+
+                <section>
+                  <h3 className="text-[10.5px] font-semibold uppercase tracking-widest text-[var(--color-text-faint)] mb-2">Privacy Policy</h3>
+                  <div className="space-y-2">
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">What we collect.</span> Your email and, if using Google Sign-In, your name and profile picture. Cloud documents are stored in Firebase Firestore.</p>
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">What we don't do.</span> We don't sell your data, run ads, or share it with third parties beyond Firebase for auth and storage.</p>
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">AI &amp; Google Docs.</span> Auto-naming and Buddy send a brief context snippet to Google Gemini only when you invoke them. Google Docs import/export sends content to Google's API on your behalf.</p>
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">Your rights.</span> Delete documents any time. Email <a href="mailto:hi@usewords.app" className="underline text-[var(--color-text-primary)] hover:opacity-70 transition-opacity">hi@usewords.app</a> for full account deletion.</p>
+                  </div>
+                </section>
+
+                <div className="flex gap-3 text-[11px]">
+                  <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-70 transition-opacity">Full Terms</a>
+                  <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:opacity-70 transition-opacity">Full Privacy Policy</a>
+                </div>
+              </div>
+
+              {/* Progressive blur — raised 1rem (= rounded-2xl radius) off the bottom so the blur layers
+                  never reach the corner zone. The gradient overlay covers that bottom band, and its
+                  clip-path keeps the solid bg-primary inside the card's arc so corners stay clean. */}
+              <div className="absolute left-0 right-0 h-24 pointer-events-none z-30" style={{ bottom: '1rem' }}>
+                <GradualBlur position="bottom" height="100%" strength={0.4} divCount={5} zIndex={0} />
+              </div>
+              {/* Gradient overlay — clip-path rounds the bottom corners so bg-primary stays inside the arc */}
+              <div
+                className="absolute bottom-0 left-0 right-0 h-28 pointer-events-none z-[31]"
+                style={{ clipPath: 'inset(0 0 0 0 round 0 0 1rem 1rem)' }}
+              >
+                <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-primary)] to-transparent" />
+              </div>
+
+              {/* Buttons — sibling to blur, z-40, same pattern as sidebar cloud icon */}
+              <div className="absolute bottom-0 left-0 right-0 px-5 pb-4 flex items-center justify-between gap-2 pointer-events-auto z-40">
+                <button
+                  onClick={() => { setTermsPopupAction(null); signOut(auth); }}
+                  className="px-3.5 py-1.5 rounded-lg text-[12.5px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-hover-strong)] active:bg-[var(--color-bg-hover-strong)] transition-all"
+                >
+                  Sign out
+                </button>
+                <button
+                  onClick={handleTermsAccept}
+                  className="btn-tactile-accent px-4 py-1.5 rounded-lg text-[12.5px] font-semibold text-white"
+                >
+                  Accept &amp; Continue
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Sync Suggestion Popup */}
+      {showSyncSuggestion && (
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[200] animate-slide-in-right">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="font-medium text-sm text-[var(--color-text-primary)] flex items-center gap-2">
+              <Cloud size={16} className="text-[var(--color-text-faint)]" /> Back up your data
+            </h3>
+            <button
+              onClick={() => {
+                setShowSyncSuggestion(false);
+                localStorage.setItem('words_dismissed_sync', 'true');
+              }}
+              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <p className="text-xs text-[var(--color-text-muted)] mb-4 leading-relaxed">
+            You've created a few documents! Consider enabling Cloud Sync so you don't lose your work.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setShowSyncSuggestion(false);
+                setAuthModal('login');
+              }}
+              className="btn-tactile-dark flex-1 py-1.5 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] rounded-md text-xs font-medium hover:opacity-90"
+            >
+              Enable Sync
+            </button>
+            <button
+              onClick={() => {
+                setShowSyncSuggestion(false);
+                localStorage.setItem('words_dismissed_sync', 'true');
+              }}
+              className="flex-1 py-1.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-md text-xs font-medium transition-colors"
+            >
+              Later
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Undo Popup */}
+      {deletedDocInfo && (
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
+              <Trash2 size={15} className="text-[var(--color-text-faint)]" />
+              Page Deleted
+            </div>
+            <button
+              onClick={() => { deletedDocInfoRef.current = null; setDeletedDocInfo(null); }}
+              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors rounded p-0.5"
+            >
+              <X size={13} />
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={undoDeleteDoc}
+              className="btn-tactile-dark flex-1 flex items-center justify-center gap-1.5 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] px-3 py-1.5 rounded-lg text-xs font-semibold hover:opacity-80"
+            >
+              <Undo2 size={12} /> Undo
+            </button>
+            <button
+              onClick={() => { deletedDocInfoRef.current = null; setDeletedDocInfo(null); }}
+              className="flex-1 flex items-center justify-center gap-1.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] text-[var(--color-text-muted)] px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+
+      {/* Custom Share UI Popup */}
+      {sharePopupInfo && (
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
+              <Link size={15} className="text-[var(--color-text-faint)]" />
+              Link Copied
+            </div>
+            <button
+              onClick={() => setSharePopupInfo(null)}
+              className="text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] transition-colors rounded p-0.5"
+            >
+              <X size={13} />
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={sharePopupInfo.url.replace(/^https?:\/\//, '')}
+              className="w-full bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] outline-none selection:bg-[var(--color-border-primary)]"
+              onClick={(e) => { e.target.select(); navigator.clipboard.writeText(sharePopupInfo.url); }}
+            />
+            <button
+              onClick={async () => { await navigator.clipboard.writeText(sharePopupInfo.url); }}
+              className="btn-tactile-dark flex-shrink-0 bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] px-3 py-1.5 rounded-lg text-xs font-semibold hover:opacity-80"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Version History Panel */}
+      <AnimatePresence>
+        {historyPanelOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="fixed inset-0 z-[119] print:hidden"
+              onClick={() => setHistoryPanelOpen(false)}
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed top-0 right-0 bottom-0 w-[280px] bg-[var(--color-bg-primary)] border-l border-[var(--color-border-primary)] shadow-2xl z-[120] flex flex-col print:hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--color-border-primary)] flex-shrink-0">
+                <span className="text-[13px] font-semibold text-[var(--color-text-primary)] tracking-[-0.01em]">Version history</span>
+                <button
+                  onClick={() => setHistoryPanelOpen(false)}
+                  className="w-6 h-6 flex items-center justify-center rounded-md text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+
+              {/* List */}
+              <div className="flex-1 overflow-y-auto">
+                {(() => {
+                  const activeDoc = docs.find(d => d.id === activeDocId);
+                  const rawEntries = [...(activeDoc?.editHistory || [])].reverse();
+                  const versionGroups = groupHistoryVersions(rawEntries);
+
+                  if (versionGroups.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+                        <div className="w-9 h-9 rounded-full bg-[var(--color-bg-hover)] flex items-center justify-center mb-1">
+                          <Clock size={16} className="text-[var(--color-text-faint)]" />
+                        </div>
+                        <p className="text-[13px] font-medium text-[var(--color-text-primary)]">No version history yet</p>
+                        <p className="text-[12px] text-[var(--color-text-faint)] leading-relaxed">History saves automatically as you write.</p>
+                      </div>
+                    );
+                  }
+
+                  // Attach prevSnapshot for diff comparison (next group = older version)
+                  versionGroups.forEach((vg, i) => {
+                    const older = versionGroups[i + 1];
+                    vg.prevSnapshot = older ? older.versions[older.versions.length - 1].snapshot : null;
+                  });
+
+                  // Group version groups by calendar day
+                  const dayGroups = [];
+                  const dayMap = {};
+                  versionGroups.forEach(vg => {
+                    const label = historyDayLabel(vg.timestamp);
+                    if (!dayMap[label]) {
+                      dayMap[label] = { label, groups: [] };
+                      dayGroups.push(dayMap[label]);
+                    }
+                    dayMap[label].groups.push(vg);
+                  });
+
+                  const RestoreBtn = ({ onClick }) => (
+                    <button
+                      onClick={onClick}
+                      className="px-2 py-[3px] rounded-md text-[10px] font-semibold bg-[var(--color-text-primary)] text-[var(--color-bg-primary)] hover:opacity-80 transition-opacity whitespace-nowrap opacity-0 group-hover/row:opacity-100"
+                    >
+                      Restore
+                    </button>
+                  );
+
+                  return (
+                    <div className="pb-4">
+                      {dayGroups.map(day => (
+                        <div key={day.label}>
+                          {/* Day header */}
+                          <div className="px-4 pt-5 pb-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-faint)]">
+                              {day.label}
+                            </span>
+                          </div>
+
+                          {/* Version groups */}
+                          <div className="flex flex-col px-2">
+                            {day.groups.map(vg => {
+                              const isExpanded = expandedGroups.has(vg.id);
+                              const hasSubVersions = vg.versions.length > 1;
+
+                              return (
+                                <div key={vg.id}>
+                                  {/* Main group row */}
+                                  <div
+                                    className={`group/row relative flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-colors ${
+                                      vg.isFirst ? 'bg-[var(--color-bg-secondary)]' : 'hover:bg-[var(--color-bg-hover)]'
+                                    } ${hasSubVersions ? 'cursor-pointer' : ''}`}
+                                    onClick={hasSubVersions ? () => setExpandedGroups(prev => { const next = new Set(prev); next.has(vg.id) ? next.delete(vg.id) : next.add(vg.id); return next; }) : undefined}
+                                    onMouseEnter={() => { if (!vg.isFirst) enterHistoryPreview(vg.prevSnapshot?.content || '', vg.versions[0].snapshot.content); }}
+                                    onMouseLeave={exitHistoryPreview}
+                                  >
+                                    {/* Icon */}
+                                    <div className="flex-shrink-0 w-[18px] flex items-center justify-center">
+                                      {vg.type === 'buddy'
+                                        ? <BuddyIcon size={15} />
+                                        : <div className={`w-[7px] h-[7px] rounded-full ${vg.isFirst ? 'bg-[#E8572A]' : 'bg-[var(--color-text-faint)]'}`} />
+                                      }
+                                    </div>
+
+                                    {/* Text */}
+                                    <div className="flex-1 min-w-0">
+                                      <span className="text-[12.5px] font-semibold text-[var(--color-text-primary)] leading-snug block">
+                                        {formatVersionTime(vg.timestamp)}
+                                      </span>
+                                      <span className="text-[11px] text-[var(--color-text-muted)] leading-tight">
+                                        {vg.isFirst ? 'Current version'
+                                          : vg.type === 'buddy' ? 'Buddy edit'
+                                          : vg.type === 'title' ? vg.label
+                                          : hasSubVersions ? `${vg.versions.length} edits`
+                                          : vg.label}
+                                      </span>
+                                    </div>
+
+                                    {/* Right: restore (single) or plain caret (grouped) */}
+                                    <div className="flex-shrink-0">
+                                      {!vg.isFirst && !hasSubVersions && (
+                                        <RestoreBtn onClick={(e) => { e.stopPropagation(); restoreHistorySnapshot(vg.versions[0]); }} />
+                                      )}
+                                      {hasSubVersions && (
+                                        <ChevronDown
+                                          size={15}
+                                          className={`text-[var(--color-text-faint)] group-hover/row:text-[var(--color-text-secondary)] transition-all duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Sub-versions */}
+                                  <AnimatePresence>
+                                    {isExpanded && (
+                                      <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                                        className="overflow-hidden"
+                                      >
+                                        <div className="flex flex-col pl-[29px] pr-2 pb-1">
+                                          {vg.versions.map((version, vi) => {
+                                            const prevContent = vi < vg.versions.length - 1 ? vg.versions[vi + 1].snapshot.content : vg.prevSnapshot?.content || '';
+                                            return (
+                                              <div
+                                                key={version.id}
+                                                className="group/row group/sv relative flex items-center gap-2 px-3 py-[7px] rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors"
+                                                onMouseEnter={() => { if (!(vi === 0 && vg.isFirst)) enterHistoryPreview(prevContent, version.snapshot.content); }}
+                                                onMouseLeave={exitHistoryPreview}
+                                              >
+                                                <div className={`w-[5px] h-[5px] rounded-full flex-shrink-0 ${vi === 0 && vg.isFirst ? 'bg-[#E8572A]' : 'bg-[var(--color-text-faint)] opacity-50'}`} />
+                                                <span className="text-[12px] font-medium text-[var(--color-text-primary)] flex-1">
+                                                  {formatVersionTime(version.timestamp)}
+                                                </span>
+                                                {!(vi === 0 && vg.isFirst) && (
+                                                  <RestoreBtn onClick={() => restoreHistorySnapshot(version)} />
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+
+      {/* Heading Navigator — right-side dock-style TOC */}
+      {activeDoc && !historyPanelOpen && (
+        <HeadingNavigator
+          editorRef={editorRef}
+          scrollRef={contentAreaRef}
+          activeDocId={activeDocId}
+          visible={!lockModal}
+        />
+      )}
+
+      <LayoutGroup id="buddy">
+      {user && !historyPanelOpen && (
+        <BuddyWidget
+          isOpen={buddyState.show}
+          position={{ x: Math.min(Math.max(buddyState.x || window.innerWidth / 2, 0), window.innerWidth - 380), y: Math.max(buddyState.y || 100, 0) + 16 }}
+          onClose={() => setBuddyState(p => ({ ...p, show: false }))}
+          onApplyText={handleBuddyApply}
+          selectedText={buddyState.selectedText}
+          selectedHtml={buddyState.selectedHtml}
+          isCollapsedSelection={buddyState.isCollapsed}
+          fullDocumentText={editorRef.current?.innerHTML || ""}
+          docs={docs}
+          activeDocId={activeDocId}
+          isDumpActive={buddyDumpActive}
+          micError={buddyMicError}
+          onDismissMicError={() => { clearTimeout(buddyMicErrorTimerRef.current); setBuddyMicError(null); }}
+          onLongPress={async () => {
+            if (!user) { setAuthModal('signup'); return; }
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              stream.getTracks().forEach(t => t.stop());
+              setBuddyDumpActive(true);
+            } catch (err) {
+              const name = err?.name ?? '';
+              const kind =
+                name === 'NotFoundError' || name === 'DevicesNotFoundError' ? 'no-mic' :
+                name === 'NotAllowedError' || name === 'PermissionDeniedError' ? 'no-permission' :
+                'error';
+              setBuddyMicError(kind);
+              buddyMicErrorTimerRef.current = setTimeout(() => setBuddyMicError(null), 3000);
+            }
+          }}
+          onGlobalClick={() => {
+            const sel = window.getSelection();
+            let text = sel.toString();
+            let selectedHtml = "";
+            let savedRange = null;
+            let isCollapsed = true;
+
+            if (editorRef.current && editorRef.current.contains(sel.anchorNode) && text.trim().length > 0) {
+               savedRange = sel.getRangeAt(0).cloneRange();
+               isCollapsed = false;
+               // Capture the selection as HTML so AI knows the full structure (headings, bold, etc.)
+               const tmp = document.createElement("div");
+               tmp.appendChild(sel.getRangeAt(0).cloneContents());
+               selectedHtml = tmp.innerHTML;
+            } else {
+               text = "GLOBAL_CHAT";
+            }
+
+            setBuddyState({
+              show: true,
+              x: window.innerWidth - 380 - 45,
+              y: window.innerHeight - 200,
+              savedRange,
+              selectedText: text,
+              selectedHtml,
+              isCollapsed,
+            });
+          }}
+        />
+      )}
+
+      <BuddyDumpMode
+        isActive={buddyDumpActive}
+        onClose={() => {
+          setBuddyDumpActive(false);
+          // Restore tab title and favicon now that Buddy Live is closing
+          const activeDoc = docsRef.current.find(d => d.id === activeDocId);
+          if (activeDoc) {
+            document.title = activeDoc.title || 'New Page';
+            let link = document.querySelector("link[rel~='icon']");
+            if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+            if (activeDoc.emoji) {
+              const canvas = document.createElement('canvas');
+              canvas.width = 64; canvas.height = 64;
+              const ctx = canvas.getContext('2d');
+              ctx.font = '48px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+              ctx.fillText(activeDoc.emoji, 32, 36);
+              link.href = canvas.toDataURL('image/png');
+            } else {
+              link.href = isDark ? '/favicondark.png' : '/faviconlight.png';
+            }
+          }
+        }}
+        onInsert={(html) => {
+          // Use h1 as the document title (it's the semantic title heading Buddy generates).
+          // Fall back to h2 if no h1, then generate an AI title from the plain text.
+          const tmp = document.createElement('div');
+          tmp.innerHTML = html || '';
+          const titleEl = tmp.querySelector('h1') || tmp.querySelector('h2');
+          const rawTitle = titleEl?.textContent?.trim() || '';
+          if (titleEl) titleEl.remove();
+          const content = tmp.innerHTML.trim() || '<p><br></p>';
+          const title = rawTitle || 'Voice Note';
+
+          const newId = Math.random().toString(36).substring(2, 9);
+          const newDoc = {
+            id: newId,
+            title,
+            content,
+            isPinned: false,
+            emoji: getEmojiForTitle(title) || null,
+            hasCustomEmoji: false,
+            groupId: null,
+            textAlign: 'left',
+            hideTitle: false,
+            fullWidth: false,
+            lineSpacing: '1.5',
+          };
+
+          const newDocs = [newDoc, ...docsRef.current];
+          docsRef.current = newDocs;
+          setDocs(newDocs);
+          prevActiveDocIdRef.current = newId;
+          setActiveDocId(newId);
+
+          if (titleRef.current) titleRef.current.textContent = title;
+          if (editorRef.current) editorRef.current.innerHTML = content;
+
+          // Only run AI title generation if no heading was found to use as the title
+          if (!rawTitle) {
+            const plainText = content.replace(/<[^>]+>/g, ' ');
+            generateDocTitle(plainText).then(aiTitle => {
+              if (!aiTitle?.trim()) return;
+              const refined = aiTitle.trim();
+              const autoEmoji = getEmojiForTitle(refined) || newDoc.emoji;
+              setDocs(prev => prev.map(d =>
+                d.id === newId ? { ...d, title: refined, emoji: autoEmoji } : d
+              ));
+              if (titleRef.current && renderedDocIdRef.current === newId) {
+                titleRef.current.textContent = refined;
+              }
+            });
+          }
+        }}
+      />
+      </LayoutGroup>
+
+      {/* Genie delete animation overlay */}
+      <AnimatePresence>
+        {deleteGhost && (
+          <DeleteGhostOverlay
+            key={`ghost-${deleteGhost.id}-${deleteGhost.rect.top}`}
+            ghost={deleteGhost}
+            onComplete={() => setDeleteGhost(null)}
+            impactRef={cloudButtonRef}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
