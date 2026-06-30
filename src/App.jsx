@@ -73,6 +73,7 @@ import { generateFolderName, generateDocTitle } from "./utils/gemini";
 import { exportToGoogleDocs } from "./utils/googleDocs";
 import FolderIconPicker from "./components/FolderIconPicker";
 import { FolderIcon } from "./utils/folderIcons";
+import SpotlightSearch from "./components/SpotlightSearch";
 import { getIconForFolderName } from "./utils/folderIconMap";
 import HeadingNavigator from "./components/HeadingNavigator";
 import BuddyDumpMode from "./components/BuddyDumpMode";
@@ -5344,6 +5345,16 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans selection:bg-[#E8572A33] overflow-hidden relative w-full">
+      {/* Spotlight Search */}
+      <SpotlightSearch
+        isOpen={isSearching}
+        onClose={() => setIsSearching(false)}
+        docs={docs}
+        groups={groups}
+        activeDocId={activeDocId}
+        onOpenDoc={(id) => setActiveDocId(id)}
+        isDark={isDark}
+      />
       {/* Dynamic Editor Typography */}
       <style
         dangerouslySetInnerHTML={{
@@ -6075,6 +6086,7 @@ export default function App() {
             </div>
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setIsSearching(true)}
                 className="p-1 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
                 title="Search"
               >
