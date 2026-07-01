@@ -641,6 +641,8 @@ html[data-reduce-motion="true"] *::after {
 @media (prefers-color-scheme: dark) {
   .goop-static, .goop-animated { color: #ffffff; }
 }
+html[data-theme="dark"] .goop-static,
+html[data-theme="dark"] .goop-animated { color: #ffffff; }
 
 @media (prefers-reduced-motion: reduce) {
   .goop-animated { -webkit-text-stroke-width: 0; }
@@ -652,9 +654,7 @@ html[data-reduce-motion="true"] *::after {
   will-change: -webkit-text-stroke-width;
 }
 
-/* Smooth only the width on hover. The mouse-down white→black swap is driven in
- * JS by collapsing the stroke to zero and re-growing it in the new colour, so
- * the colour must flip instantly (no fade through grey). */
+/* Smooth only the width on hover. */
 .goop-animated.interactive .goop-letter {
   transition: -webkit-text-stroke-width 0.12s ease-out;
 }

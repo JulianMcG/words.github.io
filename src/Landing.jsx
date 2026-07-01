@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, useTransform, useMotionValue, AnimatePresence, animate as animateMV } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Heart } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import GradualBlur from './components/GradualBlur';
 
 /* ─── Tokens ─── */
@@ -170,7 +170,7 @@ const StickyShowcase = () => {
                     <div className="flex-1">
                       <h3
                         className="text-[1.5rem] leading-tight"
-                        style={{ ...serifHead, color: active === i ? 'var(--color-text-primary)' : 'var(--color-text-faint)', transition: 'color 0.45s ease' }}
+                        style={{ ...serifHead, color: active === i ? 'var(--color-text-primary)' : 'var(--color-text-muted)', transition: 'color 0.45s ease' }}
                       >
                         {it.title}
                       </h3>
@@ -183,7 +183,7 @@ const StickyShowcase = () => {
                         }}
                       >
                         <div className="overflow-hidden">
-                          <p className="text-[var(--color-text-muted)] text-[15px] leading-relaxed max-w-sm pt-2 pb-1">{it.body}</p>
+                          <p className="text-[var(--color-text-primary)] text-[15px] leading-relaxed max-w-sm pt-2 pb-1">{it.body}</p>
                         </div>
                       </div>
                     </div>
@@ -199,7 +199,7 @@ const StickyShowcase = () => {
               <div key={i} ref={(el) => { cardRefs.current[i] = el; }}>
                 <div className="lg:hidden mb-4">
                   <h3 className="text-[1.5rem] leading-tight mb-2" style={serifHead}>{it.title}</h3>
-                  <p className="text-[var(--color-text-muted)] text-[15px] leading-relaxed">{it.body}</p>
+                  <p className="text-[var(--color-text-primary)] text-[15px] leading-relaxed">{it.body}</p>
                 </div>
                 <div className="aspect-[4/3] transition-all duration-500" style={{ opacity: active === i ? 1 : 0.5, transform: `scale(${active === i ? 1 : 0.97})` }}>
                   <Preview label={it.previewLabel} instruction={it.previewInstruction} />
@@ -213,13 +213,13 @@ const StickyShowcase = () => {
   );
 };
 
-/* ─── Bento feature cell (larger) ─── */
+/* ─── Bento feature cell ─── */
 const FeatureCell = ({ title, body, previewLabel, previewInstruction, className = '' }) => (
   <Reveal className={className}>
     <div className="h-full rounded-2xl border border-[var(--color-border-primary)] bg-[var(--color-bg-primary)] overflow-hidden flex flex-col hover:border-[var(--color-border-hover)] transition-colors">
       <div className="p-6 pb-3">
         <h3 className="text-[21px] mb-2" style={serifHead}>{title}</h3>
-        <p className="text-[14px] text-[var(--color-text-muted)] leading-relaxed">{body}</p>
+        <p className="text-[14px] text-[var(--color-text-primary)] leading-relaxed">{body}</p>
       </div>
       <div className="flex-1 min-h-[170px] m-4 mt-1">
         <Preview label={previewLabel} instruction={previewInstruction} />
@@ -329,10 +329,10 @@ export default function Landing() {
     return () => window.removeEventListener('scroll', h);
   }, [glowScroll]);
 
-  // ── Goop-in (JS) + cursor bloom; mouse-down flips to a bold black outline ──
+  // ── Goop-in on load; quiet shrinks on hover, loud expands on hover ──
   useEffect(() => {
     let cancelled = false, controls;
-    let moveHandler, leaveHandler, resizeHandler, downHandler, upHandler;
+    let moveHandler, leaveHandler, resizeHandler;
     const words = () => [...document.querySelectorAll('.goop-animated')];
     const setW = (v) => words().forEach(el => { el.style.webkitTextStrokeWidth = `${v}px`; });
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -341,51 +341,43 @@ export default function Landing() {
       if (cancelled) return;
       const letters = [...document.querySelectorAll('.goop-animated .goop-letter')];
       const bg = getComputedStyle(document.documentElement).getPropertyValue('--color-bg-primary').trim() || '#fff';
-      // phase 0 = white inner stroke, phase 1 = bold black outer; the width is
-      // multiplied by |2·phase−1| so it collapses to zero exactly at the swap.
-      let phase = 0;
       let last = null;
-      let phaseAnim = null;
       let rects = [];
 
       const render = () => {
-        const white = phase < 0.5;
-        const mult = Math.abs(phase * 2 - 1);
-        const color = white ? bg : STROKE_DOWN;
-        const maxW = white ? 4.5 : 7;
-        for (const { s, cx, cy } of rects) {
-          s.style.webkitTextStrokeColor = color;
+        for (const { s, cx, cy, isQuiet } of rects) {
+          // quiet → bg stroke (letters shrink/press in); loud → dark stroke (letters expand/pop out)
+          s.style.webkitTextStrokeColor = isQuiet ? bg : STROKE_DOWN;
+          const maxW = isQuiet ? 4.5 : 7;
           if (!last) { s.style.webkitTextStrokeWidth = '0px'; continue; }
           const d = Math.hypot(last.x - cx, last.y - cy);
           const t = Math.max(0, 1 - d / 160);
-          s.style.webkitTextStrokeWidth = `${(t * t * maxW * mult).toFixed(2)}px`;
+          s.style.webkitTextStrokeWidth = `${(t * t * maxW).toFixed(2)}px`;
         }
       };
 
-      const upd = () => { rects = letters.map(s => { const r = s.getBoundingClientRect(); return { s, cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; }); render(); };
+      const upd = () => {
+        rects = letters.map(s => {
+          const r = s.getBoundingClientRect();
+          const isQuiet = s.closest('.goop-word')?.querySelector('.goop-ph')?.textContent?.trim() === 'quiet';
+          return { s, cx: r.left + r.width / 2, cy: r.top + r.height / 2, isQuiet };
+        });
+        render();
+      };
       upd();
       resizeHandler = upd;
       window.addEventListener('resize', resizeHandler);
 
-      const animatePhase = (to) => {
-        phaseAnim?.stop?.();
-        phaseAnim = animateMV(phase, to, { duration: 0.34, ease: EASE, onUpdate: (v) => { phase = v; render(); } });
-      };
-
       moveHandler = (e) => { last = { x: e.clientX, y: e.clientY }; render(); };
       leaveHandler = () => { last = null; render(); };
-      downHandler = () => animatePhase(1);
-      upHandler = () => animatePhase(0);
       document.addEventListener('mousemove', moveHandler);
       document.addEventListener('mouseleave', leaveHandler);
-      document.addEventListener('mousedown', downHandler);
-      document.addEventListener('mouseup', upHandler);
       setGoopDone(true);
     };
 
     const startId = setTimeout(() => {
       if (cancelled) return;
-      setRevealed(true); // reveal button + glow together with the text
+      setRevealed(true);
       if (reduce) { setW(0); enableHover(); return; }
       setW(15);
       controls = animateMV(15, 0, { duration: 0.95, ease: EASE, onUpdate: setW, onComplete: enableHover });
@@ -398,8 +390,6 @@ export default function Landing() {
       if (resizeHandler) window.removeEventListener('resize', resizeHandler);
       if (moveHandler) document.removeEventListener('mousemove', moveHandler);
       if (leaveHandler) document.removeEventListener('mouseleave', leaveHandler);
-      if (downHandler) document.removeEventListener('mousedown', downHandler);
-      if (upHandler) document.removeEventListener('mouseup', upHandler);
     };
   }, []);
 
@@ -523,7 +513,7 @@ export default function Landing() {
       {/* ── Sticky accordion showcase ── */}
       <StickyShowcase />
 
-      {/* ── Feature bento grid (larger) ── */}
+      {/* ── Feature bento grid ── */}
       <section className="relative z-10 bg-[var(--color-bg-primary)] px-6 py-14 sm:py-20">
         <div className="max-w-6xl mx-auto">
           <Reveal>
@@ -533,7 +523,6 @@ export default function Landing() {
               </h2>
             </div>
           </Reveal>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 auto-rows-[300px]">
             <FeatureCell
               className="lg:col-span-2 lg:row-span-2"
@@ -545,7 +534,7 @@ export default function Landing() {
             <FeatureCell
               className="lg:col-span-2"
               title="Organize as loosely as you like"
-              body="Folders, pins, drag-to-reorder. Keep it spotless or let it sprawl — Words won’t nag you either way."
+              body="Folders, pins, drag-to-reorder. Keep it spotless or let it sprawl — Words won't nag you either way."
               previewLabel="Sidebar"
               previewInstruction="Animated preview: dragging notes between folders, pinning one to the top, reordering the list."
             />
@@ -579,17 +568,13 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── Bottom CTA ── */}
-      <section className="relative z-10 bg-[var(--color-bg-primary)] px-6 pt-6 pb-16 sm:pb-20 overflow-hidden">
-        <div aria-hidden="true" className="absolute inset-x-0 bottom-0 h-[420px] pointer-events-none" style={{ background: 'radial-gradient(ellipse at center bottom, rgba(232,87,42,0.18) 0%, transparent 68%)' }} />
+      {/* ── Bottom CTA + Footer (unified) ── */}
+      <footer className="relative z-10 bg-[var(--color-bg-primary)] overflow-hidden">
         <Reveal>
-          <div className="relative max-w-3xl mx-auto text-center">
-            <h2 className="text-[2.4rem] sm:text-[3.4rem] leading-[1.03] mb-4" style={serifHead}>
+          <div className="max-w-4xl mx-auto px-6 pt-16 sm:pt-24 pb-12 text-center">
+            <h2 className="text-[2.4rem] sm:text-[3.4rem] leading-[1.03] mb-8" style={serifHead}>
               Your next thought deserves<br className="hidden sm:inline" /> a good home.
             </h2>
-            <p className="text-[18px] text-[var(--color-text-muted)] mb-10 max-w-lg mx-auto">
-              Words is free, instant, and right there in your browser. No account, no setup — just open it and start.
-            </p>
             <span className="btn-land-wrap">
               <button
                 onClick={() => navigate('/documents')}
@@ -601,25 +586,16 @@ export default function Landing() {
             </span>
           </div>
         </Reveal>
-      </section>
 
-      {/* ── Footer — links row, then a clean full-bleed goopy wordmark ── */}
-      <footer className="relative z-10 bg-[var(--color-bg-primary)] overflow-hidden pt-10">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-8 text-[13px] text-[var(--color-text-faint)]">
-            <div className="flex items-center gap-2.5">
-              <span className="w-5 h-5 flex items-center justify-center">
-                <img src="/logolight.png" alt="" className="w-full h-full object-contain dark:hidden" />
-                <img src="/logodark.png" alt="" className="w-full h-full object-contain hidden dark:block" />
-              </span>
-              <span>© {new Date().getFullYear()} Words</span>
-              <a href="/privacy" className="ml-2 hover:text-[var(--color-text-muted)] transition-colors">Privacy</a>
-              <a href="/terms" className="hover:text-[var(--color-text-muted)] transition-colors">Terms</a>
-            </div>
-            <span className="flex items-center gap-1">Made with <Heart size={12} className="fill-current" /> by Julian M.</span>
+        <div className="max-w-6xl mx-auto px-6 pt-12 pb-5 flex items-center justify-between text-[12px] text-[var(--color-text-faint)]">
+          <div className="flex items-center gap-5">
+            <span>© {new Date().getFullYear()} Words</span>
+            <a href="/privacy" className="hover:text-[var(--color-text-primary)] transition-colors">Privacy</a>
+            <a href="/terms" className="hover:text-[var(--color-text-primary)] transition-colors">Terms</a>
           </div>
+          <span>Julian M.</span>
         </div>
-        {/* full-bleed wordmark, baseline kissing the bottom of the page */}
+
         <div className="flex items-end justify-center -mb-[0.08em]">
           <FooterWordmark />
         </div>

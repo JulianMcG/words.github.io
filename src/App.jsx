@@ -6085,13 +6085,28 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsSearching(true)}
-                className="p-1 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
-                title="Search"
-              >
-                <Search size={18} />
-              </button>
+              <AnimatePresence>
+                {!isSearching && (
+                  <motion.button
+                    layout
+                    layoutId="spotlight-shell"
+                    onClick={() => setIsSearching(true)}
+                    className="text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
+                    title="Search"
+                    style={{ padding: 4, borderRadius: 6, '--lisse-skip': 1 }}
+                    exit={{ transition: { duration: 0.001 } }}
+                    transition={{ layout: { type: 'spring', stiffness: 480, damping: 42, mass: 0.85 } }}
+                  >
+                    <motion.span
+                      layoutId="spotlight-icon"
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      transition={{ layout: { type: 'spring', stiffness: 480, damping: 42, mass: 0.85 } }}
+                    >
+                      <Search size={18} />
+                    </motion.span>
+                  </motion.button>
+                )}
+              </AnimatePresence>
               <button
                 onClick={() => {
                   if (isSidebarPeeking) {
