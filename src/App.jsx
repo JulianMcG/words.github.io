@@ -4220,7 +4220,7 @@ export default function App() {
   const RESIZE_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><line x1="3" y1="13.5" x2="13.5" y2="3" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="8.5" y1="13.5" x2="13.5" y2="8.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>`;
   const DELETE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
   const createImgWrapperHTML = (src) => {
-    return `<div class="image-outer" contenteditable="false" style="display:block;width:320px;margin:0.75em 0;position:relative;"><div class="image-wrapper"><img src="${src}" style="width:100%;height:auto;display:block;pointer-events:none;" /></div><button class="image-delete-btn" contenteditable="false" title="Delete image">${DELETE_SVG}</button><div class="image-resize-handle" contenteditable="false">${RESIZE_SVG}</div></div>&nbsp;`;
+    return `<div class="image-outer" contenteditable="false" style="display:block;width:320px;margin:0.75em 0;position:relative;"><div class="image-wrapper border-shape-squircle"><img src="${src}" style="width:100%;height:auto;display:block;pointer-events:none;" /></div><button class="image-delete-btn" contenteditable="false" title="Delete image">${DELETE_SVG}</button><div class="image-resize-handle" contenteditable="false">${RESIZE_SVG}</div></div>&nbsp;`;
   };
 
   const insertImageFile = (file, targetNodeToReplace = null) => {
@@ -7825,7 +7825,7 @@ export default function App() {
       {authModal && (
         <>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] transition-opacity" onClick={() => { setAuthModal(false); setAuthError(''); setAuthPassword(''); }} />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[var(--color-bg-primary)] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-6 w-full max-w-[320px] z-[101] border border-[var(--color-border-primary)] animate-in zoom-in-95 duration-200">
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[var(--color-bg-primary)] rounded-xl p-6 w-full max-w-[320px] z-[101] border border-[var(--color-border-primary)] animate-in zoom-in-95 duration-200" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
             <div className="flex justify-between items-start mb-6">
               <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
                 Sync with Cloud
@@ -7897,7 +7897,7 @@ export default function App() {
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200]" />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[201] w-full max-w-[400px] animate-in zoom-in-95 fade-in duration-200">
             {/* Card — no overflow:hidden so GradualBlur backdrop-filter sees behind the modal (not just card bg) */}
-            <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-[0_24px_60px_rgb(0,0,0,0.28)]">
+            <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl" style={{ filter: 'drop-shadow(0 24px 60px rgba(0,0,0,0.28))' }}>
 
               {/* Scrollable content — overflow-y-auto + rounded-2xl clips its own corners */}
               <div
@@ -7974,7 +7974,7 @@ export default function App() {
 
       {/* Sync Suggestion Popup */}
       {showSyncSuggestion && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-80 z-[200] animate-slide-in-right">
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl p-4 w-80 z-[200] animate-slide-in-right" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-medium text-sm text-[var(--color-text-primary)] flex items-center gap-2">
               <Cloud size={16} className="text-[var(--color-text-faint)]" /> Back up your data
@@ -8017,7 +8017,7 @@ export default function App() {
 
       {/* Delete Undo Popup */}
       {deletedDocInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3">
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
               <Trash2 size={15} className="text-[var(--color-text-faint)]" />
@@ -8050,7 +8050,7 @@ export default function App() {
 
       {/* Custom Share UI Popup */}
       {sharePopupInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3">
+        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
               <Link size={15} className="text-[var(--color-text-faint)]" />

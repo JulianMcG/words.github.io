@@ -5,6 +5,7 @@ import { motion, AnimatePresence, useMotionValue, useSpring, animate } from 'fra
 import { Search, X, Check, ListFilter } from 'lucide-react';
 import { FolderIcon } from '../utils/folderIcons';
 import GradualBlur from './GradualBlur';
+import { generateClipPath } from '@lisse/core';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 function DocPageIcon({ size = 14, className = '' }) {
@@ -111,8 +112,8 @@ const PaperCard = memo(function PaperCard({ doc, group, onOpen, isDark }) {
   const staticTilt = getTilt(doc.id);
   const lines = useMemo(() => getDocLines(doc.content), [doc.content]);
 
-  const paperBg     = isDark ? '#2a2a2a' : '#ffffff';
-  const shadowRest  = isDark
+  const paperBg    = isDark ? '#2a2a2a' : '#ffffff';
+  const shadowRest = isDark
     ? '0 1px 3px rgba(0,0,0,0.55), 0 4px 12px rgba(0,0,0,0.32)'
     : '0 1px 2px rgba(0,0,0,0.09), 0 3px 10px rgba(0,0,0,0.07)';
   const shadowHover = isDark
@@ -158,11 +159,11 @@ const PaperCard = memo(function PaperCard({ doc, group, onOpen, isDark }) {
           transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
           style={{
             width: 112, height: 150,
+            borderRadius: 3,
             rotate: staticTilt,
             rotateX: springX,
             rotateY: springY,
             transformPerspective: 800,
-            borderRadius: 3,
             backgroundColor: paperBg,
             overflow: 'hidden',
             flexShrink: 0,
@@ -224,7 +225,7 @@ const PaperCard = memo(function PaperCard({ doc, group, onOpen, isDark }) {
           <FolderIcon name={group.icon} size={9} color={group.color || 'var(--color-icon-muted)'} style={{ flexShrink: 0 }} />
         )}
         {group && !group.icon && group.color && (
-          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: 2, backgroundColor: group.color, flexShrink: 0 }} />
+          <span className="rounded-[2px]" style={{ display: 'inline-block', width: 6, height: 6, backgroundColor: group.color, flexShrink: 0 }} />
         )}
       </div>
     </div>
@@ -265,6 +266,7 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
   const sortRef        = useRef(null);
   const scrollRef      = useRef(null);
   const filteredDocRef = useRef([]);
+  const shellRef       = useRef(null);
 
   useLayoutEffect(() => {
     if (!mirrorRef.current || !inputRef.current) return;
@@ -357,6 +359,39 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
     requestAnimationFrame(checkScroll);
   }, [filteredDocs, checkScroll]);
 
+  // Apply squircle to spotlight shell manually so it's stable regardless of
+  // Framer Motion's layoutId transform state or browser zoom.
+  useEffect(() => {
+    const el = shellRef.current;
+    if (!el || !isOpen) return;
+
+    const applySquircle = () => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      if (w > 0 && h > 0) {
+        el.style.clipPath = generateClipPath(w, h, { radius: 18, smoothing: 0.6 });
+      }
+    };
+
+    // Apply after the layoutId spring animation settles (~350ms for stiffness:440)
+    const timer = setTimeout(applySquircle, 380);
+
+    // Recompute on resize (e.g. browser zoom changes 80vh height)
+    let rafId;
+    const obs = new ResizeObserver(() => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(applySquircle);
+    });
+    obs.observe(el);
+
+    return () => {
+      clearTimeout(timer);
+      cancelAnimationFrame(rafId);
+      obs.disconnect();
+      if (el) el.style.clipPath = '';
+    };
+  }, [isOpen]);
+
   const handleOpen  = useCallback((id) => { onOpenDoc(id); onClose(); }, [onOpenDoc, onClose]);
   const topDoc      = filteredDocs[0] || null;
   const currentSort = SORT_OPTIONS.find((o) => o.id === sortBy);
@@ -384,21 +419,25 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
               style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.24)' }}
             />
 
+            {/* Shadow wrapper: drop-shadow here so it renders around the squircle shell below, avoiding any clip-path recalc artifacts on zoom */}
+            <div style={{
+              position: 'relative', width: '100%', maxWidth: 740,
+              filter: isDark
+                ? 'drop-shadow(0 10px 36px rgba(0,0,0,0.58)) drop-shadow(0 2px 8px rgba(0,0,0,0.32))'
+                : 'drop-shadow(0 10px 36px rgba(0,0,0,0.13)) drop-shadow(0 2px 8px rgba(0,0,0,0.07))',
+            }}>
             {/* Shell: pure layoutId morph from button — no layout prop to avoid conflicts */}
             <motion.div
+              ref={shellRef}
               layoutId="spotlight-shell"
               exit={{ transition: { duration: 0.001 } }}
               transition={{ layout: { type: 'spring', stiffness: 440, damping: 34, mass: 0.85 } }}
               style={{
-                position: 'relative', width: '100%', maxWidth: 740, maxHeight: '80vh',
+                width: '100%', maxHeight: '80vh',
                 borderRadius: 18,
                 backgroundColor: 'var(--color-bg-secondary)',
                 border: '1px solid var(--color-border-primary)',
-                boxShadow: isDark
-                  ? '0 10px 36px rgba(0,0,0,0.58), 0 2px 8px rgba(0,0,0,0.32)'
-                  : '0 10px 36px rgba(0,0,0,0.13), 0 2px 8px rgba(0,0,0,0.07)',
                 display: 'flex', flexDirection: 'column', overflow: 'hidden',
-                '--lisse-skip': 1,
               }}
             >
                 {/* ── Search row ── */}
@@ -481,15 +520,21 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.94, y: -4 }}
                             transition={{ duration: 0.12, ease: [0.25, 0.46, 0.45, 0.94] }}
-                            className="rounded-[10px]"
                             style={{
                               position: 'absolute', right: 0, top: 'calc(100% + 10px)',
-                              backgroundColor: 'var(--color-bg-primary)',
-                              border: '1px solid var(--color-border-primary)',
-                              boxShadow: isDark ? '0 4px 20px rgba(0,0,0,0.50)' : '0 4px 20px rgba(0,0,0,0.12)',
-                              padding: 4, minWidth: 158, zIndex: 9999,
+                              zIndex: 9999,
+                              filter: isDark ? 'drop-shadow(0 4px 20px rgba(0,0,0,0.50))' : 'drop-shadow(0 4px 20px rgba(0,0,0,0.12))',
                             }}
                           >
+                            <div
+                              className="rounded-[10px]"
+                              style={{
+                                position: 'relative',
+                                backgroundColor: 'var(--color-bg-primary)',
+                                border: '1px solid var(--color-border-primary)',
+                                padding: 4, minWidth: 158,
+                              }}
+                            >
                             <div style={{ position: 'absolute', bottom: '100%', right: 9, width: 0, height: 0, borderLeft: '7px solid transparent', borderRight: '7px solid transparent', borderBottom: `7px solid var(--color-border-primary)` }} />
                             <div style={{ position: 'absolute', bottom: 'calc(100% - 1px)', right: 10, width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderBottom: `6px solid var(--color-bg-primary)` }} />
                             {SORT_OPTIONS.map((opt) => (
@@ -508,6 +553,7 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
                                 {sortBy === opt.id && <Check size={12} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />}
                               </button>
                             ))}
+                            </div>
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -560,6 +606,7 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
                   <FadeEdge position="bottom" visible={hasScrollBelow} height={60} />
                 </motion.div>
             </motion.div>
+            </div>{/* end shadow wrapper */}
           </div>
         )}
       </AnimatePresence>

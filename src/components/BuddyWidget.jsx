@@ -582,7 +582,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           type: "spring", stiffness: 350, damping: 25, mass: 0.5,
         }}
         className={`fixed z-[100] transition-colors duration-200 print:hidden border-shape-squircle ${
-          isOpen ? 'bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl overflow-hidden pointer-events-auto flex flex-col' : 'bg-transparent overflow-visible pointer-events-none'
+          isOpen ? 'shadow-2xl bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden pointer-events-auto flex flex-col' : 'bg-transparent overflow-visible pointer-events-none'
         }`}
         style={{
           '--r': isOpen ? '12px' : '24px',
