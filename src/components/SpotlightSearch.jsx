@@ -156,6 +156,7 @@ const PaperCard = memo(function PaperCard({ doc, group, onOpen, isDark }) {
       }}>
         <motion.div
           animate={{ y: isHovered ? -8 : 0, boxShadow: isHovered ? shadowHover : shadowRest }}
+          whileTap={{ scale: 0.93, y: 0, boxShadow: shadowRest }}
           transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
           style={{
             width: 112, height: 150,
@@ -286,6 +287,8 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
     }
   }, [isOpen]);
 
+  const handleOpen = useCallback((id) => { onOpenDoc(id); onClose(); }, [onOpenDoc, onClose]);
+
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e) => {
@@ -300,7 +303,7 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose, sortMenuOpen]);
+  }, [isOpen, onClose, sortMenuOpen, handleOpen]);
 
   useEffect(() => {
     if (!sortMenuOpen) return;
@@ -331,29 +334,36 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
 
   const docTextMap = useMemo(() => {
     const m = new Map();
+    // Parsing every doc's HTML is costly — skip it entirely while closed
+    // (docs update on each editor keystroke and would recompute this map).
+    if (!isOpen) return m;
     (docs || []).forEach(d => m.set(d.id, stripHtml(d.content || '').toLowerCase()));
     return m;
-  }, [docs]);
+  }, [docs, isOpen]);
 
   const filteredDocs = useMemo(() => {
+    if (!isOpen) return [];
     const q = query.toLowerCase().trim();
     let result = (docs || []).filter((d) => {
       if (!q) return true;
       if ((d.title || '').toLowerCase().includes(q)) return true;
       return (docTextMap.get(d.id) || '').includes(q);
     });
+    const createdTime = (d) => (d.createdAt ? new Date(d.createdAt).getTime() : 0);
     if (sortBy === 'name') {
       result = [...result].sort((a, b) => (a.title || 'Untitled').localeCompare(b.title || 'Untitled'));
     } else if (sortBy === 'created') {
-      result = [...result].sort((a, b) => {
-        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return tb - ta;
-      });
+      result = [...result].sort((a, b) => createdTime(b) - createdTime(a));
+    } else if (sortBy === 'modified') {
+      result = [...result].sort((a, b) => (b.updatedAt || createdTime(b)) - (a.updatedAt || createdTime(a)));
     }
-    filteredDocRef.current = result;
     return result;
-  }, [docs, query, sortBy, docTextMap]);
+  }, [docs, query, sortBy, docTextMap, isOpen]);
+
+  // Keep the ref the global Enter handler reads in sync (outside render)
+  useEffect(() => {
+    filteredDocRef.current = filteredDocs;
+  }, [filteredDocs]);
 
   useEffect(() => {
     requestAnimationFrame(checkScroll);
@@ -392,7 +402,6 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
     };
   }, [isOpen]);
 
-  const handleOpen  = useCallback((id) => { onOpenDoc(id); onClose(); }, [onOpenDoc, onClose]);
   const topDoc      = filteredDocs[0] || null;
   const currentSort = SORT_OPTIONS.find((o) => o.id === sortBy);
 
@@ -431,7 +440,7 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
               ref={shellRef}
               layoutId="spotlight-shell"
               exit={{ transition: { duration: 0.001 } }}
-              transition={{ layout: { type: 'spring', stiffness: 440, damping: 34, mass: 0.85 } }}
+              transition={{ layout: { type: 'spring', stiffness: 440, damping: 32, mass: 0.85 } }}
               style={{
                 width: '100%', maxHeight: '80vh',
                 borderRadius: 18,
@@ -449,7 +458,7 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
                   <motion.span
                     layoutId="spotlight-icon"
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--color-text-muted)' }}
-                    transition={{ layout: { type: 'spring', stiffness: 480, damping: 42, mass: 0.85 } }}
+                    transition={{ layout: { type: 'spring', stiffness: 480, damping: 38, mass: 0.85 } }}
                   >
                     <Search size={18} />
                   </motion.span>

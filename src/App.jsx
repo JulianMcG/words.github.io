@@ -515,6 +515,8 @@ const escapeHtml = (text = "") => {
   return div.innerHTML;
 };
 
+const escapeAttr = (text = "") => escapeHtml(text).replace(/"/g, "&quot;");
+
 const normalizeColorToken = (value = "") => value.toLowerCase().replace(/\s+/g, "");
 
 const getNativeHighlightColor = (value = "") => {
@@ -1082,7 +1084,15 @@ export default function App() {
   const pendingNewDocRef = useRef(location.state?.createNew === true);
   const pendingOpenLiveRef = useRef(new URLSearchParams(window.location.search).get('openLive') === '1');
   const sidebarScrollRef = useRef(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  // Below this width the sidebar behaves as a temporary overlay drawer
+  // (auto-hidden, no content push) instead of the desktop pinned rail.
+  const NARROW_VIEWPORT_BREAKPOINT = 768;
+  const [isNarrowViewport, setIsNarrowViewport] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < NARROW_VIEWPORT_BREAKPOINT
+  );
+  const [isSidebarOpen, setIsSidebarOpen] = useState(
+    () => !(typeof window !== "undefined" && window.innerWidth < NARROW_VIEWPORT_BREAKPOINT)
+  );
   const [isSidebarPeeking, setIsSidebarPeeking] = useState(false);
   const SIDEBAR_MIN = 180;
   const SIDEBAR_DEFAULT = 256;
@@ -1102,6 +1112,23 @@ export default function App() {
   const squishOpacity = useTransform(displaySquish, v => Math.min(1, v * 13));
   const isResizingRef = useRef(false);
   const resizeDragRef = useRef({ startX: 0, startWidth: 0 });
+
+  // Track the narrow/mobile breakpoint and auto-hide the pinned sidebar the
+  // moment the viewport crosses into it. Widening back never forces it back
+  // open — desktop behavior (pinned or peek-on-hover) is untouched.
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${NARROW_VIEWPORT_BREAKPOINT - 1}px)`);
+    const handleChange = (e) => setIsNarrowViewport(e.matches);
+    mq.addEventListener('change', handleChange);
+    return () => mq.removeEventListener('change', handleChange);
+  }, []);
+
+  useEffect(() => {
+    if (isNarrowViewport) {
+      setIsSidebarOpen(false);
+      setIsSidebarPeeking(false);
+    }
+  }, [isNarrowViewport]);
   const [resizeCursorActive, setResizeCursorActive] = useState(false);
   const resizeCursorTimerRef = useRef(null);
   const contentAreaRef = useRef(null);
@@ -1457,8 +1484,21 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key === 'Alt') setIsAltHeld(true);
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'z' && deletedDocInfoRef.current) {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && deletedDocInfoRef.current) {
+        // Claim the shortcut — otherwise the editor's native undo also fires
+        e.preventDefault();
         undoDeleteDoc();
+      }
+      // Cmd/Ctrl+K — open spotlight search
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearching(true);
+      }
+      // Option+Space (mac) / Alt+Space (win/linux) — open spotlight search.
+      // Browsers report Option as e.altKey too, so one check covers both.
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.code === 'Space') {
+        e.preventDefault();
+        setIsSearching(true);
       }
     };
     const onKeyUp = (e) => { if (e.key === 'Alt') setIsAltHeld(false); };
@@ -2987,7 +3027,7 @@ export default function App() {
 
     // Instantly sync the text typed to the document state
     setDocs((prev) =>
-      prev.map((d) => (d.id === activeDocId ? { ...d, title: newTitle } : d))
+      prev.map((d) => (d.id === activeDocId ? { ...d, title: newTitle, updatedAt: Date.now() } : d))
     );
 
     // Clear any existing timeout since the user is still actively typing
@@ -3042,7 +3082,7 @@ export default function App() {
         return prev;
       }
       const updatedDocs = prev.map((d) =>
-        d.id === activeDocId ? { ...d, content: newContent } : d,
+        d.id === activeDocId ? { ...d, content: newContent, updatedAt: Date.now() } : d,
       );
       docsRef.current = updatedDocs;
       return updatedDocs;
@@ -3177,7 +3217,13 @@ export default function App() {
     if (!selection || !selection.focusNode) return;
 
     const node = selection.focusNode;
-    const text = node.textContent.substring(0, selection.focusOffset);
+    // Offsets below index into text content — on an element node focusOffset is
+    // a child index, so the slash/URL/math range math would be wrong or throw.
+    // Treat element focus as empty text: no triggers match, and an open slash
+    // menu still falls through to the close branch at the bottom.
+    const text = node.nodeType === Node.TEXT_NODE
+      ? node.textContent.substring(0, selection.focusOffset)
+      : "";
 
     // Sentence-end detection: tighter 2s snapshot on sentence boundary
     if (/[.!?]\s$/.test(text)) {
@@ -3199,8 +3245,10 @@ export default function App() {
         try {
           const sanitized = eq.replace(/\^/g, "**").replace(/[\u00A0]/g, " ");
           if (/^[\d\.\+\-\*\/\^\(\)\s\*\*]+$/.test(sanitized)) {
-            const ans = new Function("return " + sanitized)();
-            if (isFinite(ans)) {
+            let ans = new Function("return " + sanitized)();
+            if (typeof ans === "number" && isFinite(ans)) {
+              // Trim float artifacts: 0.1+0.2 should preview 0.3, not 0.30000000000000004
+              ans = parseFloat(ans.toPrecision(12));
               isInternalEdit.current = true;
 
               const sel = window.getSelection();
@@ -3259,16 +3307,18 @@ export default function App() {
         if (!el) return;
 
         if (preview) {
+          const safeUrl = escapeAttr(sanitizeHref(preview.url) || url);
+          const safeImage = escapeAttr(sanitizeHref(preview.image));
           el.outerHTML = `
             <div class="link-preview-outer" contenteditable="false" id="${placeholderId}-resolved">
-              <a href="${preview.url}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
-                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" onerror="this.onerror=null; this.style.display='none';"/>` : ''}
+              <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
+                ${safeImage ? `<img src="${safeImage}" class="link-preview-image" alt="Preview" onerror="this.onerror=null; this.style.display='none';"/>` : ''}
                 <div class="link-preview-content">
-                  <div class="link-preview-title">${preview.title}</div>
-                  <div class="link-preview-domain">${preview.domain}</div>
+                  <div class="link-preview-title">${escapeHtml(preview.title)}</div>
+                  <div class="link-preview-domain">${escapeHtml(preview.domain)}</div>
                 </div>
               </a>
-              <button class="link-remove-btn" title="Convert to plain link" data-url="${preview.url}">
+              <button class="link-remove-btn" title="Convert to plain link" data-url="${safeUrl}">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
@@ -3351,6 +3401,9 @@ export default function App() {
 
   const createNewDoc = (e, targetGroupId = null) => {
     if (e) e.stopPropagation();
+    // On the mobile overlay drawer, creating a doc should close it like
+    // selecting one does — it's meant to be temporary.
+    if (isNarrowViewport) setIsSidebarPeeking(false);
     // Flush current doc before creating new one
     flushCurrentDoc();
     const newId = Math.random().toString(36).substring(2, 9);
@@ -3366,6 +3419,7 @@ export default function App() {
       hideTitle: false,
       fullWidth: false,
       lineSpacing: "1.5",
+      createdAt: new Date().toISOString(),
     };
 
     const newDocs = [newDoc, ...docsRef.current];
@@ -3477,6 +3531,7 @@ export default function App() {
           emoji: null,
           hasCustomEmoji: false,
           groupId: null,
+          createdAt: new Date().toISOString(),
         };
         setActiveDocId("1");
         if (titleRef.current) titleRef.current.textContent = "";
@@ -3635,7 +3690,8 @@ export default function App() {
             }, 200);
           }
         }
-        return { ...d, title: newTitle, emoji: nextEmoji };
+        const changed = d.title !== newTitle || d.emoji !== nextEmoji;
+        return changed ? { ...d, title: newTitle, emoji: nextEmoji, updatedAt: Date.now() } : d;
       });
       docsRef.current = updated;
       return updated;
@@ -4018,16 +4074,20 @@ export default function App() {
     const range = selection.getRangeAt(0);
     const node = selection.focusNode;
 
-    const text = node.textContent.substring(0, selection.focusOffset);
-    const match = text.match(/(?:^|\s)(\/)([^/\s]*)$/);
+    // Offsets below index into text content, so only a text node can host the
+    // "/query" trigger — on an element node setStart would throw.
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent.substring(0, selection.focusOffset);
+      const match = text.match(/(?:^|\s)(\/)([^/\s]*)$/);
 
-    if (match) {
-      const triggerIndex = text.lastIndexOf(match[1]);
-      range.setStart(node, triggerIndex);
-      range.setEnd(node, selection.focusOffset);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.execCommand("delete", false, null);
+      if (match) {
+        const triggerIndex = text.lastIndexOf(match[1]);
+        range.setStart(node, triggerIndex);
+        range.setEnd(node, selection.focusOffset);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.execCommand("delete", false, null);
+      }
     }
 
     if (command.type === "buddy") {
@@ -4492,16 +4552,18 @@ export default function App() {
         if (!el) return;
 
         if (preview) {
+          const safeUrl = escapeAttr(sanitizeHref(preview.url) || url);
+          const safeImage = escapeAttr(sanitizeHref(preview.image));
           el.outerHTML = `
             <div class="link-preview-outer" contenteditable="false" id="${placeholderId}-resolved">
-              <a href="${preview.url}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
-                ${preview.image ? `<img src="${preview.image}" class="link-preview-image" alt="Preview" onerror="this.onerror=null; this.style.display='none';" />` : ''}
+              <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
+                ${safeImage ? `<img src="${safeImage}" class="link-preview-image" alt="Preview" onerror="this.onerror=null; this.style.display='none';" />` : ''}
                 <div class="link-preview-content">
-                  <div class="link-preview-title">${preview.title}</div>
-                  <div class="link-preview-domain">${preview.domain}</div>
+                  <div class="link-preview-title">${escapeHtml(preview.title)}</div>
+                  <div class="link-preview-domain">${escapeHtml(preview.domain)}</div>
                 </div>
               </a>
-              <button class="link-remove-btn" contenteditable="false" title="Convert to plain link" data-url="${preview.url}">
+              <button class="link-remove-btn" contenteditable="false" title="Convert to plain link" data-url="${safeUrl}">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
@@ -4566,6 +4628,19 @@ export default function App() {
     const fragment = range.cloneContents();
     const div = document.createElement('div');
     div.appendChild(fragment);
+    // A drag spanning list items clones bare <li>s — the list wrapper is the
+    // range's common ancestor, so cloneContents omits it. Re-wrap so the drop
+    // inserts a valid list and checklist styling survives the move.
+    if (Array.from(div.children).some((c) => c.tagName === 'LI')) {
+      const anc = range.commonAncestorContainer;
+      const sourceList = (anc.nodeType === 3 ? anc.parentElement : anc)?.closest('ul, ol');
+      if (sourceList) {
+        const wrapper = document.createElement(sourceList.tagName.toLowerCase());
+        if (sourceList.classList.contains('checklist')) wrapper.classList.add('checklist');
+        while (div.firstChild) wrapper.appendChild(div.firstChild);
+        div.appendChild(wrapper);
+      }
+    }
     draggedTextHtmlRef.current = div.innerHTML;
     dragSourceRangeRef.current = range.cloneRange();
     isInternalTextDragRef.current = true;
@@ -4598,6 +4673,13 @@ export default function App() {
       const html = draggedTextHtmlRef.current;
       const sel = window.getSelection();
 
+      // Record blocks the source range touches — items fully consumed by the
+      // move leave empty shells (<li><br></li>, <p><br></p>) behind.
+      const sourceNodes = [];
+      editorRef.current?.querySelectorAll('li, p, h1, h2, h3, blockquote').forEach((n) => {
+        try { if (sourceRange.intersectsNode(n)) sourceNodes.push(n); } catch (_) { /* detached */ }
+      });
+
       // Is the drop point after the source?
       const dropIsAfter = sourceRange.compareBoundaryPoints(Range.END_TO_START, dropRange) < 0;
 
@@ -4610,10 +4692,15 @@ export default function App() {
         insertRange.collapse(true);
         sel.addRange(insertRange);
         document.execCommand('insertHTML', false, html);
+        // Ranges are live, so this boundary survives the source deletion below
+        const landed = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
         // Now delete source content
         sel.removeAllRanges();
         sel.addRange(sourceRange);
         document.execCommand('insertHTML', false, '');
+        if (landed) {
+          try { sel.removeAllRanges(); sel.addRange(landed); } catch (_) { /* collapsed away */ }
+        }
       } else {
         // Delete source first, then re-resolve drop position and insert
         sel.removeAllRanges();
@@ -4625,6 +4712,22 @@ export default function App() {
         insertRange.collapse(true);
         sel.addRange(insertRange);
         document.execCommand('insertHTML', false, html);
+      }
+
+      // Remove source blocks the move emptied out (a partially dragged block
+      // keeps its remaining text and is left alone). Lists with no items left
+      // are removed with them.
+      sourceNodes.forEach((n) => {
+        if (!n.isConnected || n.textContent.trim()) return;
+        if (n.querySelector('img, table, input, .link-preview-outer, .divider-block')) return;
+        // Never remove the block the caret landed in after the drop
+        if (sel.rangeCount && n.contains(sel.getRangeAt(0).startContainer)) return;
+        const list = n.tagName === 'LI' ? n.closest('ul, ol') : null;
+        n.remove();
+        if (list && !list.querySelector('li')) list.remove();
+      });
+      if (editorRef.current && !editorRef.current.firstElementChild) {
+        editorRef.current.innerHTML = '<p><br></p>';
       }
 
       syncContentToState();
@@ -4823,7 +4926,9 @@ export default function App() {
       }
 
       // --- 2. Slash Commands Menu Navigation ---
-      if (slashState.isOpen) {
+      // When the query matches nothing the menu is hidden, so typing keys
+      // (Enter, arrows) must fall through to normal editing.
+      if (slashState.isOpen && filteredCommands.length > 0) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
           setSlashState((prev) => ({
@@ -4908,11 +5013,13 @@ export default function App() {
       }
 
       // --- Heading & Block Format Shortcuts (Cmd/Ctrl+Alt+0–6) ---
+      // Match on e.code: with Option/Alt held, e.key reports the alt character
+      // ('¡', '™', …) on macOS, so digit keys would never match.
       if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey) {
-        const headingMap = { '0': 'P', '1': 'H1', '2': 'H2', '3': 'H3', '4': 'H4', '5': 'H5', '6': 'H6' };
-        if (headingMap[e.key] !== undefined) {
+        const headingMap = { Digit0: 'P', Digit1: 'H1', Digit2: 'H2', Digit3: 'H3', Digit4: 'H4', Digit5: 'H5', Digit6: 'H6' };
+        if (headingMap[e.code] !== undefined) {
           e.preventDefault();
-          document.execCommand('formatBlock', false, headingMap[e.key]);
+          document.execCommand('formatBlock', false, headingMap[e.code]);
           syncContentToState();
           return;
         }
@@ -4954,22 +5061,24 @@ export default function App() {
           syncContentToState();
           return;
         }
+        // Match on e.code: with Shift held, e.key reports the shifted character
+        // ('&', '*', '('), so comparing against '7'/'8'/'9' would never fire.
         // Cmd+Shift+7 — Ordered list
-        if (e.key === '7') {
+        if (e.code === 'Digit7') {
           e.preventDefault();
           document.execCommand('insertOrderedList', false, null);
           syncContentToState();
           return;
         }
         // Cmd+Shift+8 — Unordered list
-        if (e.key === '8') {
+        if (e.code === 'Digit8') {
           e.preventDefault();
           document.execCommand('insertUnorderedList', false, null);
           syncContentToState();
           return;
         }
         // Cmd+Shift+9 — Blockquote
-        if (e.key === '9') {
+        if (e.code === 'Digit9') {
           e.preventDefault();
           document.execCommand('formatBlock', false, 'BLOCKQUOTE');
           syncContentToState();
@@ -4996,7 +5105,8 @@ export default function App() {
       const selection = window.getSelection();
 
       if (e.key === " " || e.key === "Enter") {
-        if (selection && selection.focusNode) {
+        // Text nodes only: the range math below indexes into character offsets
+        if (selection && selection.focusNode && selection.focusNode.nodeType === Node.TEXT_NODE) {
           const focusNode = selection.focusNode;
           const text = focusNode.textContent.substring(
             0,
@@ -5069,10 +5179,13 @@ export default function App() {
       }
 
       if (e.key === "Tab") {
-        e.preventDefault();
-        const isList = selection && selection.focusNode && 
+        const isList = selection && selection.focusNode &&
           (selection.focusNode.nodeType === 3 ? selection.focusNode.parentElement : selection.focusNode).closest('li');
-        
+
+        // Shift+Tab outside a list has no editing action — let focus move natively
+        if (!isList && e.shiftKey) return;
+        e.preventDefault();
+
         if (isList) {
           document.execCommand(e.shiftKey ? "outdent" : "indent", false, null);
           // Strip inline margin/padding the browser adds during indent/outdent,
@@ -5085,7 +5198,7 @@ export default function App() {
               if (!el.getAttribute('style')) el.removeAttribute('style');
             });
           }
-        } else if (!e.shiftKey) {
+        } else {
           document.execCommand("insertHTML", false, "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;");
         }
         syncContentToState();
@@ -5141,6 +5254,41 @@ export default function App() {
                 }
               }
             }, 10);
+          }
+
+          // Inline formatting (bold, highlight, strikethrough…) must not carry
+          // onto the fresh line — the browser clones the style wrappers into
+          // the new block on Enter. Lists keep continuation, so skip those.
+          // Runs after the heading→P timeout above (same-tick FIFO).
+          if (!liElement) {
+            setTimeout(() => {
+              const s = window.getSelection();
+              if (!s || !s.focusNode || !editorRef.current) return;
+              const focusEl =
+                s.focusNode.nodeType === 3 ? s.focusNode.parentElement : s.focusNode;
+              if (!focusEl || !editorRef.current.contains(focusEl) || focusEl.closest("li")) return;
+              // Chrome exits headings into a <div>, so include it — but never the editor root
+              let block = focusEl.closest("p, h1, h2, h3, h4, blockquote, div");
+              if (!block || block === editorRef.current) return;
+              // Only a freshly split empty line — mid-text splits keep their style
+              if (block.textContent.replace(/\u200B/g, "").trim() !== "") return;
+              if (!block.querySelector("b, strong, i, em, u, s, strike, del, span, font, mark, sub, sup, a, code")) return;
+              if (block.tagName === "DIV") {
+                // Normalize the browser's div to the editor's canonical <p>
+                const p = document.createElement("p");
+                p.innerHTML = "<br>";
+                block.replaceWith(p);
+                block = p;
+              } else {
+                block.innerHTML = "<br>";
+              }
+              const r = document.createRange();
+              r.setStart(block, 0);
+              r.collapse(true);
+              s.removeAllRanges();
+              s.addRange(r);
+              syncContentToState();
+            }, 0);
           }
         }
       }
@@ -5858,8 +6006,8 @@ export default function App() {
               `,
         }}
       />{" "}
-      {/* Sidebar Hover Trigger Zone (Active when closed) */}
-      {!isSidebarOpen && !isSidebarPeeking && !historyPanelOpen && (
+      {/* Sidebar Hover Trigger Zone (Active when closed) — desktop only, no hover on touch */}
+      {!isNarrowViewport && !isSidebarOpen && !isSidebarPeeking && !historyPanelOpen && (
         <div
           className="absolute left-0 top-0 bottom-0 w-4 z-40"
           onMouseEnter={() => setIsSidebarPeeking(true)}
@@ -6057,12 +6205,33 @@ export default function App() {
           }`}
       >
         <button
-          onClick={() => setIsSidebarOpen(true)}
+          onClick={() => {
+            // Narrow viewports get a temporary overlay drawer (peek), never
+            // the pinned/push-content state — see isNarrowViewport effect above.
+            if (isNarrowViewport) setIsSidebarPeeking(true);
+            else setIsSidebarOpen(true);
+          }}
           className="p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
         >
           <Menu size={20} />
         </button>
       </div>{" "}
+      {/* Mobile drawer backdrop — darkens the document area while the sidebar
+          overlay is showing on a narrow viewport; tap to dismiss. Desktop's
+          hover-peek never darkens anything. */}
+      <AnimatePresence>
+        {isNarrowViewport && isSidebarPeeking && !historyPanelOpen && (
+          <motion.div
+            key="mobile-sidebar-backdrop"
+            className="absolute inset-0 z-40 bg-black/45"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => setIsSidebarPeeking(false)}
+          />
+        )}
+      </AnimatePresence>
       {/* Collapsible Sidebar */}
       <motion.div
         className={`absolute top-0 bottom-0 left-0 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border-primary)] flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] z-50 overflow-hidden ${(isSidebarOpen || isSidebarPeeking) && !historyPanelOpen
@@ -6072,7 +6241,7 @@ export default function App() {
             ? "shadow-[4px_0_24px_rgba(0,0,0,0.1)]"
             : "shadow-none"
           }`}
-        style={{ width: displaySidebarWidth }}
+        style={{ width: isNarrowViewport ? "min(85vw, 320px)" : displaySidebarWidth }}
       >
         <div ref={sidebarInnerRef} className="w-full h-full flex flex-col">
           {" "}
@@ -6107,20 +6276,24 @@ export default function App() {
                   </motion.button>
                 )}
               </AnimatePresence>
-              <button
-                onClick={() => {
-                  if (isSidebarPeeking) {
-                    setIsSidebarOpen(true);
-                    setIsSidebarPeeking(false);
-                  } else {
-                    setIsSidebarOpen(false);
-                    setIsSidebarPeeking(false);
-                  }
-                }}
-                className="p-1 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
-              >
-                {isSidebarPeeking ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
-              </button>
+              {/* Pin/collapse toggle — meaningless on the narrow overlay drawer
+                  (there's no pinned/push state to switch into), so it's hidden there. */}
+              {!isNarrowViewport && (
+                <button
+                  onClick={() => {
+                    if (isSidebarPeeking) {
+                      setIsSidebarOpen(true);
+                      setIsSidebarPeeking(false);
+                    } else {
+                      setIsSidebarOpen(false);
+                      setIsSidebarPeeking(false);
+                    }
+                  }}
+                  className="p-1 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
+                >
+                  {isSidebarPeeking ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+                </button>
+              )}
             </div>
           </div>
           <div
@@ -6771,7 +6944,7 @@ export default function App() {
       <div
         ref={contentAreaRef}
         className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] ${historyPanelOpen ? "mr-[280px]" : ""} print:!ml-0`}
-        style={{ marginLeft: historyPanelOpen ? 0 : isSidebarOpen ? sidebarWidth : 0 }}
+        style={{ marginLeft: historyPanelOpen || isNarrowViewport ? 0 : isSidebarOpen ? sidebarWidth : 0 }}
         onClick={() => {
           if (isSidebarPeeking && !isSidebarOpen) {
             setIsSidebarPeeking(false);
@@ -6930,6 +7103,14 @@ export default function App() {
                     e.preventDefault();
                     editorRef.current.focus();
                   }
+                }}
+                onPaste={(e) => {
+                  // Titles are plain single-line text — strip markup and newlines
+                  e.preventDefault();
+                  const plain = (e.clipboardData?.getData("text/plain") || "")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                  if (plain) document.execCommand("insertText", false, plain);
                 }}
               ></h1>
             </div>
