@@ -51,10 +51,8 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
-  EyeOff,
   ChevronLeft,
   ArrowLeft,
-  Maximize2,
   AlignJustify,
   Undo2,
   Smile,
@@ -1829,6 +1827,7 @@ export default function App() {
   const [buddyMicError, setBuddyMicError] = useState(null); // null | 'no-mic' | 'no-permission' | 'error'
   const buddyMicErrorTimerRef = useRef(null);
   const [isSpacingAnimating, setIsSpacingAnimating] = useState(false);
+  const alignFlipRef = useRef(null); // Map(el → pre-change x) captured by the Align control, consumed by the FLIP effect
 
   const editorRef = useRef(null);
   const titleRef = useRef(null);
@@ -4865,7 +4864,21 @@ export default function App() {
       const ul = e.target.closest("ul");
       if (ul && ul.classList.contains("checklist")) {
         const rect = e.target.getBoundingClientRect();
-        if (e.clientX >= rect.left && e.clientX <= rect.left + 24) {
+        const docAlign = docsRef.current.find((d) => d.id === activeDocId)?.textAlign;
+        let hit;
+        if (docAlign === 'center' || docAlign === 'right') {
+          // Checkbox renders inline before the first line's text in these modes
+          const r = document.createRange();
+          r.selectNodeContents(e.target);
+          const first = r.getClientRects()[0];
+          hit = first
+            ? e.clientX >= first.left - 28 && e.clientX <= first.left &&
+              e.clientY >= first.top - 2 && e.clientY <= first.bottom + 2
+            : e.clientX >= rect.left && e.clientX <= rect.left + 24;
+        } else {
+          hit = e.clientX >= rect.left && e.clientX <= rect.left + 24;
+        }
+        if (hit) {
           e.target.classList.toggle("checked");
           syncContentToState();
           e.preventDefault();
@@ -5759,6 +5772,46 @@ export default function App() {
   const activeDoc = docs.find((d) => d.id === activeDocId) || docs[0];
   const docFont = activeDoc?.docFont || 'sans';
 
+  // Alignment FLIP: text-align isn't interpolable, so blocks slide from their
+  // old x-position to the new one instead (mirrors the spacing animation).
+  // Block boxes stay full-width when alignment changes — only the inline
+  // content moves — so positions are read from a Range over the contents.
+  const measureAlignLeft = (el) => {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const rect = r.getClientRects()[0];
+    return rect ? rect.left : el.getBoundingClientRect().left;
+  };
+  useLayoutEffect(() => {
+    const snap = alignFlipRef.current;
+    if (!snap) return;
+    alignFlipRef.current = null;
+    const moved = [];
+    snap.forEach((oldLeft, el) => {
+      if (!el.isConnected) return;
+      const dx = oldLeft - measureAlignLeft(el);
+      if (Math.abs(dx) < 1) return;
+      el.style.transition = 'none';
+      el.style.transform = `translateX(${dx}px)`;
+      moved.push(el);
+    });
+    if (!moved.length) return;
+    requestAnimationFrame(() => {
+      moved.forEach((el) => {
+        el.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+        el.style.transform = 'translateX(0)';
+      });
+      // Editor children are persisted as HTML — strip the transient styles
+      setTimeout(() => {
+        moved.forEach((el) => {
+          el.style.removeProperty('transition');
+          el.style.removeProperty('transform');
+          if (!el.getAttribute('style')) el.removeAttribute('style');
+        });
+      }, 340);
+    });
+  }, [activeDoc?.textAlign]);
+
   const renderDocItem = (doc) => {
     const isSelected = selectedDocIds.includes(doc.id);
     const isActive = activeDocId === doc.id;
@@ -6101,6 +6154,32 @@ export default function App() {
                 font-size: 1rem;
                 margin-bottom: 0.25em;
               }
+
+              ${(activeDoc?.textAlign === 'center' || activeDoc?.textAlign === 'right') ? `
+              /* Centered/right alignment: markers must travel with the text.
+                 Bullets/numbers move inside the line box; the checklist box
+                 switches from absolute to inline flow (checkmark becomes a
+                 background since ::after can't follow it there). */
+              .editor-content ul:not(.checklist),
+              .editor-content ol {
+                list-style-position: inside;
+                padding-left: 0 !important;
+              }
+              .editor-content ul.checklist>li { padding-left: 0; }
+              .editor-content ul.checklist>li::before {
+                position: static;
+                display: inline-block;
+                margin-right: 0.5em;
+                vertical-align: -0.2em;
+              }
+              .editor-content ul.checklist>li::after { content: none; }
+              .editor-content ul.checklist>li.checked::before {
+                background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M4.2 8.6l2.6 2.6 5-6' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+                background-repeat: no-repeat;
+                background-position: center;
+                background-size: 11px 11px;
+              }
+              ` : ''}
 
               .editor-content a {
                 color: var(--color-accent);
@@ -6463,10 +6542,10 @@ export default function App() {
             <motion.div
               key="options-menu"
               className="words-context-menu absolute right-0 top-full mt-2 z-[40]"
-              initial={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(4px)' }}
+              initial={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' }}
               animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(4px)' }}
-              transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, y: { type: 'spring', stiffness: 450, damping: 28 } }}
+              exit={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' }}
+              transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
               style={{ transformOrigin: 'top right' }}
             >
               <svg className="absolute -top-[9px] right-4 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10 Z" fill="var(--color-bg-primary)"/><path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
@@ -6546,28 +6625,34 @@ export default function App() {
                     key="style-popout"
                     className="absolute z-[50]"
                     style={{ top: styleMenuOpen.top, right: 'calc(100% + 10px)', transformOrigin: 'right top' }}
-                    initial={{ opacity: 0, scale: 0.95, x: 4, filter: 'blur(4px)' }}
+                    initial={{ opacity: 0, scale: 0.95, x: 4, filter: 'blur(2px)' }}
                     animate={{ opacity: 1, scale: 1, x: 0, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, scale: 0.95, x: 4, filter: 'blur(4px)' }}
-                    transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, x: { type: 'spring', stiffness: 450, damping: 28 } }}
+                    exit={{ opacity: 0, scale: 0.95, x: 4, filter: 'blur(2px)' }}
+                    transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, x: { type: 'spring', stiffness: 400, damping: 32 } }}
                   >
                     <svg className="absolute pointer-events-none z-10" style={{ top: '5px', right: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
                       <path d="M0,0 C0,4 10,7 10,10 C10,13 0,16 0,20 Z" fill="var(--color-bg-primary)" />
                       <path d="M0,0 C0,4 10,7 10,10 C10,13 0,16 0,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
                     </svg>
-                    <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl w-[240px] py-2 px-2">
-                      <p className="px-1 pb-1.5 text-[11px] font-semibold tracking-wide uppercase text-[var(--color-text-faint)] select-none">Style</p>
-
-                      {/* Alignment */}
-                      <div className="px-1 pb-2">
-                        <p className="text-[12px] text-[var(--color-text-primary)] mb-1.5">Alignment</p>
-                        <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md p-1 items-center gap-0.5">
+                    <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl w-[224px] p-1.5">
+                      {/* Align row */}
+                      <div className="flex items-center justify-between pl-2 pr-1 h-8">
+                        <span className="text-[12px] text-[var(--color-text-primary)] select-none">Align</span>
+                        <div className="flex items-center bg-[var(--color-bg-secondary)] rounded-md p-0.5">
                           {['left', 'center', 'right', 'justify'].map((align) => {
                             const active = activeDoc?.textAlign === align || (!activeDoc?.textAlign && align === 'left');
                             return (
                               <button
                                 key={align}
+                                title={align.charAt(0).toUpperCase() + align.slice(1)}
                                 onClick={() => {
+                                  // Snapshot pre-change positions for the FLIP effect
+                                  const map = new Map();
+                                  if (titleRef.current?.isConnected) map.set(titleRef.current, measureAlignLeft(titleRef.current));
+                                  const emojiEl = document.querySelector('[data-align-emoji]');
+                                  if (emojiEl) map.set(emojiEl, measureAlignLeft(emojiEl));
+                                  if (editorRef.current) [...editorRef.current.children].forEach(el => map.set(el, measureAlignLeft(el)));
+                                  alignFlipRef.current = map;
                                   captureHistorySnapshot('user', `Aligned ${align}`);
                                   setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: align } : d));
                                   if (editorRef.current) {
@@ -6578,69 +6663,65 @@ export default function App() {
                                     syncContentToState();
                                   }
                                 }}
-                                className={`flex-1 flex justify-center py-1 rounded-sm transition-colors ${active ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'}`}
+                                className={`w-[26px] h-[22px] flex items-center justify-center rounded-[5px] transition-colors ${active ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)]'}`}
                               >
-                                {align === 'left' && <AlignLeft size={15} />}
-                                {align === 'center' && <AlignCenter size={15} />}
-                                {align === 'right' && <AlignRight size={15} />}
-                                {align === 'justify' && <AlignJustify size={15} />}
+                                {align === 'left' && <AlignLeft size={13} />}
+                                {align === 'center' && <AlignCenter size={13} />}
+                                {align === 'right' && <AlignRight size={13} />}
+                                {align === 'justify' && <AlignJustify size={13} />}
                               </button>
                             );
                           })}
                         </div>
                       </div>
 
-                      {/* Spacing */}
-                      <div className="px-1 pb-2">
-                        <p className="text-[12px] text-[var(--color-text-primary)] mb-1.5">Spacing</p>
-                        <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md p-1 items-center gap-0.5">
+                      {/* Spacing row */}
+                      <div className="flex items-center justify-between pl-2 pr-1 h-8">
+                        <span className="text-[12px] text-[var(--color-text-primary)] select-none">Spacing</span>
+                        <div className="flex items-center bg-[var(--color-bg-secondary)] rounded-md p-0.5">
                           {['1.0', '1.5', '2.0'].map((space) => {
                             const lbl = space === '1.0' ? 'Compact' : space === '1.5' ? 'Standard' : 'Spacious';
                             const active = activeDoc?.lineSpacing === space || (!activeDoc?.lineSpacing && space === '1.5');
                             return (
                               <button
                                 key={space}
+                                title={lbl}
                                 onClick={() => {
                                   captureHistorySnapshot('user', `Changed spacing to ${lbl}`);
                                   setIsSpacingAnimating(true);
                                   setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, lineSpacing: space } : d));
                                   setTimeout(() => setIsSpacingAnimating(false), 350);
                                 }}
-                                className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded-sm transition-colors ${active ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'}`}
+                                className={`w-[26px] h-[22px] flex items-center justify-center rounded-[5px] transition-colors ${active ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)]'}`}
                               >
-                                <div className="flex flex-col opacity-70" style={{ gap: space === '1.0' ? '1.5px' : space === '1.5' ? '2.5px' : '4px' }}>
-                                  <div className="w-3.5 h-0.5 bg-current rounded-full" />
-                                  <div className="w-3.5 h-0.5 bg-current rounded-full" />
-                                  <div className="w-2.5 h-0.5 bg-current rounded-full" />
+                                <div className="flex flex-col items-center" style={{ gap: space === '1.0' ? '1.5px' : space === '1.5' ? '2.5px' : '3.5px' }}>
+                                  <div className="w-3 h-[1.5px] bg-current rounded-full" />
+                                  <div className="w-3 h-[1.5px] bg-current rounded-full" />
+                                  <div className="w-3 h-[1.5px] bg-current rounded-full" />
                                 </div>
-                                <span className="text-[9.5px] font-medium leading-none">{lbl}</span>
                               </button>
                             );
                           })}
                         </div>
                       </div>
 
-                      <div className="h-px bg-[var(--color-border-primary)] mx-1 mb-1" />
+                      <div className="h-px bg-[var(--color-border-primary)] my-1 mx-1" />
 
-                      {/* Page toggles */}
-                      <div className="flex items-center justify-between px-1 py-1.5">
-                        <span className="flex items-center gap-2 text-[12px] text-[var(--color-text-primary)]">
-                          <EyeOff size={13} className="text-[var(--color-text-muted)]" /> Hide title
-                        </span>
+                      {/* Toggle rows */}
+                      <div className="flex items-center justify-between pl-2 pr-1.5 h-8">
+                        <span className="text-[12px] text-[var(--color-text-primary)] select-none">Hide title</span>
                         <A11ySwitch
                           checked={!!activeDoc?.hideTitle}
                           onChange={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, hideTitle: !d.hideTitle } : d))}
                           label="Hide title"
                         />
                       </div>
-                      <div className="flex items-center justify-between px-1 py-1.5">
-                        <span className="flex items-center gap-2 text-[12px] text-[var(--color-text-primary)]">
-                          <Maximize2 size={13} className="text-[var(--color-text-muted)]" /> Full width page
-                        </span>
+                      <div className="flex items-center justify-between pl-2 pr-1.5 h-8">
+                        <span className="text-[12px] text-[var(--color-text-primary)] select-none">Full width</span>
                         <A11ySwitch
                           checked={!!activeDoc?.fullWidth}
                           onChange={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, fullWidth: !d.fullWidth } : d))}
-                          label="Full width page"
+                          label="Full width"
                         />
                       </div>
                     </div>
@@ -7219,10 +7300,10 @@ export default function App() {
               <motion.div
                 key="user-menu"
                 className="words-context-menu fixed left-4 bottom-[56px] z-[95]"
-                initial={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(4px)' }}
+                initial={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(2px)' }}
                 animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(4px)' }}
-                transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, y: { type: 'spring', stiffness: 450, damping: 28 } }}
+                exit={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(2px)' }}
+                transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
                 style={{ transformOrigin: 'bottom left' }}
               >
               <svg className="absolute -bottom-[9px] left-4 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0 Z" fill="var(--color-bg-primary)"/><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
@@ -7271,34 +7352,20 @@ export default function App() {
                   <motion.div
                     key="cloud-trash"
                     className="absolute left-[calc(100%+10px)] bottom-0 z-[70]"
-                    initial={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(4px)' }}
+                    initial={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(2px)' }}
                     animate={{ opacity: 1, scale: 1, x: 0, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(4px)' }}
-                    transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, x: { type: 'spring', stiffness: 450, damping: 28 } }}
+                    exit={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(2px)' }}
+                    transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, x: { type: 'spring', stiffness: 400, damping: 32 } }}
                     style={{ transformOrigin: 'left bottom' }}
                   >
                     <svg className="absolute pointer-events-none z-10" style={{ bottom: '9px', left: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
                       <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)" />
                       <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
                     </svg>
-                    <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl w-[244px] py-1.5 px-1.5">
-                      {/* Header: title + count, Empty action inline where it's discoverable */}
-                      <div className="flex items-center justify-between px-1.5 pb-1">
-                        <p className="text-[11px] font-semibold tracking-wide uppercase text-[var(--color-text-faint)] select-none">
-                          Trash{trashedDocs.length > 0 && <span className="ml-1 font-medium">· {trashedDocs.length}</span>}
-                        </p>
-                        {trashedDocs.length > 0 && (
-                          <button
-                            onClick={emptyTrash}
-                            className="text-[11px] font-medium text-[var(--color-text-faint)] hover:text-red-500 px-1 py-0.5 rounded transition-colors"
-                          >
-                            Empty
-                          </button>
-                        )}
-                      </div>
+                    <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl w-[224px] p-1.5">
                       {trashedDocs.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-5 gap-1.5">
-                          <Trash2 size={18} className="text-[var(--color-text-faint)] opacity-60" />
+                        <div className="flex flex-col items-center justify-center py-6 gap-1.5">
+                          <Trash2 size={16} className="text-[var(--color-text-faint)] opacity-60" />
                           <p className="text-[12px] text-[var(--color-text-faint)]">Trash is empty</p>
                         </div>
                       ) : (
@@ -7307,7 +7374,7 @@ export default function App() {
                             {trashedDocs.map(d => (
                               <div
                                 key={d.id}
-                                className="group/ti flex items-center gap-2 px-1.5 py-1.5 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors"
+                                className="group/ti flex items-center gap-2 pl-2 pr-1.5 py-1.5 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors"
                                 onMouseEnter={(e) => {
                                   clearTimeout(trashHoverTimeoutRef.current);
                                   const rect = e.currentTarget.getBoundingClientRect();
@@ -7352,9 +7419,14 @@ export default function App() {
                             ))}
                           </div>
                           <div className="h-px bg-[var(--color-border-primary)] mx-1 my-1" />
-                          <p className="px-1.5 pb-0.5 text-[10px] text-[var(--color-text-faint)] select-none">
-                            Pages are deleted forever after 30 days
-                          </p>
+                          <button
+                            onClick={emptyTrash}
+                            title="Pages are deleted forever after 30 days"
+                            className="w-full flex items-center justify-between pl-2 pr-2 h-8 rounded-md text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors group/empty"
+                          >
+                            <span className="text-[12px]">Empty trash</span>
+                            <span className="text-[11px] text-[var(--color-text-faint)] group-hover/empty:text-red-500/70 transition-colors">{trashedDocs.length}</span>
+                          </button>
                         </>
                       )}
                     </div>
@@ -7365,47 +7437,47 @@ export default function App() {
                   <motion.div
                     key="cloud-a11y"
                     className="absolute left-[calc(100%+10px)] bottom-0 z-[70]"
-                    initial={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(4px)' }}
+                    initial={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(2px)' }}
                     animate={{ opacity: 1, scale: 1, x: 0, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(4px)' }}
-                    transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, x: { type: 'spring', stiffness: 450, damping: 28 } }}
+                    exit={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(2px)' }}
+                    transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, x: { type: 'spring', stiffness: 400, damping: 32 } }}
                     style={{ transformOrigin: 'left bottom' }}
                   >
                     <svg className="absolute pointer-events-none z-10" style={{ bottom: '9px', left: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
                       <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)" />
                       <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
                     </svg>
-                    <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl w-[240px] py-2 px-2">
-                      <p className="px-1 pb-1.5 text-[11px] font-semibold tracking-wide uppercase text-[var(--color-text-faint)] select-none">Accessibility</p>
-
-                      {/* Text & UI scale */}
-                      <div className="px-1 pb-2">
-                        <p className="text-[12px] text-[var(--color-text-primary)] mb-1.5">Text &amp; UI size</p>
-                        <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md p-1 items-center gap-0.5">
-                          {[0.9, 1, 1.1, 1.25].map((s) => (
+                    <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl w-[224px] p-1.5">
+                      {/* Text size row */}
+                      <div className="flex items-center justify-between pl-2 pr-1 h-8">
+                        <span className="text-[12px] text-[var(--color-text-primary)] select-none">Text size</span>
+                        <div className="flex items-center bg-[var(--color-bg-secondary)] rounded-md p-0.5">
+                          {[0.9, 1, 1.1, 1.25].map((s, i) => (
                             <button
                               key={s}
+                              title={`${Math.round(s * 100)}%`}
                               onClick={() => setA11y((p) => ({ ...p, scale: s }))}
-                              className={`flex-1 py-1 rounded-sm text-[11.5px] transition-colors ${a11y.scale === s ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'}`}
+                              className={`w-[26px] h-[22px] flex items-end justify-center pb-[4px] rounded-[5px] transition-colors ${a11y.scale === s ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)]'}`}
                             >
-                              {Math.round(s * 100)}%
+                              <span className="font-medium" style={{ fontSize: `${[9, 11, 13, 15][i]}px`, lineHeight: 1 }}>A</span>
                             </button>
                           ))}
                         </div>
                       </div>
 
-                      <div className="h-px bg-[var(--color-border-primary)] mx-1 mb-1" />
+                      <div className="h-px bg-[var(--color-border-primary)] my-1 mx-1" />
 
-                      <div className="flex items-center justify-between px-1 py-1.5">
-                        <span className="text-[12px] text-[var(--color-text-primary)]">High contrast</span>
+                      {/* Toggle rows */}
+                      <div className="flex items-center justify-between pl-2 pr-1.5 h-8">
+                        <span className="text-[12px] text-[var(--color-text-primary)] select-none">High contrast</span>
                         <A11ySwitch
                           checked={a11y.highContrast}
                           onChange={() => setA11y((p) => ({ ...p, highContrast: !p.highContrast }))}
                           label="High contrast"
                         />
                       </div>
-                      <div className="flex items-center justify-between px-1 py-1.5">
-                        <span className="text-[12px] text-[var(--color-text-primary)]">Reduce motion</span>
+                      <div className="flex items-center justify-between pl-2 pr-1.5 h-8">
+                        <span className="text-[12px] text-[var(--color-text-primary)] select-none">Reduce motion</span>
                         <A11ySwitch
                           checked={a11y.reduceMotion}
                           onChange={() => setA11y((p) => ({ ...p, reduceMotion: !p.reduceMotion }))}
@@ -7607,13 +7679,17 @@ export default function App() {
               </div>
             )}
 
-            {/* Title row: emoji + title text */}
-            <div className="flex items-start">
+            {/* Title row: emoji + title text — justified as a unit so the emoji travels with the aligned title */}
+            <div
+              className="flex items-start"
+              style={{ justifyContent: activeDoc.textAlign === 'center' ? 'center' : activeDoc.textAlign === 'right' ? 'flex-end' : 'flex-start' }}
+            >
               {/* Animated emoji button — always mounted, driven by animate props so doc-switch transition applies instantly */}
               <motion.div
+                data-align-emoji
                 initial={{ width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }}
                 animate={activeDoc.emoji
-                  ? { width: 48, opacity: 1, marginRight: 6, marginLeft: -8 }
+                  ? { width: 48, opacity: 1, marginRight: 6, marginLeft: (activeDoc.textAlign === 'center' || activeDoc.textAlign === 'right') ? 0 : -8 }
                   : { width: 0, opacity: 0, marginRight: 0, marginLeft: 0 }
                 }
                 transition={renderedDocIdRef.current !== activeDocId ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 38 }}
@@ -7637,8 +7713,13 @@ export default function App() {
 
               <h1
                 ref={titleRef}
-                className="flex-1 title-input text-[36px] sm:text-[42px] font-bold leading-tight outline-none w-full break-words tracking-tight mt-0"
-                style={{ textAlign: activeDoc.textAlign || "left" }}
+                className="title-input text-[36px] sm:text-[42px] font-bold leading-tight outline-none break-words tracking-tight mt-0"
+                style={{
+                  textAlign: activeDoc.textAlign || "left",
+                  // Center/right: hug the text so the emoji sits beside it
+                  flex: (activeDoc.textAlign === 'center' || activeDoc.textAlign === 'right') ? '0 1 auto' : '1 1 0%',
+                  minWidth: 24,
+                }}
                 contentEditable
                 suppressContentEditableWarning
                 spellCheck={true}
@@ -8151,10 +8232,10 @@ export default function App() {
           key="sidebar-ctx"
           className="fixed z-[150] w-44 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1"
           style={{ top: sidebarContextMenu.y, left: sidebarContextMenu.x }}
-          initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+          initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
           animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-          exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
-          transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 } }}
+          exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
+          transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 } }}
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
         >
@@ -8182,9 +8263,9 @@ export default function App() {
 
           return (
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
               transition={{ type: "spring", stiffness: 450, damping: 30 }}
               className="fixed z-[100] w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-3 pointer-events-none"
               style={{ top: previewPos.top, left: previewPos.left, transformOrigin: "-16px 20px" }}
@@ -8217,9 +8298,9 @@ export default function App() {
 
           return (
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
               transition={{ type: "spring", stiffness: 450, damping: 30 }}
               className="fixed z-[100] w-56 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg py-1 px-1 pointer-events-auto"
               style={{ top: groupPreviewPos.top, left: groupPreviewPos.left, transformOrigin: "-16px 20px" }}
@@ -8303,9 +8384,9 @@ export default function App() {
           if (!previewDoc) return null;
           return (
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
               transition={{ type: "spring", stiffness: 450, damping: 30 }}
               className="fixed z-[100] w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-2xl rounded-xl p-3 pointer-events-none"
               style={{ top: trashHoverPos.top, left: trashHoverPos.left, transformOrigin: "-16px 20px" }}
@@ -8359,10 +8440,10 @@ export default function App() {
           <motion.div
             ref={slashMenuRef}
             key="slash-menu"
-            initial={{ opacity: 0, scale: 0.95, filter: "blur(4px)" }}
+            initial={{ opacity: 0, scale: 0.95, filter: "blur(2px)" }}
             animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-            exit={{ opacity: 0, scale: 0.95, filter: "blur(4px)" }}
-            transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: "spring", stiffness: 450, damping: 28 } }}
+            exit={{ opacity: 0, scale: 0.95, filter: "blur(2px)" }}
+            transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: "spring", stiffness: 400, damping: 32 } }}
             className="fixed z-50"
             style={{
               top: `${slashState.y + 10}px`,
@@ -8401,10 +8482,10 @@ export default function App() {
           key="doc-ctx"
           className="words-context-menu fixed z-[60]"
           style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x + 10}px`, transformOrigin: 'left center' }}
-          initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+          initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
           animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-          exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
-          transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 } }}
+          exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
+          transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 } }}
           onClick={(e) => e.stopPropagation()}
         >
           <svg
@@ -8478,10 +8559,10 @@ export default function App() {
               key="group-ctx"
               className="words-context-menu fixed bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 z-[60] w-44"
               style={{ top: groupMenuOpen.y, left: groupMenuOpen.x }}
-              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
-              transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 } }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
+              transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 } }}
               onClick={(e) => e.stopPropagation()}
             >
               <button
@@ -8529,10 +8610,10 @@ export default function App() {
               onClick={() => setFolderCustomizeOpen(null)}
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
-              transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 } }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
+              transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 } }}
               className="fixed z-[60]"
               style={{ top: folderCustomizeOpen.y, left: folderCustomizeOpen.x }}
               onClick={(e) => e.stopPropagation()}
@@ -8700,9 +8781,12 @@ export default function App() {
         </>
       )}
 
-      {/* Sync Suggestion Popup */}
+      {/* Sync Suggestion Popup — filter lives on this outer wrapper, not the
+          rounded-xl box below: Lisse clip-paths any rounded-* element, and a
+          clip-path on the same element as a drop-shadow filter crops the shadow. */}
       {showSyncSuggestion && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl p-4 w-80 z-[200] animate-slide-in-right" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
+        <div className="fixed bottom-6 right-6 w-80 z-[200] animate-slide-in-right" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
+        <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl p-4">
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-medium text-sm text-[var(--color-text-primary)] flex items-center gap-2">
               <Cloud size={16} className="text-[var(--color-text-faint)]" /> Back up your data
@@ -8741,11 +8825,14 @@ export default function App() {
             </button>
           </div>
         </div>
+        </div>
       )}
 
-      {/* Delete Undo Popup */}
+      {/* Delete Undo Popup — see Sync Suggestion Popup above for why filter
+          and rounded-xl are split across outer/inner elements. */}
       {deletedDocInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
+        <div className="fixed bottom-6 right-6 w-72 z-[200] animate-slide-in-right" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
+        <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl p-4 flex flex-col gap-3">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
               <Trash2 size={15} className="text-[var(--color-text-faint)]" />
@@ -8773,12 +8860,15 @@ export default function App() {
             </button>
           </div>
         </div>
+        </div>
       )}
 
 
-      {/* Custom Share UI Popup */}
+      {/* Custom Share UI Popup — see Sync Suggestion Popup above for why filter
+          and rounded-xl are split across outer/inner elements. */}
       {sharePopupInfo && (
-        <div className="fixed bottom-6 right-6 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl p-4 w-72 z-[200] animate-slide-in-right flex flex-col gap-3" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
+        <div className="fixed bottom-6 right-6 w-72 z-[200] animate-slide-in-right" style={{ filter: 'drop-shadow(0 8px 30px rgba(0,0,0,0.12))' }}>
+        <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl p-4 flex flex-col gap-3">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
               <Link size={15} className="text-[var(--color-text-faint)]" />
@@ -8806,6 +8896,7 @@ export default function App() {
               Copy
             </button>
           </div>
+        </div>
         </div>
       )}
 

@@ -535,6 +535,15 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
                               filter: isDark ? 'drop-shadow(0 4px 20px rgba(0,0,0,0.50))' : 'drop-shadow(0 4px 20px rgba(0,0,0,0.12))',
                             }}
                           >
+                            {/* Tail — curved to merge into the box edge, matching the other
+                                pop-outs in the app (see the Options/Style menus in App.jsx).
+                                Sibling of the squircle-clipped box below, not a child: Lisse
+                                clip-paths any `rounded-*` element, which would crop an
+                                absolutely-positioned child that pokes outside the box. */}
+                            <svg className="absolute -top-[9px] right-4 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none">
+                              <path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10 Z" fill="var(--color-bg-primary)" />
+                              <path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
+                            </svg>
                             <div
                               className="rounded-[10px]"
                               style={{
@@ -544,8 +553,6 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
                                 padding: 4, minWidth: 158,
                               }}
                             >
-                            <div style={{ position: 'absolute', bottom: '100%', right: 9, width: 0, height: 0, borderLeft: '7px solid transparent', borderRight: '7px solid transparent', borderBottom: `7px solid var(--color-border-primary)` }} />
-                            <div style={{ position: 'absolute', bottom: 'calc(100% - 1px)', right: 10, width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderBottom: `6px solid var(--color-bg-primary)` }} />
                             {SORT_OPTIONS.map((opt) => (
                               <button
                                 key={opt.id}
