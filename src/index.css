@@ -160,6 +160,12 @@ body {
   .pin-item {
     transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
                 background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+    /* Keep the item on its own compositing layer at all times. Without this,
+       the press animation promotes/demotes the layer mid-transition, and the
+       fractional 1fr grid width snaps to device pixels — the right-most item
+       visibly grew ~1px on its right edge while animating. */
+    will-change: transform;
+    transform: translateZ(0);
   }
 
   .doc-item {
@@ -682,6 +688,18 @@ html[data-reduce-motion="true"] *::after {
   transition: -webkit-text-stroke-width 0.18s ease-out;
 }
 
+/* ── 404 page digits — same goop trick as the footer wordmark, smaller ── */
+.nf-goop {
+  cursor: default;
+  -webkit-text-stroke-color: var(--color-bg-primary);
+  -webkit-text-stroke-width: 0;
+}
+.nf-goop-letter {
+  display: inline-block;
+  will-change: -webkit-text-stroke-width;
+  transition: -webkit-text-stroke-width 0.18s ease-out;
+}
+
 /* ── Landing typing-demo caret ── */
 .land-caret {
   display: inline-block;
@@ -799,4 +817,112 @@ html[data-reduce-motion="true"] *::after {
       inset 0 1px 0 rgba(255, 255, 255, 0.70),
       inset 0 3px 8px rgba(0, 0, 0, 0.12);
   }
+}
+
+/* ════════════════════════════════════════════════
+   ACCESSIBILITY MODES
+   Toggled as classes on <html> by the accessibility
+   panel in the cloud menu; persisted in localStorage.
+   ════════════════════════════════════════════════ */
+
+/* High contrast: darken the muted/faint tiers and strengthen borders so
+ * secondary text and dividers pass a higher contrast bar. */
+:root.a11y-high-contrast {
+  --color-text-muted: #4a4944;
+  --color-text-faint: #64635e;
+  --color-icon-muted: #64635e;
+  --color-border-primary: #b9b3a8;
+  --color-border-hover: #8f887b;
+}
+@media (prefers-color-scheme: dark) {
+  :root.a11y-high-contrast {
+    --color-text-muted: #d6d6d6;
+    --color-text-faint: #ababab;
+    --color-icon-muted: #ababab;
+    --color-border-primary: #5c584f;
+    --color-border-hover: #767065;
+  }
+}
+
+/* Reduce motion: collapse CSS animations/transitions to a frame.
+ * Framer Motion springs are handled separately via MotionConfig. */
+:root.a11y-reduce-motion *,
+:root.a11y-reduce-motion *::before,
+:root.a11y-reduce-motion *::after {
+  animation-duration: 0.001s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0.001s !important;
+  scroll-behavior: auto !important;
+}
+
+/* ════════════════════════════════════════════════
+   MEMBERSHIP CARD (cloud menu)
+   A physical titanium card, Apple Card style: it stays
+   silver in both themes like a real object would. The
+   brushed texture is /metal.jpg; the reflection layer
+   tracks the cursor (via --rx/--ry set in App.jsx), and
+   tilt/hover-shadow are Framer springs.
+   ════════════════════════════════════════════════ */
+.member-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.20);
+  background: linear-gradient(135deg, #eceded 0%, #d7d8d8 42%, #e3e4e4 68%, #cbcccc 100%);
+  /* Bevel edges only — the outer drop shadow is animated by Framer on hover */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12);
+}
+
+/* Overhead light — fixed at the top edge like a ceiling light on real metal;
+   the tilt springs sell the movement, the light source stays put.
+   (The gradient position is animated from the tilt angle in App.jsx.) */
+.mc-reflection {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    175% 115% at 50% -12%,
+    rgba(255, 255, 255, 1) 0%,
+    rgba(255, 255, 255, 0.4) 42%,
+    rgba(255, 255, 255, 0) 72%
+  );
+  opacity: 0.6;
+  transition: opacity 0.3s ease;
+}
+.member-card:hover .mc-reflection,
+.member-card.mc-active .mc-reflection {
+  opacity: 1;
+}
+
+/* Laser-engraved text: slightly darker than the plate, with a hairline dark
+   cut above and a light catch below the glyphs. */
+.mc-engraved {
+  color: #73716c;
+  text-shadow:
+    0 -1px 0 rgba(0, 0, 0, 0.16),
+    0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* Shimmer band: parked off-card, sweeps across once per hover. */
+.member-card::after {
+  content: "";
+  position: absolute;
+  inset: -40% auto -40% -80%;
+  width: 55%;
+  transform: skewX(-18deg) translateX(0);
+  background: linear-gradient(90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.5) 50%,
+    rgba(255, 255, 255, 0) 100%);
+  opacity: 0;
+  pointer-events: none;
+}
+.member-card:hover::after {
+  animation: member-card-shimmer 0.9s cubic-bezier(0.33, 1, 0.68, 1) forwards;
+}
+@keyframes member-card-shimmer {
+  0%   { opacity: 0; transform: skewX(-18deg) translateX(0); }
+  15%  { opacity: 1; }
+  100% { opacity: 0; transform: skewX(-18deg) translateX(420%); }
 }

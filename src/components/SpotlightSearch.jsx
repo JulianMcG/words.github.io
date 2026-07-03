@@ -125,8 +125,8 @@ const PaperCard = memo(function PaperCard({ doc, group, onOpen, isDark }) {
     const rect = cardRef.current.getBoundingClientRect();
     const dx = ((e.clientX - rect.left) / rect.width  - 0.5) * 2;
     const dy = ((e.clientY - rect.top)  / rect.height - 0.5) * 2;
-    tiltX.set(dy * -13);
-    tiltY.set(dx *  17);
+    tiltX.set(dy * -10);
+    tiltY.set(dx *  13);
   }, [tiltX, tiltY]);
 
   const handleMouseEnter = useCallback(() => setIsHovered(true), []);
@@ -442,7 +442,7 @@ export default function SpotlightSearch({ isOpen, onClose, docs, groups, activeD
               exit={{ transition: { duration: 0.001 } }}
               transition={{ layout: { type: 'spring', stiffness: 440, damping: 32, mass: 0.85 } }}
               style={{
-                width: '100%', maxHeight: '80vh',
+                width: '100%', maxHeight: 'calc(80vh / var(--a11y-zoom, 1))',
                 borderRadius: 18,
                 backgroundColor: 'var(--color-bg-secondary)',
                 border: '1px solid var(--color-border-primary)',

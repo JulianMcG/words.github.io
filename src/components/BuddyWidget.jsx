@@ -640,20 +640,22 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                          micError === 'no-permission' ? 'Mic access denied' :
                          'Microphone unavailable'}
                       </span>
-                      {/* Tail — rounded diamond pointing down at Buddy */}
-                      <div style={{
-                        position: 'absolute',
-                        bottom: -5,
-                        right: 15,
-                        width: 10,
-                        height: 10,
-                        background: 'var(--color-bg-primary)',
-                        borderRight: '1px solid var(--color-border-primary)',
-                        borderBottom: '1px solid var(--color-border-primary)',
-                        borderRadius: 2,
-                        transform: 'rotate(45deg)',
-                      }} />
                     </div>
+                    {/* Tail — rounded diamond pointing down at Buddy. Lives OUTSIDE
+                        the rounded-lg bubble: the lisse squircle clip-path on that
+                        element cuts off anything protruding past its border. */}
+                    <div style={{
+                      position: 'absolute',
+                      bottom: -5,
+                      right: 15,
+                      width: 10,
+                      height: 10,
+                      background: 'var(--color-bg-primary)',
+                      borderRight: '1px solid var(--color-border-primary)',
+                      borderBottom: '1px solid var(--color-border-primary)',
+                      borderRadius: 2,
+                      transform: 'rotate(45deg)',
+                    }} />
                   </motion.div>
                 )}
               </AnimatePresence>

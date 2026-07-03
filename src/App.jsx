@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   Type,
   Heading1,
@@ -42,7 +43,10 @@ import {
   Cloud,
   CloudOff,
   LogOut,
+  PersonStanding,
   Copy,
+  Download,
+  Check,
   Paintbrush,
   AlignLeft,
   AlignCenter,
@@ -51,7 +55,6 @@ import {
   ChevronLeft,
   ArrowLeft,
   Maximize2,
-  Minimize2,
   AlignJustify,
   Undo2,
   Smile,
@@ -62,7 +65,7 @@ import {
 } from "lucide-react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, writeBatch } from "./firebase";
-import { motion, AnimatePresence, useMotionValue, useTransform, useSpring, animate as animateMV, LayoutGroup } from "framer-motion";
+import { motion, AnimatePresence, MotionConfig, useMotionValue, useMotionTemplate, useTransform, useSpring, animate as animateMV, LayoutGroup } from "framer-motion";
 import GradualBlur from "./components/GradualBlur";
 import { Sparkles } from "lucide-react";
 import BuddyIcon from "./components/BuddyIcon";
@@ -74,6 +77,7 @@ import { exportToGoogleDocs } from "./utils/googleDocs";
 import FolderIconPicker from "./components/FolderIconPicker";
 import { FolderIcon } from "./utils/folderIcons";
 import SpotlightSearch from "./components/SpotlightSearch";
+import TooltipLayer from "./components/TooltipLayer";
 import { getIconForFolderName } from "./utils/folderIconMap";
 import HeadingNavigator from "./components/HeadingNavigator";
 import BuddyDumpMode from "./components/BuddyDumpMode";
@@ -333,6 +337,362 @@ const DeleteGhostOverlay = ({ ghost, onComplete, impactRef }) => {
   );
 };
 
+// ── Membership card (cloud menu) ─────────────────────────────────────────────
+// A physical titanium card. Brushed texture from /metal.jpg, laser-engraved
+// text (.mc-engraved), and an overhead light whose highlight slides across the
+// surface as the card's tilt ANGLE changes (derived from the tilt springs, not
+// the raw cursor) — the way light actually plays over tipping metal.
+// Clicking the card opens a small menu to copy or save it as an image.
+const CARD_W = 232;
+const CARD_H = 132;
+
+const loadImage = (src) => new Promise((res, rej) => {
+  const i = new Image();
+  i.onload = () => res(i);
+  i.onerror = rej;
+  i.src = src;
+});
+
+// Draws the card face in local 232×132 coordinates — the ctx must already be
+// translated/scaled. embossScale softens the engraving offsets/opacity so a
+// large print doesn't read as a heavy 3D extrusion.
+const drawMemberCardFace = async (ctx, { name, email, since, embossScale = 1 }) => {
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(0, 0, CARD_W, CARD_H, 10);
+  ctx.clip();
+
+  const base = ctx.createLinearGradient(0, 0, CARD_W, CARD_H);
+  base.addColorStop(0, "#eceded");
+  base.addColorStop(0.42, "#d7d8d8");
+  base.addColorStop(0.68, "#e3e4e4");
+  base.addColorStop(1, "#cbcccc");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, CARD_W, CARD_H);
+
+  try {
+    const metal = await loadImage("/metal.jpg");
+    const s = Math.max(CARD_W / metal.width, CARD_H / metal.height);
+    ctx.globalAlpha = 0.4;
+    ctx.drawImage(metal, (CARD_W - metal.width * s) / 2, (CARD_H - metal.height * s) / 2, metal.width * s, metal.height * s);
+    ctx.globalAlpha = 1;
+  } catch { /* texture optional */ }
+
+  const light = ctx.createRadialGradient(CARD_W / 2, -CARD_H * 0.12, 0, CARD_W / 2, -CARD_H * 0.12, CARD_H * 1.5);
+  light.addColorStop(0, "rgba(255,255,255,0.85)");
+  light.addColorStop(0.4, "rgba(255,255,255,0.26)");
+  light.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = light;
+  ctx.fillRect(0, 0, CARD_W, CARD_H);
+
+  try {
+    const logo = await loadImage("/card logo.png");
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(logo, CARD_W - 104, CARD_H / 2 - 104, 208, 208);
+    ctx.globalAlpha = 1;
+  } catch { /* logo optional */ }
+
+  const off = 1 * embossScale;
+  const engrave = (text, x, y, font, spacing = "0px") => {
+    ctx.font = font;
+    ctx.letterSpacing = spacing;
+    ctx.fillStyle = `rgba(0,0,0,${0.16 * embossScale})`;
+    ctx.fillText(text, x, y - off);
+    ctx.fillStyle = `rgba(255,255,255,${0.9 * embossScale})`;
+    ctx.fillText(text, x, y + off);
+    ctx.fillStyle = "#73716c";
+    ctx.fillText(text, x, y);
+    ctx.letterSpacing = "0px";
+  };
+  const clipText = (text, font, maxW) => {
+    ctx.font = font;
+    if (ctx.measureText(text).width <= maxW) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+    return t + "…";
+  };
+
+  const smallFont = "400 8.5px Inter, sans-serif";
+  const nameFont = "300 16px Inter, sans-serif";
+  const emailFont = "300 9.5px Inter, sans-serif";
+  engrave("WORDS MEMBER", 14, 23, smallFont, "2px");
+  engrave(clipText(name, nameFont, CARD_W - 14 - 104), 14, CARD_H / 2 + 2, nameFont, "0.3px");
+  // Slightly tighter than the name: measureText doesn't include the letter
+  // spacing applied at draw time, so leave headroom before the logo petals.
+  engrave(clipText(email, emailFont, CARD_W - 14 - 116), 14, CARD_H / 2 + 16, emailFont, "0.4px");
+  if (since) engrave(`MEMBER SINCE ${since.toUpperCase()}`, 14, CARD_H - 13, smallFont, "1.4px");
+
+  ctx.strokeStyle = "rgba(0,0,0,0.2)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(0.5, 0.5, CARD_W - 1, CARD_H - 1, 10);
+  ctx.stroke();
+  ctx.restore();
+};
+
+// Copy: just the card at 3x.
+const renderMemberCardImage = async (name, email, since) => {
+  const SCALE = 3;
+  const canvas = document.createElement("canvas");
+  canvas.width = CARD_W * SCALE;
+  canvas.height = CARD_H * SCALE;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(SCALE, SCALE);
+  await drawMemberCardFace(ctx, { name, email, since });
+  return new Promise((res) => canvas.toBlob(res, "image/png"));
+};
+
+// Save: a US Letter landscape sheet (11×8.5in @300dpi) — Words logo up top,
+// the card big in the middle with a soft drop shadow, usewords.app below.
+// The engraving is softened (embossScale) so the enlarged text doesn't look
+// like heavy 3D extrusion at print size.
+const renderMemberCardSheet = async (name, email, since) => {
+  const W = 3300, H = 2550;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, W, H);
+
+  try {
+    const logo = await loadImage("/logolight.png");
+    const lh = 200;
+    const lw = (logo.width / logo.height) * lh;
+    ctx.drawImage(logo, (W - lw) / 2, 250, lw, lh);
+  } catch { /* logo optional */ }
+
+  const cs = 7; // card scale: 232×132 → 1624×924
+  const cardX = (W - CARD_W * cs) / 2;
+  const cardY = (H - CARD_H * cs) / 2;
+
+  // Soft drop shadow under the card (drawn unscaled — shadowBlur ignores transforms)
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.28)";
+  ctx.shadowBlur = 90;
+  ctx.shadowOffsetY = 45;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, CARD_W * cs, CARD_H * cs, 10 * cs);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(cardX, cardY);
+  ctx.scale(cs, cs);
+  await drawMemberCardFace(ctx, { name, email, since, embossScale: 0.45 });
+  ctx.restore();
+
+  ctx.fillStyle = "#9a9a97";
+  ctx.font = "500 44px Inter, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("usewords.app", W / 2, H - 230);
+
+  return new Promise((res) => canvas.toBlob(res, "image/png"));
+};
+
+const MembershipCard = ({ user }) => {
+  const cardRef = useRef(null);
+  const wrapRef = useRef(null);
+  const menuRef = useRef(null);
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const [cardMenu, setCardMenu] = useState(null); // null | { x, y } — anchor right of the card
+  const [copied, setCopied] = useState(false);
+  const tiltX = useMotionValue(0);
+  const tiltY = useMotionValue(0);
+  const springX = useSpring(tiltX, { stiffness: 320, damping: 26, mass: 0.55 });
+  const springY = useSpring(tiltY, { stiffness: 320, damping: 26, mass: 0.55 });
+
+  // The highlight hangs from a fixed overhead light: it slides opposite the
+  // tilt (right edge dips back → light catches the left side), riding the same
+  // springs as the rotation so the motion stays buttery and physical.
+  const lightX = useTransform(springY, [-9, 9], [66, 34]);
+  const lightY = useTransform(springX, [-7, 7], [-26, -2]);
+  const reflectionBg = useMotionTemplate`radial-gradient(175% 115% at ${lightX}% ${lightY}%, rgba(255,255,255,1) 0%, rgba(255,255,255,0.4) 42%, rgba(255,255,255,0) 72%)`;
+
+  const rawName = user.displayName || (user.email ? user.email.split("@")[0] : "Member");
+  const nameParts = rawName.trim().split(/\s+/);
+  // First name + last initial — "Julian McGuire" → "Julian M."
+  const name = nameParts.length > 1
+    ? `${nameParts[0]} ${nameParts[nameParts.length - 1][0].toUpperCase()}.`
+    : nameParts[0];
+  const since = (() => {
+    const t = user.metadata?.creationTime;
+    if (!t) return null;
+    const d = new Date(t);
+    return isNaN(d) ? null : d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  })();
+
+  // Close the card menu on any outside press (it's portaled, so check both)
+  useEffect(() => {
+    if (!cardMenu) return;
+    const onDown = (e) => {
+      if (!wrapRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) {
+        setCardMenu(null);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [cardMenu]);
+
+  const saveBlob = (blob) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "words-membership-card.png";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+
+  const copyCard = async () => {
+    const blob = await renderMemberCardImage(name, user.email || "", since);
+    if (!blob) return;
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      setCopied(true);
+      setTimeout(() => { setCopied(false); setCardMenu(null); }, 900);
+    } catch {
+      saveBlob(blob); // clipboard unavailable — fall back to download
+      setCardMenu(null);
+    }
+  };
+
+  const saveCard = async () => {
+    const blob = await renderMemberCardSheet(name, user.email || "", since);
+    if (blob) saveBlob(blob);
+    setCardMenu(null);
+  };
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <motion.div
+        ref={cardRef}
+        className={`member-card select-none cursor-pointer${cardMenu ? " mc-active" : ""}`}
+        style={{
+          height: CARD_H,
+          borderRadius: 10,
+          "--lisse-skip": 1,
+          rotateX: springX,
+          rotateY: springY,
+          transformPerspective: 700,
+        }}
+        animate={{
+          // Pressed always shows the idle shadow, even mid-hover — the card
+          // should read as settled while held down, not still lifted.
+          boxShadow: !pressed && (hovered || cardMenu)
+            ? "inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(0,0,0,0.12), 0 14px 30px rgba(0,0,0,0.30), 0 5px 12px rgba(0,0,0,0.18)"
+            : "inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.16), 0 1px 3px rgba(0,0,0,0.10)",
+          scale: pressed ? 0.965 : 1,
+          y: pressed ? 3 : 0,
+        }}
+        transition={{
+          boxShadow: { duration: pressed ? 0.12 : 0.25, ease: "easeOut" },
+          scale: { type: "spring", stiffness: 500, damping: 30 },
+          y: { type: "spring", stiffness: 500, damping: 30 },
+        }}
+        onClick={() => {
+          if (cardMenu) { setCardMenu(null); return; }
+          const r = cardRef.current?.getBoundingClientRect();
+          if (r) setCardMenu({ x: r.right + 12, y: r.top + r.height / 2 });
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseDown={() => setPressed(true)}
+        onMouseUp={() => setPressed(false)}
+        onMouseMove={(e) => {
+          const rect = cardRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const px = (e.clientX - rect.left) / rect.width;
+          const py = (e.clientY - rect.top) / rect.height;
+          tiltX.set((py - 0.5) * 2 * -7);
+          tiltY.set((px - 0.5) * 2 * 9);
+        }}
+        onMouseLeave={() => { setHovered(false); setPressed(false); tiltX.set(0); tiltY.set(0); }}
+      >
+        {/* Brushed titanium texture */}
+        <img src="/metal.jpg" alt="" aria-hidden="true" className="absolute inset-0 w-full h-full object-cover opacity-40 pointer-events-none" />
+        {/* Overhead light — highlight position derives from the tilt angle */}
+        <motion.div className="mc-reflection" style={{ background: reflectionBg }} />
+        {/* Embossed logo — the card edge slices it at its midpoint */}
+        <img src="/card%20logo.png" alt="" aria-hidden="true" className="absolute top-1/2 -translate-y-1/2 -right-[104px] w-52 h-52 object-contain opacity-90 pointer-events-none" />
+
+        <div className="relative z-10 h-full p-3.5">
+          <p className="mc-engraved text-[8.5px] font-normal tracking-[0.24em] uppercase">Words Member</p>
+          {/* Name + email — left-aligned, ending before the logo's petals */}
+          <div className="absolute inset-y-0 left-3.5 right-[104px] flex flex-col justify-center items-start text-left pointer-events-none">
+            <p className="mc-engraved text-[16px] font-light tracking-[0.02em] leading-tight max-w-full truncate" title={name}>{name}</p>
+            <p className="mc-engraved text-[9.5px] font-light tracking-[0.04em] mt-0.5 max-w-full truncate" title={user.email}>{user.email}</p>
+          </div>
+          {since && (
+            <p className="mc-engraved absolute bottom-3.5 left-3.5 text-[8.5px] font-normal tracking-[0.16em] uppercase">
+              Member since {since}
+            </p>
+          )}
+        </div>
+      </motion.div>
+
+      {/* Card actions — pops out to the RIGHT of the card. Portaled: the cloud
+          menu panel's squircle clip-path would slice off anything past its
+          border. words-context-menu keeps the global outside-click handler
+          from closing the whole cloud menu when clicking in here. */}
+      {createPortal(
+        <AnimatePresence>
+          {cardMenu && (
+            <motion.div
+              key="card-menu"
+              ref={menuRef}
+              className="words-context-menu fixed z-[120]"
+              style={{ left: cardMenu.x, top: cardMenu.y, transform: "translateY(-50%)", transformOrigin: "left center" }}
+              initial={{ opacity: 0, scale: 0.95, x: -4, y: "-50%", filter: "blur(3px)" }}
+              animate={{ opacity: 1, scale: 1, x: 0, y: "-50%", filter: "blur(0px)" }}
+              exit={{ opacity: 0, scale: 0.95, x: -4, y: "-50%", filter: "blur(3px)" }}
+              transition={{ opacity: { duration: 0.1 }, filter: { duration: 0.12 }, scale: { type: "spring", stiffness: 500, damping: 30 }, x: { type: "spring", stiffness: 500, damping: 30 } }}
+            >
+              <svg className="absolute pointer-events-none z-10" style={{ top: "50%", left: "-9px", transform: "translateY(-50%)" }} width="10" height="20" viewBox="0 0 10 20" fill="none">
+                <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)" />
+                <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
+              </svg>
+              <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-36">
+                <button
+                  onClick={(e) => { e.stopPropagation(); copyCard(); }}
+                  className="w-full text-left px-2 py-1.5 rounded flex items-center gap-2 text-[12.5px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                >
+                  {copied ? <Check size={13} className="text-green-500" /> : <Copy size={13} className="text-[var(--color-text-muted)]" />}
+                  {copied ? "Copied" : "Copy image"}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); saveCard(); }}
+                  className="w-full text-left px-2 py-1.5 rounded flex items-center gap-2 text-[12.5px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                >
+                  <Download size={13} className="text-[var(--color-text-muted)]" />
+                  Save image
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+    </div>
+  );
+};
+
+// Small pill switch for the accessibility panel
+const A11ySwitch = ({ checked, onChange, label }) => (
+  <button
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    onClick={onChange}
+    className={`relative w-8 h-[18px] rounded-full flex-shrink-0 transition-colors duration-150 ${checked ? "bg-[#E8572A]" : "bg-[var(--color-border-hover)]"}`}
+  >
+    <span
+      className="absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform duration-150"
+      style={{ transform: checked ? "translateX(14px)" : "translateX(0)" }}
+    />
+  </button>
+);
+
 // Define the separated commands
 const COMMANDS = [
   {
@@ -505,6 +865,20 @@ const mergeLocalHistory = (incoming, current) => {
     const local = byId.get(d.id);
     return local && local.length > 0 ? { ...d, editHistory: local } : d;
   });
+};
+
+const IS_MAC = /Mac|iPhone|iPad/i.test(navigator.platform || "");
+
+// Compact relative age for trash rows: "3d ago", "2h ago", "just now"
+const timeAgo = (t) => {
+  if (!t) return "";
+  const diff = Date.now() - t;
+  const days = Math.floor(diff / 86400000);
+  if (days > 0) return `${days}d ago`;
+  const hours = Math.floor(diff / 3600000);
+  if (hours > 0) return `${hours}h ago`;
+  const mins = Math.floor(diff / 60000);
+  return mins > 0 ? `${mins}m ago` : "just now";
 };
 
 const hasMeaningfulText = (text = "") => text.replace(/\u00A0/g, " ").trim().length > 0;
@@ -1150,7 +1524,11 @@ export default function App() {
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [shareDocMenuOpen, setShareDocMenuOpen] = useState(false);
   const [gdocsLoading, setGdocsLoading] = useState(false);
-  const [styleAccordionOpen, setStyleAccordionOpen] = useState(false);
+  const [styleMenuOpen, setStyleMenuOpen] = useState(null); // null | { top: px offset of Style row in options menu }
+  // The style pop-out lives inside the options menu — never outlive it
+  useEffect(() => {
+    if (!shareMenuOpen) setStyleMenuOpen(null);
+  }, [shareMenuOpen]);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const [docs, setDocs] = useState(() => {
@@ -1236,7 +1614,26 @@ export default function App() {
   // Cloud Sync State
   const [user, setUser] = useState(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [trashViewOpen, setTrashViewOpen] = useState(false);
+  // Cloud menu pop-out submenus: null | 'trash' | 'a11y'
+  const [cloudSubmenu, setCloudSubmenu] = useState(null);
+
+  // Accessibility settings — applied as classes/zoom on <html>, persisted
+  const [a11y, setA11y] = useState(() => {
+    const defaults = { scale: 1, highContrast: false, reduceMotion: false };
+    try { return { ...defaults, ...JSON.parse(localStorage.getItem('words_a11y') || '{}') }; }
+    catch { return defaults; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('words_a11y', JSON.stringify(a11y)); } catch { /* private mode */ }
+    const root = document.documentElement;
+    root.style.zoom = a11y.scale === 1 ? '' : String(a11y.scale);
+    // Viewport units don't shrink under zoom — h-screen would paint taller
+    // than the viewport and push the sidebar bottom (cloud button) off-screen.
+    // Layout heights divide by this to stay viewport-exact.
+    root.style.setProperty('--a11y-zoom', String(a11y.scale));
+    root.classList.toggle('a11y-high-contrast', a11y.highContrast);
+    root.classList.toggle('a11y-reduce-motion', a11y.reduceMotion);
+  }, [a11y]);
   const [pressedPinId, setPressedPinId] = useState(null);
   const [trashHoverDocId, setTrashHoverDocId] = useState(null);
   const [trashHoverPos, setTrashHoverPos] = useState({ top: 0, left: 0 });
@@ -1500,6 +1897,21 @@ export default function App() {
         e.preventDefault();
         setIsSearching(true);
       }
+      // Cmd/Ctrl+Shift+M — toggle the sidebar (drawer on narrow viewports).
+      // Deliberately a letter key, not punctuation: physical backslash placement
+      // varies wildly across ISO/JIS/ANSI keyboard layouts (it was Backslash
+      // before and unreliable off US layouts), while letter-key codes stay
+      // consistent. "M" for Minimize also isn't a reserved OS/browser combo —
+      // Cmd+M alone is "minimize to dock" on macOS, but Cmd+Shift+M is free.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.code === 'KeyM') {
+        e.preventDefault();
+        if (isNarrowViewport) {
+          setIsSidebarPeeking((v) => !v);
+        } else {
+          setIsSidebarOpen((v) => !v);
+          setIsSidebarPeeking(false);
+        }
+      }
     };
     const onKeyUp = (e) => { if (e.key === 'Alt') setIsAltHeld(false); };
     const onBlur = () => setIsAltHeld(false);
@@ -1511,7 +1923,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [undoDeleteDoc]);
+  }, [undoDeleteDoc, isNarrowViewport]);
 
   const filteredCommands = COMMANDS.filter(
     (cmd) =>
@@ -3074,6 +3486,22 @@ export default function App() {
       while (editorRef.current.firstChild && editorRef.current.firstChild.nodeName === 'BR') {
         editorRef.current.removeChild(editorRef.current.firstChild);
       }
+      // Lists created in an empty paragraph get nested inside it
+      // (<p><ul>…</ul></p>), and the wrapper renders as a phantom blank line
+      // above the list. Unwrap — the caret lives in the li, which survives.
+      editorRef.current.querySelectorAll('p > ul, p > ol, h1 > ul, h1 > ol, h2 > ul, h2 > ol, h3 > ul, h3 > ol').forEach((list) => {
+        const wrapper = list.parentElement;
+        const onlyList = Array.from(wrapper.childNodes).every(
+          (n) => n === list || n.nodeName === 'BR' || (n.nodeType === 3 && !n.textContent.trim())
+        );
+        const sel = window.getSelection();
+        const saved = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+        if (onlyList) wrapper.replaceWith(list);
+        else wrapper.after(list); // wrapper keeps its own text, list becomes a sibling
+        if (saved) {
+          try { sel.removeAllRanges(); sel.addRange(saved); } catch { /* caret was elsewhere */ }
+        }
+      });
     }
     const newContent = editorRef.current?.innerHTML || "<p><br></p>";
     setDocs((prev) => {
@@ -5316,7 +5744,7 @@ export default function App() {
         setShareMenuOpen(false);
         setShareDocMenuOpen(false);
         setUserMenuOpen(false);
-        setTrashViewOpen(false);
+        setCloudSubmenu(null);
         setTrashHoverDocId(null);
       }
     };
@@ -5492,7 +5920,12 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans selection:bg-[#E8572A33] overflow-hidden relative w-full">
+    <MotionConfig reducedMotion={a11y.reduceMotion ? "always" : "user"}>
+    <div
+      className="flex h-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] font-sans selection:bg-[#E8572A33] overflow-hidden relative w-full"
+      style={{ height: 'calc(100vh / var(--a11y-zoom, 1))' }}
+    >
+      <TooltipLayer />
       {/* Spotlight Search */}
       <SpotlightSearch
         isOpen={isSearching}
@@ -6065,105 +6498,18 @@ export default function App() {
                 </div>
                 <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
                 <button
-                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center justify-between text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                  onClick={() => setStyleAccordionOpen(!styleAccordionOpen)}
+                  className={`w-full text-left px-2.5 py-1.5 rounded flex items-center justify-between text-[13px] text-[var(--color-text-primary)] transition-colors ${styleMenuOpen ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]'}`}
+                  onClick={(e) => {
+                    // offsetParent is the positioned options-menu container, so
+                    // offsetTop anchors the pop-out to this row
+                    setStyleMenuOpen(styleMenuOpen ? null : { top: e.currentTarget.offsetTop });
+                  }}
                 >
                   <div className="flex items-center gap-2.5">
                     <Paintbrush size={14} /> Style
                   </div>
-                  <ChevronDown size={14} className={`transition-transform duration-200 text-[var(--color-text-muted)] ${styleAccordionOpen ? 'rotate-180' : ''}`} />
+                  <ChevronDown size={14} className={`transition-transform duration-200 text-[var(--color-text-muted)] ${styleMenuOpen ? 'rotate-90' : ''}`} />
                 </button>
-                <AnimatePresence>
-                  {styleAccordionOpen && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="overflow-hidden"
-                    >
-                      <div className="pt-2 pb-1 flex flex-col gap-3 px-3">
-                        {/* Text Alignment */}
-                        <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md p-1 items-center justify-between">
-                          {['left', 'center', 'right', 'justify'].map((align) => {
-                            const active = activeDoc?.textAlign === align || (!activeDoc?.textAlign && align === 'left');
-                            return (
-                              <button
-                                key={align}
-                                onClick={() => {
-                                  captureHistorySnapshot('user', `Aligned ${align}`);
-                                  setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: align } : d));
-                                  if (editorRef.current) {
-                                    editorRef.current.querySelectorAll('*').forEach(el => {
-                                      if (el.style) el.style.textAlign = '';
-                                      if (el.hasAttribute('align')) el.removeAttribute('align');
-                                    });
-                                    syncContentToState();
-                                  }
-                                }}
-                                className={`flex-1 flex justify-center py-1.5 rounded-sm transition-colors ${active ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'} hover:bg-[var(--color-bg-hover)]`}
-                              >
-                                {align === 'left' && <AlignLeft size={16} />}
-                                {align === 'center' && <AlignCenter size={16} />}
-                                {align === 'right' && <AlignRight size={16} />}
-                                {align === 'justify' && <AlignJustify size={16} />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {/* Line Spacing UI */}
-                        <div className="flex flex-col border border-[var(--color-border-primary)] rounded-md overflow-hidden bg-[var(--color-bg-secondary)]">
-                          {['1.0', '1.5', '2.0'].map((space, idx) => {
-                            const lbl = space === '1.0' ? 'Compact' : space === '1.5' ? 'Standard' : 'Spacious';
-                                const active = activeDoc?.lineSpacing === space || (!activeDoc?.lineSpacing && space === '1.5');
-                                return (
-                                  <button
-                                    key={space}
-                                    onClick={() => {
-                                      captureHistorySnapshot('user', `Changed spacing to ${lbl}`);
-                                      setIsSpacingAnimating(true);
-                                      setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, lineSpacing: space } : d));
-                                      setTimeout(() => setIsSpacingAnimating(false), 350);
-                                    }}
-                                className={`text-[12px] py-1.5 px-3 text-left hover:bg-[var(--color-bg-hover)] transition-colors ${active ? 'bg-[var(--color-bg-primary)] text-[#E8572A] font-medium' : 'text-[var(--color-text-muted)]'} ${idx > 0 ? 'border-t border-[var(--color-border-primary)]' : ''}`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <div className="flex flex-col opacity-70" style={{ gap: space === '1.0' ? '1px' : space === '1.5' ? '2px' : '4px' }}>
-                                    <div className="w-3 h-0.5 bg-current rounded-full" />
-                                    <div className="w-3 h-0.5 bg-current rounded-full" />
-                                    <div className="w-2 h-0.5 bg-current rounded-full" />
-                                  </div>
-                                  {lbl}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      
-                      {/* Sub Divider */}
-                      <div className="h-px bg-[var(--color-border-primary)] mx-3 my-1" />
-
-                      {/* Hide Title */}
-                      <button
-                        className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                        onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, hideTitle: !d.hideTitle } : d))}
-                      >
-                        <EyeOff size={14} className={activeDoc?.hideTitle ? "text-[#E8572A]" : "text-[var(--color-text-muted)]"} />
-                        <span className={activeDoc?.hideTitle ? "text-[#E8572A]" : ""}>Hide title</span>
-                      </button>
-
-                      {/* Full Width Layout */}
-                      <button
-                        className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                        onClick={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, fullWidth: !d.fullWidth } : d))}
-                      >
-                        {activeDoc?.fullWidth ? <Minimize2 size={14} className="text-[#E8572A]" /> : <Maximize2 size={14} className="text-[var(--color-text-muted)]" />}
-                        <span className={activeDoc?.fullWidth ? "text-[#E8572A]" : ""}>Full width page</span>
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
                 <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
                 <button
                   className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
@@ -6191,6 +6537,116 @@ export default function App() {
                   <Printer size={14} /> Print
                 </button>
               </div>
+
+              {/* Style pop-out — sibling of the panel so its squircle clip can't cut it off.
+                  Anchored to the Style row; tail on the right edge points back at it. */}
+              <AnimatePresence>
+                {styleMenuOpen && (
+                  <motion.div
+                    key="style-popout"
+                    className="absolute z-[50]"
+                    style={{ top: styleMenuOpen.top, right: 'calc(100% + 10px)', transformOrigin: 'right top' }}
+                    initial={{ opacity: 0, scale: 0.95, x: 4, filter: 'blur(4px)' }}
+                    animate={{ opacity: 1, scale: 1, x: 0, filter: 'blur(0px)' }}
+                    exit={{ opacity: 0, scale: 0.95, x: 4, filter: 'blur(4px)' }}
+                    transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, x: { type: 'spring', stiffness: 450, damping: 28 } }}
+                  >
+                    <svg className="absolute pointer-events-none z-10" style={{ top: '5px', right: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
+                      <path d="M0,0 C0,4 10,7 10,10 C10,13 0,16 0,20 Z" fill="var(--color-bg-primary)" />
+                      <path d="M0,0 C0,4 10,7 10,10 C10,13 0,16 0,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
+                    </svg>
+                    <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl w-[240px] py-2 px-2">
+                      <p className="px-1 pb-1.5 text-[11px] font-semibold tracking-wide uppercase text-[var(--color-text-faint)] select-none">Style</p>
+
+                      {/* Alignment */}
+                      <div className="px-1 pb-2">
+                        <p className="text-[12px] text-[var(--color-text-primary)] mb-1.5">Alignment</p>
+                        <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md p-1 items-center gap-0.5">
+                          {['left', 'center', 'right', 'justify'].map((align) => {
+                            const active = activeDoc?.textAlign === align || (!activeDoc?.textAlign && align === 'left');
+                            return (
+                              <button
+                                key={align}
+                                onClick={() => {
+                                  captureHistorySnapshot('user', `Aligned ${align}`);
+                                  setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, textAlign: align } : d));
+                                  if (editorRef.current) {
+                                    editorRef.current.querySelectorAll('*').forEach(el => {
+                                      if (el.style) el.style.textAlign = '';
+                                      if (el.hasAttribute('align')) el.removeAttribute('align');
+                                    });
+                                    syncContentToState();
+                                  }
+                                }}
+                                className={`flex-1 flex justify-center py-1 rounded-sm transition-colors ${active ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'}`}
+                              >
+                                {align === 'left' && <AlignLeft size={15} />}
+                                {align === 'center' && <AlignCenter size={15} />}
+                                {align === 'right' && <AlignRight size={15} />}
+                                {align === 'justify' && <AlignJustify size={15} />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Spacing */}
+                      <div className="px-1 pb-2">
+                        <p className="text-[12px] text-[var(--color-text-primary)] mb-1.5">Spacing</p>
+                        <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md p-1 items-center gap-0.5">
+                          {['1.0', '1.5', '2.0'].map((space) => {
+                            const lbl = space === '1.0' ? 'Compact' : space === '1.5' ? 'Standard' : 'Spacious';
+                            const active = activeDoc?.lineSpacing === space || (!activeDoc?.lineSpacing && space === '1.5');
+                            return (
+                              <button
+                                key={space}
+                                onClick={() => {
+                                  captureHistorySnapshot('user', `Changed spacing to ${lbl}`);
+                                  setIsSpacingAnimating(true);
+                                  setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, lineSpacing: space } : d));
+                                  setTimeout(() => setIsSpacingAnimating(false), 350);
+                                }}
+                                className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded-sm transition-colors ${active ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'}`}
+                              >
+                                <div className="flex flex-col opacity-70" style={{ gap: space === '1.0' ? '1.5px' : space === '1.5' ? '2.5px' : '4px' }}>
+                                  <div className="w-3.5 h-0.5 bg-current rounded-full" />
+                                  <div className="w-3.5 h-0.5 bg-current rounded-full" />
+                                  <div className="w-2.5 h-0.5 bg-current rounded-full" />
+                                </div>
+                                <span className="text-[9.5px] font-medium leading-none">{lbl}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="h-px bg-[var(--color-border-primary)] mx-1 mb-1" />
+
+                      {/* Page toggles */}
+                      <div className="flex items-center justify-between px-1 py-1.5">
+                        <span className="flex items-center gap-2 text-[12px] text-[var(--color-text-primary)]">
+                          <EyeOff size={13} className="text-[var(--color-text-muted)]" /> Hide title
+                        </span>
+                        <A11ySwitch
+                          checked={!!activeDoc?.hideTitle}
+                          onChange={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, hideTitle: !d.hideTitle } : d))}
+                          label="Hide title"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between px-1 py-1.5">
+                        <span className="flex items-center gap-2 text-[12px] text-[var(--color-text-primary)]">
+                          <Maximize2 size={13} className="text-[var(--color-text-muted)]" /> Full width page
+                        </span>
+                        <A11ySwitch
+                          checked={!!activeDoc?.fullWidth}
+                          onChange={() => setDocs(prev => prev.map(d => d.id === activeDocId ? { ...d, fullWidth: !d.fullWidth } : d))}
+                          label="Full width page"
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
           )}
           </AnimatePresence>
@@ -6212,6 +6668,7 @@ export default function App() {
             else setIsSidebarOpen(true);
           }}
           className="p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+          title={`Open sidebar||${IS_MAC ? '⌘' : 'Ctrl'} ⇧ M`}
         >
           <Menu size={20} />
         </button>
@@ -6261,7 +6718,7 @@ export default function App() {
                     layoutId="spotlight-shell"
                     onClick={() => setIsSearching(true)}
                     className="text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
-                    title="Search"
+                    title={`Search||${IS_MAC ? '⌘' : 'Ctrl'} K`}
                     style={{ padding: 4, borderRadius: 6, '--lisse-skip': 1 }}
                     exit={{ transition: { duration: 0.001 } }}
                     transition={{ layout: { type: 'spring', stiffness: 480, damping: 42, mass: 0.85 } }}
@@ -6290,6 +6747,7 @@ export default function App() {
                     }
                   }}
                   className="p-1 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
+                  title={isSidebarPeeking ? "Pin sidebar" : `Collapse sidebar||${IS_MAC ? '⌘' : 'Ctrl'} ⇧ M`}
                 >
                   {isSidebarPeeking ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
                 </button>
@@ -6400,7 +6858,9 @@ export default function App() {
                                   ? "pin-active text-[var(--color-text-primary)] z-10"
                                   : "pin-inactive text-[var(--color-text-muted)]"
                                   }`}
-                                title={doc.title || "New Page"}
+                                // No title/tooltip here — the existing 600ms hover-preview
+                                // card already shows the title (and content), so a text
+                                // tooltip on top of it was redundant and felt cluttered.
                               >
                                 <div className="text-xl flex-shrink-0 leading-none select-none flex items-center justify-center pointer-events-none">
                                   {doc.emoji ? (
@@ -6708,7 +7168,7 @@ export default function App() {
           {/* Cloud Sync Toggle */}
           <div ref={cloudButtonRef} className="absolute bottom-4 left-4 z-40">
             <button
-              onClick={() => user ? setUserMenuOpen(!userMenuOpen) : setAuthModal('login')}
+              onClick={() => { if (user) { setUserMenuOpen(!userMenuOpen); setCloudSubmenu(null); } else setAuthModal('login'); }}
               className={`words-context-menu p-1.5 rounded-md transition-colors hover:bg-[var(--color-bg-hover-strong)] ${user ? "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]" : "flex items-center gap-1.5 text-[var(--color-text-primary)] bg-[var(--color-bg-hover)]"}`}
               title={user ? "Cloud Sync Active" : "Sign up to sync your notes"}
             >
@@ -6750,11 +7210,15 @@ export default function App() {
               )}
             </button>
 
+            {/* Portaled: the sidebar is overflow-hidden AND transformed, so any
+                in-tree popover (and its right-side pop-outs) gets clipped by it.
+                Fixed position on body escapes both. */}
+            {createPortal(
             <AnimatePresence>
             {userMenuOpen && user && (
               <motion.div
                 key="user-menu"
-                className="words-context-menu absolute left-0 bottom-full mb-2 z-[60]"
+                className="words-context-menu fixed left-4 bottom-[56px] z-[95]"
                 initial={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(4px)' }}
                 animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
                 exit={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(4px)' }}
@@ -6762,53 +7226,88 @@ export default function App() {
                 style={{ transformOrigin: 'bottom left' }}
               >
               <svg className="absolute -bottom-[9px] left-4 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0 Z" fill="var(--color-bg-primary)"/><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
-              <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl z-[60] w-[220px] py-1 px-1">
+              <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl z-[60] w-[248px] p-2">
 
-                {/* User row */}
-                <div className="flex items-center gap-2.5 px-2.5 py-2 mb-0.5">
-                  <div
-                    className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-semibold text-white select-none"
-                    style={{ backgroundColor: `hsl(${(user.email.charCodeAt(0) * 47 + user.email.charCodeAt(1) * 13) % 360}, 40%, 55%)` }}
+                <MembershipCard user={user} />
+
+                {/* Icon row: sign out ··· accessibility / trash */}
+                <div className="flex items-center justify-between mt-2">
+                  <button
+                    onClick={() => { handleLogout(); setUserMenuOpen(false); setCloudSubmenu(null); setTrashHoverDocId(null); }}
+                    className="flex items-center gap-1.5 py-1 px-1.5 rounded-md text-red-500 hover:text-red-600 hover:bg-red-500/10 transition-colors"
                   >
-                    {user.email[0].toUpperCase()}
+                    <LogOut size={15} />
+                    <span className="text-[12px] font-medium">Sign out</span>
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setCloudSubmenu((v) => (v === 'a11y' ? null : 'a11y'))}
+                      className={`p-1 rounded-md transition-colors ${cloudSubmenu === 'a11y' ? 'bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                      title="Accessibility"
+                    >
+                      <PersonStanding size={18} />
+                    </button>
+                    <button
+                      onClick={() => setCloudSubmenu((v) => (v === 'trash' ? null : 'trash'))}
+                      className={`relative p-1 rounded-md transition-colors ${cloudSubmenu === 'trash' ? 'bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
+                      title="Trash"
+                      style={{ '--lisse-skip': 1 }}
+                    >
+                      <Trash2 size={18} />
+                      {trashedDocs.length > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-0.5 rounded-full bg-[#E8572A] text-white text-[8px] font-semibold flex items-center justify-center leading-none pointer-events-none">
+                          {trashedDocs.length > 9 ? '9+' : trashedDocs.length}
+                        </span>
+                      )}
+                    </button>
                   </div>
-                  <p className="text-[12px] text-[var(--color-text-muted)] truncate flex-1 min-w-0" title={user.email}>{user.email}</p>
                 </div>
 
-                <div className="h-px bg-[var(--color-border-primary)] mx-1 mb-1" />
+              </div>
 
-                {/* Trash collapsible section */}
-                <button
-                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center justify-between text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                  onClick={() => setTrashViewOpen(v => !v)}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Trash2 size={14} className="text-[var(--color-text-muted)]" />
-                    Trash
-                    {trashedDocs.length > 0 && (
-                      <span className="text-[11px] text-[var(--color-text-faint)]">{trashedDocs.length}</span>
-                    )}
-                  </div>
-                  <ChevronDown size={13} className={`transition-transform duration-200 text-[var(--color-text-muted)] ${trashViewOpen ? 'rotate-180' : ''}`} />
-                </button>
-                <AnimatePresence>
-                  {trashViewOpen && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.18 }}
-                      className="overflow-hidden"
-                    >
+              {/* Pop-out submenus — siblings of the panel so its squircle clip can't cut them off */}
+              <AnimatePresence>
+                {cloudSubmenu === 'trash' && (
+                  <motion.div
+                    key="cloud-trash"
+                    className="absolute left-[calc(100%+10px)] bottom-0 z-[70]"
+                    initial={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(4px)' }}
+                    animate={{ opacity: 1, scale: 1, x: 0, filter: 'blur(0px)' }}
+                    exit={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(4px)' }}
+                    transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, x: { type: 'spring', stiffness: 450, damping: 28 } }}
+                    style={{ transformOrigin: 'left bottom' }}
+                  >
+                    <svg className="absolute pointer-events-none z-10" style={{ bottom: '9px', left: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
+                      <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)" />
+                      <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
+                    </svg>
+                    <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl w-[244px] py-1.5 px-1.5">
+                      {/* Header: title + count, Empty action inline where it's discoverable */}
+                      <div className="flex items-center justify-between px-1.5 pb-1">
+                        <p className="text-[11px] font-semibold tracking-wide uppercase text-[var(--color-text-faint)] select-none">
+                          Trash{trashedDocs.length > 0 && <span className="ml-1 font-medium">· {trashedDocs.length}</span>}
+                        </p>
+                        {trashedDocs.length > 0 && (
+                          <button
+                            onClick={emptyTrash}
+                            className="text-[11px] font-medium text-[var(--color-text-faint)] hover:text-red-500 px-1 py-0.5 rounded transition-colors"
+                          >
+                            Empty
+                          </button>
+                        )}
+                      </div>
                       {trashedDocs.length === 0 ? (
-                        <p className="px-2.5 py-2 text-[12px] text-[var(--color-text-faint)] italic">Nothing in trash</p>
+                        <div className="flex flex-col items-center justify-center py-5 gap-1.5">
+                          <Trash2 size={18} className="text-[var(--color-text-faint)] opacity-60" />
+                          <p className="text-[12px] text-[var(--color-text-faint)]">Trash is empty</p>
+                        </div>
                       ) : (
                         <>
-                          <div className="max-h-[180px] overflow-y-auto">
+                          <div className="max-h-[224px] overflow-y-auto flex flex-col gap-px">
                             {trashedDocs.map(d => (
                               <div
                                 key={d.id}
-                                className="group/ti flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--color-bg-hover)] transition-colors"
+                                className="group/ti flex items-center gap-2 px-1.5 py-1.5 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors"
                                 onMouseEnter={(e) => {
                                   clearTimeout(trashHoverTimeoutRef.current);
                                   const rect = e.currentTarget.getBoundingClientRect();
@@ -6822,57 +7321,105 @@ export default function App() {
                                   trashHoverTimeoutRef.current = setTimeout(() => setTrashHoverDocId(null), 200);
                                 }}
                               >
-                                <span className="text-[var(--color-text-faint)] flex-shrink-0">
-                                  {d.emoji ? <span className="text-[12px]">{d.emoji}</span> : <File size={12} />}
+                                <span className="text-[var(--color-text-faint)] flex-shrink-0 w-5 flex justify-center">
+                                  {d.emoji ? <span className="text-[13px]">{d.emoji}</span> : <File size={13} />}
                                 </span>
-                                <span className="text-[12px] text-[var(--color-text-muted)] truncate flex-1 min-w-0 group-hover/ti:text-[var(--color-text-primary)] transition-colors">
-                                  {d.title || 'Untitled'}
-                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-[12.5px] text-[var(--color-text-muted)] truncate leading-tight group-hover/ti:text-[var(--color-text-primary)] transition-colors">
+                                    {d.title || 'Untitled'}
+                                  </p>
+                                  <p className="text-[10px] text-[var(--color-text-faint)] leading-tight mt-px">
+                                    Deleted {timeAgo(d.deletedAt)}
+                                  </p>
+                                </div>
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover/ti:opacity-100 transition-opacity flex-shrink-0">
                                   <button
-                                    onClick={() => { restoreFromTrash(d.id); setUserMenuOpen(false); setTrashViewOpen(false); setTrashHoverDocId(null); }}
-                                    className="p-1 rounded text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors"
+                                    onClick={() => { restoreFromTrash(d.id); setUserMenuOpen(false); setCloudSubmenu(null); setTrashHoverDocId(null); }}
+                                    className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover-strong)] transition-colors"
                                     title="Restore"
                                   >
-                                    <RotateCcw size={11} />
+                                    <RotateCcw size={12} />
                                   </button>
                                   <button
                                     onClick={() => { permanentlyDeleteFromTrash(d.id); setTrashHoverDocId(null); }}
-                                    className="p-1 rounded text-[var(--color-text-faint)] hover:text-red-500 transition-colors"
+                                    className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
                                     title="Delete forever"
                                   >
-                                    <X size={11} />
+                                    <X size={12} />
                                   </button>
                                 </div>
                               </div>
                             ))}
                           </div>
-                          <button
-                            onClick={emptyTrash}
-                            className="w-full text-center text-[11px] text-[var(--color-text-faint)] hover:text-red-400 transition-colors py-1.5 mt-0.5"
-                          >
-                            Empty Trash
-                          </button>
+                          <div className="h-px bg-[var(--color-border-primary)] mx-1 my-1" />
+                          <p className="px-1.5 pb-0.5 text-[10px] text-[var(--color-text-faint)] select-none">
+                            Pages are deleted forever after 30 days
+                          </p>
                         </>
                       )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                    </div>
+                  </motion.div>
+                )}
 
-                <div className="h-px bg-[var(--color-border-primary)] mx-1 mt-1 mb-1" />
+                {cloudSubmenu === 'a11y' && (
+                  <motion.div
+                    key="cloud-a11y"
+                    className="absolute left-[calc(100%+10px)] bottom-0 z-[70]"
+                    initial={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(4px)' }}
+                    animate={{ opacity: 1, scale: 1, x: 0, filter: 'blur(0px)' }}
+                    exit={{ opacity: 0, scale: 0.95, x: -4, filter: 'blur(4px)' }}
+                    transition={{ opacity: { duration: 0.12 }, filter: { duration: 0.15 }, scale: { type: 'spring', stiffness: 450, damping: 28 }, x: { type: 'spring', stiffness: 450, damping: 28 } }}
+                    style={{ transformOrigin: 'left bottom' }}
+                  >
+                    <svg className="absolute pointer-events-none z-10" style={{ bottom: '9px', left: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
+                      <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)" />
+                      <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
+                    </svg>
+                    <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl w-[240px] py-2 px-2">
+                      <p className="px-1 pb-1.5 text-[11px] font-semibold tracking-wide uppercase text-[var(--color-text-faint)] select-none">Accessibility</p>
 
-                {/* Sign out */}
-                <button
-                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-muted)] hover:text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
-                  onClick={() => { handleLogout(); setUserMenuOpen(false); setTrashViewOpen(false); setTrashHoverDocId(null); }}
-                >
-                  <LogOut size={14} /> Sign out
-                </button>
+                      {/* Text & UI scale */}
+                      <div className="px-1 pb-2">
+                        <p className="text-[12px] text-[var(--color-text-primary)] mb-1.5">Text &amp; UI size</p>
+                        <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md p-1 items-center gap-0.5">
+                          {[0.9, 1, 1.1, 1.25].map((s) => (
+                            <button
+                              key={s}
+                              onClick={() => setA11y((p) => ({ ...p, scale: s }))}
+                              className={`flex-1 py-1 rounded-sm text-[11.5px] transition-colors ${a11y.scale === s ? 'bg-[var(--color-bg-primary)] shadow-sm text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'}`}
+                            >
+                              {Math.round(s * 100)}%
+                            </button>
+                          ))}
+                        </div>
+                      </div>
 
-              </div>
+                      <div className="h-px bg-[var(--color-border-primary)] mx-1 mb-1" />
+
+                      <div className="flex items-center justify-between px-1 py-1.5">
+                        <span className="text-[12px] text-[var(--color-text-primary)]">High contrast</span>
+                        <A11ySwitch
+                          checked={a11y.highContrast}
+                          onChange={() => setA11y((p) => ({ ...p, highContrast: !p.highContrast }))}
+                          label="High contrast"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between px-1 py-1.5">
+                        <span className="text-[12px] text-[var(--color-text-primary)]">Reduce motion</span>
+                        <A11ySwitch
+                          checked={a11y.reduceMotion}
+                          onChange={() => setA11y((p) => ({ ...p, reduceMotion: !p.reduceMotion }))}
+                          label="Reduce motion"
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               </motion.div>
             )}
-            </AnimatePresence>
+            </AnimatePresence>,
+            document.body)}
           </div>
         </div>
         {/* Squish blur layers — band-based masks (same algorithm as GradualBlur).
@@ -8613,5 +9160,6 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+    </MotionConfig>
   );
 }

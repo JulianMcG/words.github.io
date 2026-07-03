@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Words</title>
+    <script>
+      // GitHub Pages has no server-side rewrites, so a direct/full navigation
+      // to a client-side route (e.g. /privacy) 404s here. Redirect to the
+      // real index.html, encoding the intended path in a query param that
+      // the app restores on load.
+      var path = location.pathname + location.search + location.hash;
+      location.replace('/?redirect=' + encodeURIComponent(path));
+    </script>
+  </head>
+  <body></body>
+</html>
