@@ -441,7 +441,7 @@ const renderMemberCardImage = async (name, email, since) => {
 };
 
 // Save: a US Letter landscape sheet (11×8.5in @300dpi) — Words logo up top,
-// the card big in the middle with a soft drop shadow, usewords.app below.
+// the card big in the middle with a soft drop shadow, words.do below.
 // The engraving is softened (embossScale) so the enlarged text doesn't look
 // like heavy 3D extrusion at print size.
 const renderMemberCardSheet = async (name, email, since) => {
@@ -485,7 +485,7 @@ const renderMemberCardSheet = async (name, email, since) => {
   ctx.fillStyle = "#9a9a97";
   ctx.font = "500 44px Inter, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("usewords.app", W / 2, H - 230);
+  ctx.fillText("words.do", W / 2, H - 230);
 
   return new Promise((res) => canvas.toBlob(res, "image/png"));
 };
@@ -7631,7 +7631,7 @@ export default function App() {
           {/* Print Logo */}
           <div className="hidden print:flex mb-6 items-center gap-2">
             <img src="/faviconlight.png" alt="Logo" className="w-5 h-5 object-contain" />
-            <span className="font-semibold text-[13px] text-[var(--color-text-muted)]">usewords.app</span>
+            <span className="font-semibold text-[13px] text-[var(--color-text-muted)]">words.do</span>
           </div>
           {" "}
           {/* From chip — zero-height so it doesn't shift the title position */}

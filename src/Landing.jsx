@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { motion, useTransform, useMotionValue, AnimatePresence, animate as animateMV } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -1179,44 +1179,72 @@ const ConvenienceSection = () => (
 );
 
 /* ─── Giant footer wordmark — thinned by a stroke; the cursor REDUCES the
-   stroke nearby, so the letters fill back in where you hover. ─── */
+   stroke nearby, so the letters fill back in where you hover. Clipped to
+   its top half so the page runs out of scroll partway through it, and a
+   mousedown press widens + deepens the fill-in for a stronger effect. ─── */
 const FooterWordmark = () => {
   const ref = useRef(null);
+  const clipRef = useRef(null);
+  const [clipHeight, setClipHeight] = useState(0);
+
+  // Only ever reveal the top half — the clip height caps how far the page can scroll.
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const measure = () => setClipHeight(root.getBoundingClientRect().height / 2);
+    measure();
+    window.addEventListener('resize', measure);
+    if (document.fonts?.ready) document.fonts.ready.then(measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
     const letters = [...root.querySelectorAll('.fw-letter')];
     let rects = [];
     let base = 16;
+    let pressed = false;
     const reset = () => letters.forEach(s => { s.style.webkitTextStrokeWidth = `${base}px`; });
     const upd = () => {
       base = parseFloat(getComputedStyle(root).fontSize) * 0.06; // stroke scales with the giant type
       rects = letters.map(s => { const r = s.getBoundingClientRect(); return { s, cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; });
     };
     const onMove = (e) => {
+      // Pressing the mouse down widens the radius and pushes the fill further, for a more intense goop.
+      const boost = pressed ? 1.6 : 1;
       for (const { s, cx, cy } of rects) {
         const d = Math.hypot(e.clientX - cx, e.clientY - cy);
-        const t = Math.max(0, 1 - d / 320);
+        const t = Math.max(0, 1 - d / (320 * boost));
+        const fill = Math.min(1, t * t * boost);
         // hovering reduces the stroke (letters thicken back toward solid)
-        s.style.webkitTextStrokeWidth = `${(base * (1 - t * t)).toFixed(2)}px`;
+        s.style.webkitTextStrokeWidth = `${(base * (1 - fill)).toFixed(2)}px`;
       }
     };
     const onEnter = () => { upd(); document.addEventListener('mousemove', onMove); };
     const onLeave = () => { document.removeEventListener('mousemove', onMove); reset(); };
+    const onDown = () => { pressed = true; };
+    const onUp = () => { pressed = false; };
     upd();
     reset();
     root.addEventListener('mouseenter', onEnter);
     root.addEventListener('mouseleave', onLeave);
+    root.addEventListener('mousedown', onDown);
+    window.addEventListener('mouseup', onUp);
     window.addEventListener('resize', () => { upd(); reset(); });
     return () => {
       root.removeEventListener('mouseenter', onEnter);
       root.removeEventListener('mouseleave', onLeave);
+      root.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mouseup', onUp);
       document.removeEventListener('mousemove', onMove);
     };
   }, []);
   return (
-    <div ref={ref} className="fw" aria-hidden="true">
-      {[...'Words'].map((c, i) => <span key={i} className="fw-letter">{c}</span>)}
+    <div ref={clipRef} className="fw-clip" style={{ height: clipHeight ? `${clipHeight}px` : undefined }}>
+      <div ref={ref} className="fw" aria-hidden="true">
+        {[...'Words'].map((c, i) => <span key={i} className="fw-letter">{c}</span>)}
+      </div>
     </div>
   );
 };
@@ -1489,7 +1517,7 @@ export default function Landing() {
           </div>
         </Reveal>
 
-        <div className="max-w-6xl mx-auto px-6 pt-12 pb-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[12px] text-[var(--color-text-faint)]">
+        <div className="relative z-20 max-w-6xl mx-auto px-6 pt-12 pb-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[12px] text-[var(--color-text-faint)]">
           <div className="flex items-center gap-5">
             <span>© {new Date().getFullYear()} Words</span>
             <a
@@ -1507,7 +1535,17 @@ export default function Landing() {
               Terms
             </a>
           </div>
-          <span>Designed in New Jersey by Julian McGuire.</span>
+          <span>
+            With love, the{' '}
+            <a
+              href="https://thenewjerseysoftware.company"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-[var(--color-text-primary)] transition-colors underline"
+            >
+              New Jersey Software Company
+            </a>
+          </span>
         </div>
 
         <div className="flex items-end justify-center -mb-[0.08em]">

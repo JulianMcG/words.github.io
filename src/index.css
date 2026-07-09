@@ -666,6 +666,10 @@ html[data-reduce-motion="true"] *::after {
 }
 
 /* ── Giant footer wordmark — faded grey, goops where the cursor passes ── */
+.fw-clip {
+  width: 100%;
+  overflow: hidden;
+}
 .fw {
   font-family: 'Averia Serif Libre', Georgia, serif;
   font-weight: 700;

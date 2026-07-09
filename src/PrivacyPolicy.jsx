@@ -24,7 +24,7 @@ export default function PrivacyPolicy() {
           <section>
             <p>
               Words ("we", "our", or "us") is a personal project operated by Julian McGuire. This Privacy Policy
-              explains what information we collect when you use Words at words.github.io, how we use it, and what
+              explains what information we collect when you use Words at words.do, how we use it, and what
               rights you have over your data.
             </p>
           </section>

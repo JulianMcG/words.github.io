@@ -24,7 +24,7 @@ export default function TermsOfService() {
           <section>
             <p>
               These Terms of Service ("Terms") govern your access to and use of Words ("the Service"), a
-              web-based document editor available at words.github.io, operated by Julian McGuire ("we",
+              web-based document editor available at words.do, operated by Julian McGuire ("we",
               "us", or "our"). By using the Service, you agree to these Terms.
             </p>
           </section>
