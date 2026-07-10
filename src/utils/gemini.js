@@ -168,12 +168,13 @@ For chat: populate "conversational_reply" with plain text (newlines OK, no HTML 
     });
 
     if (!response.ok) {
+      // Read the body once as text, then try to parse it — reading .json() and
+      // .text() in sequence throws "body stream already read"
       let errorData = "Unknown HTTP Error";
       try {
-        errorData = await response.json();
-      } catch (e) {
-        errorData = await response.text();
-      }
+        const raw = await response.text();
+        try { errorData = JSON.parse(raw); } catch { errorData = raw; }
+      } catch { /* keep default */ }
       let errMsg = `HTTP ${response.status}: Unknown Error`;
       if (typeof errorData === 'object' && errorData.error?.message) {
         errMsg = `API Error: ${errorData.error.message}`;

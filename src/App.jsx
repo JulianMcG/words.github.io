@@ -691,12 +691,99 @@ const A11ySwitch = ({ checked, onChange, label }) => (
   </button>
 );
 
+// Invisible hover target that rides the text caret. Hovering tints the caret
+// orange with a soft glow; clicking summons Buddy right at the insertion point.
+const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
+  const [rect, setRect] = useState(null);
+  const [hot, setHot] = useState(false);
+  const hotRef = useRef(false);
+  // Hover is the whole point — skip touch devices entirely
+  const canHoverRef = useRef(
+    typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches
+  );
+
+  useEffect(() => {
+    if (!enabled || !canHoverRef.current) { setRect(null); return; }
+    let raf = null;
+    const measure = () => {
+      raf = null;
+      const editor = editorRef.current;
+      const sel = window.getSelection();
+      if (!editor || !sel || !sel.rangeCount || !sel.isCollapsed || !editor.contains(sel.anchorNode) || document.activeElement !== editor) {
+        setRect(null);
+        return;
+      }
+      let cr = sel.getRangeAt(0).getClientRects()[0];
+      if (!cr || (cr.width === 0 && cr.height === 0 && cr.top === 0 && cr.left === 0)) {
+        // Empty line — collapsed ranges there have no client rect; use the block's edge
+        const node = sel.anchorNode;
+        const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        if (!el || !el.getBoundingClientRect) { setRect(null); return; }
+        const er = el.getBoundingClientRect();
+        cr = { left: er.left, top: er.top, height: Math.min(er.height, 28) || 24 };
+      }
+      if (cr.top > window.innerHeight || cr.top + (cr.height || 24) < 0) { setRect(null); return; }
+      setRect({ x: cr.left, y: cr.top, h: cr.height || 24 });
+    };
+    const schedule = () => { if (raf == null) raf = requestAnimationFrame(measure); };
+    document.addEventListener("selectionchange", schedule);
+    window.addEventListener("scroll", schedule, true);
+    window.addEventListener("resize", schedule);
+    schedule();
+    return () => {
+      document.removeEventListener("selectionchange", schedule);
+      window.removeEventListener("scroll", schedule, true);
+      window.removeEventListener("resize", schedule);
+      if (raf != null) cancelAnimationFrame(raf);
+    };
+  }, [enabled, editorRef]);
+
+  const setCaretTint = (on) => {
+    hotRef.current = on;
+    setHot(on);
+    if (editorRef.current) editorRef.current.style.caretColor = on ? "var(--color-accent)" : "";
+  };
+
+  // Never leave a stray orange caret behind
+  useEffect(() => {
+    if (!enabled && hotRef.current) setCaretTint(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
+  useEffect(() => () => { if (editorRef.current) editorRef.current.style.caretColor = ""; }, [editorRef]);
+
+  if (!enabled || !rect || !canHoverRef.current) return null;
+
+  return (
+    <div
+      className="fixed z-40 print:hidden"
+      style={{ left: rect.x - 9, top: rect.y - 4, width: 18, height: rect.h + 8, cursor: "pointer" }}
+      onMouseEnter={() => setCaretTint(true)}
+      onMouseLeave={() => setCaretTint(false)}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => { setCaretTint(false); onSummon(); }}
+    >
+      <AnimatePresence>
+        {hot && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.5 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.5 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="absolute inset-0 rounded-full pointer-events-none"
+            style={{ background: "radial-gradient(closest-side, rgba(232, 87, 42, 0.22), rgba(232, 87, 42, 0))" }}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 // Define the separated commands
 const COMMANDS = [
   {
     id: "buddy",
-    title: "Ask Buddy",
-    description: "Edit, generate, or brainstorm.",
+    title: "Buddy",
+    description: "Finish a thought, get ideas, or ask.",
     icon: BuddyIcon,
     type: "buddy",
   },
@@ -1816,12 +1903,15 @@ export default function App() {
   });
   const [buddyState, setBuddyState] = useState({
     show: false,
+    origin: "corner", // 'corner' (bottom-right) or 'slash' (at the caret)
     x: 0,
     y: 0,
     savedRange: null,
     selectedText: "",
     selectedHtml: "",
     isCollapsed: true,
+    beforeText: "",
+    afterText: "",
   });
   const [buddyDumpActive, setBuddyDumpActive] = useState(false);
   const [buddyMicError, setBuddyMicError] = useState(null); // null | 'no-mic' | 'no-permission' | 'error'
@@ -4494,6 +4584,46 @@ export default function App() {
     return { x, y };
   };
 
+  // Plain text on either side of a collapsed cursor — lets Buddy "finish the
+  // thought" with real surrounding context instead of just the document tail
+  const captureCursorContext = (range) => {
+    try {
+      const before = document.createRange();
+      before.selectNodeContents(editorRef.current);
+      before.setEnd(range.startContainer, range.startOffset);
+      const after = document.createRange();
+      after.selectNodeContents(editorRef.current);
+      after.setStart(range.endContainer, range.endOffset);
+      return {
+        beforeText: before.toString().slice(-1500),
+        afterText: after.toString().slice(0, 300),
+      };
+    } catch {
+      return { beforeText: "", afterText: "" };
+    }
+  };
+
+  // Summon the Buddy menu at the insertion caret (caret-hover click)
+  const summonBuddyAtCaret = () => {
+    const sel = window.getSelection();
+    if (!editorRef.current || !sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0).cloneRange();
+    const coords = getCaretCoordinates();
+    const { beforeText, afterText } = captureCursorContext(range);
+    setBuddyState({
+      show: true,
+      origin: "slash",
+      x: coords.x,
+      y: coords.y,
+      savedRange: range,
+      selectedText: "",
+      selectedHtml: "",
+      isCollapsed: true,
+      beforeText,
+      afterText,
+    });
+  };
+
   const executeCommand = (command) => {
     const selection = window.getSelection();
     if (!selection || !selection.rangeCount) return;
@@ -4518,13 +4648,21 @@ export default function App() {
     }
 
     if (command.type === "buddy") {
+      // The "/buddy" text was just deleted — grab the fresh collapsed selection
+      const sel = window.getSelection();
+      const liveRange = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : range;
+      const { beforeText, afterText } = captureCursorContext(liveRange);
       setBuddyState({
         show: true,
+        origin: "slash",
         x: slashState.x,
         y: slashState.y,
-        savedRange: range,
+        savedRange: liveRange,
         selectedText: "",
+        selectedHtml: "",
         isCollapsed: true,
+        beforeText,
+        afterText,
       });
       setSlashState((prev) => ({ ...prev, isOpen: false, query: "" }));
       return;
@@ -4695,6 +4833,24 @@ export default function App() {
     window.scrollTo({ top: scrollY, behavior: "instant" });
     syncContentToState();
     buddyDone();
+  };
+
+  // Buddy Live (voice dump) — shared by long-press and the "Live" menu option
+  const startBuddyLive = async () => {
+    if (!user) { setAuthModal('signup'); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(t => t.stop());
+      setBuddyDumpActive(true);
+    } catch (err) {
+      const name = err?.name ?? '';
+      const kind =
+        name === 'NotFoundError' || name === 'DevicesNotFoundError' ? 'no-mic' :
+        name === 'NotAllowedError' || name === 'PermissionDeniedError' ? 'no-permission' :
+        'error';
+      setBuddyMicError(kind);
+      buddyMicErrorTimerRef.current = setTimeout(() => setBuddyMicError(null), 3000);
+    }
   };
 
   const formatText = (e, format, value = null) => {
@@ -9116,22 +9272,11 @@ export default function App() {
           isDumpActive={buddyDumpActive}
           micError={buddyMicError}
           onDismissMicError={() => { clearTimeout(buddyMicErrorTimerRef.current); setBuddyMicError(null); }}
-          onLongPress={async () => {
-            if (!user) { setAuthModal('signup'); return; }
-            try {
-              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-              stream.getTracks().forEach(t => t.stop());
-              setBuddyDumpActive(true);
-            } catch (err) {
-              const name = err?.name ?? '';
-              const kind =
-                name === 'NotFoundError' || name === 'DevicesNotFoundError' ? 'no-mic' :
-                name === 'NotAllowedError' || name === 'PermissionDeniedError' ? 'no-permission' :
-                'error';
-              setBuddyMicError(kind);
-              buddyMicErrorTimerRef.current = setTimeout(() => setBuddyMicError(null), 3000);
-            }
-          }}
+          origin={buddyState.origin || "corner"}
+          cursorBeforeText={buddyState.beforeText || ""}
+          cursorAfterText={buddyState.afterText || ""}
+          onStartLive={startBuddyLive}
+          onLongPress={startBuddyLive}
           onGlobalClick={() => {
             const sel = window.getSelection();
             let text = sel.toString();
@@ -9152,14 +9297,25 @@ export default function App() {
 
             setBuddyState({
               show: true,
+              origin: "corner",
               x: window.innerWidth - 380 - 45,
               y: window.innerHeight - 200,
               savedRange,
               selectedText: text,
               selectedHtml,
               isCollapsed,
+              beforeText: "",
+              afterText: "",
             });
           }}
+        />
+      )}
+
+      {user && !historyPanelOpen && (
+        <CaretBuddyHotspot
+          editorRef={editorRef}
+          enabled={!buddyState.show && !buddyDumpActive && !slashState.isOpen}
+          onSummon={summonBuddyAtCaret}
         />
       )}
 
