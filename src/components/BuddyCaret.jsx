@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, PenLine, Lightbulb, CornerDownLeft } from "lucide-react";
+import { Check, PenLine, Lightbulb } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
 
@@ -13,8 +13,9 @@ const ROW_H = 34;
 const SPRING = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
 const FACE_W = 28;
 const FACE_GAP = 24; // breathing room between Buddy and the options
-const BACKDROP_L = -(FACE_W + FACE_GAP + 28); // stretch left to tuck Buddy in
-const BACKDROP_PAD = 24; // blur(10px) feathers ~2x inward — keep content in the solid core
+const BACKDROP_L = -(FACE_W + FACE_GAP + 34); // stretch left to tuck Buddy in
+const BACKDROP_PAD = 40; // blur(12px) feathers ~3x inward — keep content in the solid core
+const BACKDROP_W = 400; // fixed width: the shape never reacts to option changes
 
 const Backdrop = ({ style, animate, transition }) => (
   <motion.div
@@ -44,6 +45,8 @@ export default function BuddyCaret({
   const [refining, setRefining] = useState(false);
   const [blink, setBlink] = useState(false);
   const [joy, setJoy] = useState(false);
+  // Hovering the menu presents every option flat and fully readable
+  const [menuHovered, setMenuHovered] = useState(false);
 
   const rootRef = useRef(null);
   const inputRef = useRef(null);
@@ -142,11 +145,18 @@ export default function BuddyCaret({
   const runOption = (opt) => {
     if (!opt) return;
     if (opt.id === "ask") {
-      setPhase("ask");
-      setTimeout(() => inputRef.current?.focus(), 160);
+      setMenuIndex(0);
+      setTimeout(() => inputRef.current?.focus(), 60);
       return;
     }
     run(buddyPresetPrompt(opt.id), opt.id);
+  };
+
+  const submitInline = () => {
+    if (!input.trim()) return;
+    const q = input;
+    setInput("");
+    run(q);
   };
 
   const startTyping = (seed = "") => {
@@ -158,6 +168,16 @@ export default function BuddyCaret({
   // menuIndex ref so the keydown closure always fires the aligned option
   const menuIndexRef = useRef(0);
   useEffect(() => { menuIndexRef.current = menuIndex; }, [menuIndex]);
+
+  // The "How can I help..." line owns the keyboard while it's with Buddy
+  useEffect(() => {
+    if (!isOpen || phase !== "menu") return;
+    if (menuIndex === 0) {
+      const t = setTimeout(() => inputRef.current?.focus(), 120);
+      return () => clearTimeout(t);
+    }
+    inputRef.current?.blur();
+  }, [isOpen, phase, menuIndex]);
 
   // Keyboard-first: everything works without the mouse
   useEffect(() => {
@@ -179,10 +199,17 @@ export default function BuddyCaret({
           setMenuIndex((i) => Math.max(i - 1, 0));
         } else if (e.key === "Enter") {
           e.preventDefault(); e.stopPropagation();
-          runOption(options[menuIndexRef.current]);
+          if (menuIndexRef.current === 0) submitInline();
+          else runOption(options[menuIndexRef.current]);
         } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
-          e.preventDefault(); e.stopPropagation();
-          startTyping(e.key);
+          // On the "How can I help..." line, letters fall straight into it.
+          // From any other option, roll home and start the thought there.
+          if (menuIndexRef.current !== 0) {
+            e.preventDefault(); e.stopPropagation();
+            setMenuIndex(0);
+            setInput(e.key);
+            setTimeout(() => inputRef.current?.focus(), 60);
+          }
         }
       } else if (p === "done" || p === "reply") {
         if (e.key === "Enter") {
@@ -197,7 +224,7 @@ export default function BuddyCaret({
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, options.length, onClose]);
+  }, [isOpen, options.length, onClose, input]);
 
   // Click anywhere off the content closes
   useEffect(() => {
@@ -260,12 +287,13 @@ export default function BuddyCaret({
         {/* The line — Buddy's face is the anchor for everything */}
         <div className="relative flex items-center" style={{ minHeight: ROW_H, gap: FACE_GAP }}>
           <motion.img
-            layoutId="buddy-face"
             src={getUrl(face)}
             alt="Buddy"
-            transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
-            className="relative z-10 w-7 h-7 object-contain select-none drop-shadow-sm flex-shrink-0 self-start"
-            style={{ marginTop: (ROW_H - 28) / 2 }}
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 420, damping: 26 }}
+            className="relative z-10 object-contain select-none drop-shadow-sm flex-shrink-0 self-start"
+            style={{ width: FACE_W, height: FACE_W, aspectRatio: "1 / 1", marginTop: (ROW_H - FACE_W) / 2 }}
             draggable="false"
           />
 
@@ -278,13 +306,15 @@ export default function BuddyCaret({
                 exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
                 className="relative"
                 style={{ height: ROW_H }}
+                onMouseEnter={() => setMenuHovered(true)}
+                onMouseLeave={() => setMenuHovered(false)}
               >
-                {/* Stationary soft-edged opaque backdrop, sized for the whole roll */}
+                {/* Stationary soft-edged opaque backdrop — one fixed, generous shape */}
                 <Backdrop
                   style={{
                     top: -((options.length - 1) * ROW_H + BACKDROP_PAD),
                     left: BACKDROP_L,
-                    right: -36,
+                    width: BACKDROP_W,
                     height: (2 * options.length - 1) * ROW_H + BACKDROP_PAD * 2,
                   }}
                 />
@@ -303,17 +333,38 @@ export default function BuddyCaret({
                     const Icon = opt.icon;
                     const d = Math.abs(i - menuIndex);
                     const active = d === 0;
+                    const rolled = menuHovered
+                      ? { opacity: 1, scale: 1, x: 0 }
+                      : { opacity: active ? 1 : d === 1 ? 0.5 : 0.26, scale: active ? 1 : 0.965, x: active ? 0 : 12 + (d - 1) * 5 };
+                    if (opt.id === "ask") {
+                      return (
+                        <motion.div
+                          key={opt.id}
+                          animate={rolled}
+                          transition={SPRING}
+                          onClick={() => { setMenuIndex(i); setTimeout(() => inputRef.current?.focus(), 60); }}
+                          className="pointer-events-auto flex items-center cursor-text"
+                          style={{ height: ROW_H }}
+                        >
+                          <input
+                            ref={inputRef}
+                            type="text"
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            placeholder="How can I help..."
+                            className="bg-transparent outline-none border-none text-[14px] font-medium text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] w-[220px]"
+                            style={{ caretColor: "var(--color-accent)" }}
+                          />
+                        </motion.div>
+                      );
+                    }
                     return (
                       <motion.button
                         key={opt.id}
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => { setMenuIndex(i); setTimeout(() => runOption(opt), i === menuIndex ? 0 : 180); }}
-                        animate={{
-                          opacity: active ? 1 : d === 1 ? 0.5 : 0.26,
-                          scale: active ? 1 : 0.965,
-                          x: active ? 0 : 12 + (d - 1) * 5,
-                        }}
+                        animate={rolled}
                         transition={SPRING}
                         className="pointer-events-auto flex items-center gap-2.5 text-left outline-none"
                         style={{ height: ROW_H }}
@@ -322,16 +373,6 @@ export default function BuddyCaret({
                         <span className="text-[14px] font-medium text-[var(--color-text-primary)] whitespace-nowrap leading-none">
                           {opt.title}
                         </span>
-                        {active && (
-                          <motion.span
-                            initial={{ opacity: 0, x: -4 }}
-                            animate={{ opacity: 0.55, x: 0 }}
-                            transition={{ delay: 0.15 }}
-                            className="text-[var(--color-text-faint)] ml-0.5"
-                          >
-                            <CornerDownLeft size={11} />
-                          </motion.span>
-                        )}
                       </motion.button>
                     );
                   })}

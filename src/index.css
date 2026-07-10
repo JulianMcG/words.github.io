@@ -955,9 +955,9 @@ html[data-reduce-motion="true"] *::after {
 .buddy-backdrop {
   position: absolute;
   background: var(--color-bg-primary);
-  border-radius: 22px;
-  opacity: 0.95;
-  filter: blur(6px);
+  border-radius: 40px;
+  opacity: 0.96;
+  filter: blur(12px);
   pointer-events: none;
 }
 

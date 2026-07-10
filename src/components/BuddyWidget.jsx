@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
-import { Loader2, ArrowRight, File, Check, MicOff, AudioLines, SpellCheck, Lightbulb } from "lucide-react";
+import { Loader2, ArrowRight, X, File, Check, MicOff, AudioLines, SpellCheck, Lightbulb } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
 
@@ -10,14 +10,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [previewText, setPreviewText] = useState("");
   const [isReviewing, setIsReviewing] = useState(false);
 
-  // 'menu' = the choice list Buddy opens with; 'ask' = the classic prompt box
-  const [phase, setPhase] = useState("menu");
+  // Which quick action is highlighted in the panel
   const [menuIndex, setMenuIndex] = useState(0);
-  // While a one-click action runs, this replaces the input with a shimmering status line
+  // While a one-click action runs, this shows as a shimmering status line
   const [autoLabel, setAutoLabel] = useState(null);
-  // After an auto-applied change, the input row becomes a slim "✓ Changed it"
-  // line; typing brings the refine input back
-  const [refineMode, setRefineMode] = useState(false);
   
   const [expression, setExpression] = useState("idle");
   const [isHovered, setIsHovered] = useState(false);
@@ -161,11 +157,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   useEffect(() => {
     let t;
     if (isOpen) {
-      setPhase("menu");
-      setMenuIndex(1);
+      setMenuIndex(0);
       setAutoLabel(null);
-      setRefineMode(false);
       setInput("");
+      setTimeout(() => inputRef.current?.focus(), 300);
       setPreviewText("");
       setIsReviewing(false);
       setIsChangesApplied(false);
@@ -181,10 +176,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       // This guarantees Buddy's internal height resets without interrupting the Framer Motion popLayout,
       // and permanently solves old text heights 'bleeding' open when you re-initiate him later!
       t = setTimeout(() => {
-        setPhase("menu");
-        setMenuIndex(1);
+        setMenuIndex(0);
         setAutoLabel(null);
-        setRefineMode(false);
         setInput("");
         setPreviewText("");
         setIsReviewing(false);
@@ -289,16 +282,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         return; 
       }
     }
-    if (e.key === 'Escape') {
-      // Empty prompt box that came from the menu? Step gently back to the menu.
-      if (!input.trim() && !isReviewing && !isLoading) {
-        setPhase("menu");
-        setMenuIndex(0);
-        inputRef.current?.blur();
-      } else {
-        onClose();
-      }
-    }
+    if (e.key === 'Escape') onClose();
   };
 
   const insertMention = (doc) => {
@@ -359,13 +343,11 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const hasSelection = selectedText && selectedText !== "GLOBAL_CHAT" && !isCollapsedSelection;
   const docHasWords = (fullDocumentText || "").replace(/<[^>]+>/g, "").trim().length > 0;
 
-  // The prompt bar, split into four opaque segments (whiteboard concept):
-  // [Live] [Buddy · Ask…] [Clean] [Suggest]. Ask expands into the classic bar.
+  // Buddy's panel: quick actions up top, the prompt bar always at the bottom
   const menuOptions = [
-    { id: "live", icon: AudioLines, label: "Live", desc: "Talk it out — Buddy writes it up", enabled: true },
-    { id: "ask", label: "Ask", desc: "Tell Buddy anything", enabled: true },
-    { id: "clean", icon: SpellCheck, label: "Clean", desc: hasSelection ? "Polish the selected text" : "Polish spelling, grammar & flow", enabled: docHasWords },
-    { id: "suggest", icon: Lightbulb, label: "Suggest", desc: hasSelection ? "Ideas for this selection" : "Ideas to make this better", enabled: docHasWords },
+    { id: "clean", icon: SpellCheck, label: hasSelection ? "Clean up the selection" : "Clean up my writing", desc: "Spelling, grammar & flow — your voice stays", enabled: docHasWords },
+    { id: "suggest", icon: Lightbulb, label: "Suggest improvements", desc: "Ideas to make it better — no rewriting", enabled: docHasWords },
+    { id: "live", icon: AudioLines, label: "Buddy Live", desc: "Talk it out — Buddy writes it up", enabled: true },
   ];
 
   const runMenuOption = (opt) => {
@@ -375,19 +357,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       setTimeout(() => onStartLive?.(), 200);
       return;
     }
-    if (opt.id === "ask") {
-      setPhase("ask");
-      setTimeout(() => inputRef.current?.focus(), 180);
-      return;
-    }
     // One-click actions: Buddy just does it
-    setPhase("ask");
     setAutoLabel(buddyPresetLabel(opt.id));
     handleGenerate(null, opt);
   };
 
-  // Step left/right through the segments, skipping disabled ones
-  const stepSegment = (from, dir) => {
+  // Step through the quick actions, skipping disabled ones
+  const stepAction = (from, dir) => {
     let i = from;
     for (let n = 0; n < menuOptions.length; n++) {
       i = (i + dir + menuOptions.length) % menuOptions.length;
@@ -396,55 +372,33 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     return from;
   };
 
-  // Keyboard-first navigation while the segments are showing — no clicking needed
+  // Panel keyboard: type to ask (the input is focused), arrows pick a quick
+  // action, Enter runs it when the prompt is empty, Escape closes
   useEffect(() => {
-    if (!isOpen || phase !== "menu" || autoLabel) return;
+    if (!isOpen) return;
     const onKey = (e) => {
-      if (e.key === "ArrowRight" || e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
-        e.preventDefault(); e.stopPropagation();
-        setMenuIndex((i) => stepSegment(i, 1));
-      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
-        e.preventDefault(); e.stopPropagation();
-        setMenuIndex((i) => stepSegment(i, -1));
-      } else if (e.key === "Enter") {
-        e.preventDefault(); e.stopPropagation();
-        runMenuOption(menuOptions[menuIndex]);
-      } else if (e.key === "Escape") {
+      if (mentionQuery !== null) return; // the input's own handler owns the mention list
+      if (e.key === "Escape") {
         e.preventDefault(); e.stopPropagation();
         onClose();
-      } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        // Just start typing — Ask expands with your letter already in it
+        return;
+      }
+      if (autoLabel || isLoading || isReviewing) return;
+      if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
         e.preventDefault(); e.stopPropagation();
-        setPhase("ask");
-        setInput(e.key);
-        setTimeout(() => inputRef.current?.focus(), 120);
+        setMenuIndex((i) => stepAction(i, 1));
+      } else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
+        e.preventDefault(); e.stopPropagation();
+        setMenuIndex((i) => stepAction(i, -1));
+      } else if (e.key === "Enter" && !input.trim()) {
+        e.preventDefault(); e.stopPropagation();
+        runMenuOption(menuOptions[menuIndex]);
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, phase, autoLabel, menuIndex, menuOptions.length, docHasWords]);
-
-  // After an applied change, the row is just "✓ Changed it" — typing brings
-  // the refine input back; Enter or Escape wraps up
-  useEffect(() => {
-    if (!isOpen || phase !== "ask" || autoLabel || isLoading || refineMode || !isChangesApplied) return;
-    const onKey = (e) => {
-      if (e.key === "Enter" || e.key === "Escape") {
-        e.preventDefault(); e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault(); e.stopPropagation();
-        setRefineMode(true);
-        setInput(e.key);
-        setTimeout(() => inputRef.current?.focus(), 80);
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [isOpen, phase, autoLabel, isLoading, refineMode, isChangesApplied, onClose]);
+  }, [isOpen, autoLabel, isLoading, isReviewing, input, menuIndex, mentionQuery, menuOptions.length, docHasWords]);
 
   const handleGenerate = async (e, preset = null) => {
     e?.preventDefault();
@@ -503,7 +457,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           setIsChangesApplied(true);
           setIsViewingChanges(false);
           setIsReviewing(true);
-          setRefineMode(false);
       } else {
           // chat: show in panel, no document change
           setIsReviewing(true);
@@ -583,12 +536,11 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   const activeWidth = 380;
   const restingWidth = 48;
-  const SEG_H = 44; // ≈ the prompt bar's own height, so the segments read as its pieces
-  const menuWidth = 44 * 3 + 132 + 8 * 3; // three squares + the Ask segment + gaps
-  const isMenuMode = isOpen && phase === "menu" && !autoLabel;
-  const openWidth = isMenuMode ? menuWidth : activeWidth;
-  // Buddy smiles at you while you choose (with his usual blinks)
-  const menuFace = blinkState === "blink" ? "smileblink" : "smile";
+  // Buddy smiles from the panel header while you choose; expressions take
+  // over once he's working or reacting
+  const headerFace = micError ? "error" : (isOpen && !isReviewing && !autoLabel && !isLoading)
+    ? (blinkState === "blink" ? "smileblink" : "smile")
+    : activeExpression;
 
   const safeX = Math.min(Math.max(position?.x || windowSize.width / 2, 8), windowSize.width - activeWidth - 8);
   const safeY = Math.min(position?.y || 100, windowSize.height - 220); 
@@ -703,7 +655,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         initial={{ y: 150, width: restingWidth, height: restingWidth }}
         animate={{
           y: 0,
-          width: isOpen ? openWidth : restingWidth,
+          width: isOpen ? activeWidth : restingWidth,
           height: isOpen ? "auto" : restingWidth,
           filter: isOpeningTransition ? "blur(3px)" : "blur(0px)",
         }}
@@ -711,13 +663,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           type: "spring", stiffness: 350, damping: 25, mass: 0.5,
         }}
         className={`fixed z-[100] transition-colors duration-200 print:hidden border-shape-squircle ${
-          isOpen && !isMenuMode ? 'shadow-2xl bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden pointer-events-auto flex flex-col' : isOpen ? 'bg-transparent overflow-visible pointer-events-auto' : 'bg-transparent overflow-visible pointer-events-none'
+          isOpen ? 'shadow-2xl bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden pointer-events-auto flex flex-col' : 'bg-transparent overflow-visible pointer-events-none'
         }`}
         style={{
-          '--r': isOpen ? '12px' : '24px',
-          // While the segments are out, the outer is a transparent shell — a
-          // lisse clip-path here would crop the floating caption above the bar
-          '--lisse-skip': isMenuMode ? '1' : '0',
+          '--r': isOpen ? '14px' : '24px',
           maxHeight: isOpen ? "600px" : "auto",
           x: magnetX,
           y: magnetY,
@@ -817,91 +766,60 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
               exit={{ opacity: 0, filter: "blur(4px)" }}
               transition={{ duration: 0.2, delay: 0.05 }}
-              className={`flex flex-col h-auto ${isMenuMode ? "overflow-visible" : "overflow-hidden"}`}
-              style={{ width: openWidth }}
+              className="flex flex-col h-auto overflow-hidden"
+              style={{ width: activeWidth }}
             >
 
-              <AnimatePresence mode="popLayout" initial={false}>
-              {isMenuMode ? (
-                <motion.div
-                  key="buddy-menu"
-                  initial={{ opacity: 0, filter: "blur(4px)" }}
-                  animate={{ opacity: 1, filter: "blur(0px)" }}
-                  exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.12 } }}
-                  transition={{ duration: 0.16 }}
-                  className="relative flex items-center justify-end gap-2"
-                  style={{ width: menuWidth, height: SEG_H }}
+              {/* Panel header — Buddy lives up here */}
+              <div className="flex items-center gap-2 pl-3 pr-1.5 pt-2 pb-1">
+                <motion.img
+                  layoutId="buddy-face"
+                  src={getUrl(headerFace)}
+                  alt="Buddy"
+                  transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
+                  className="w-[22px] h-[22px] object-contain select-none drop-shadow-sm"
+                  draggable="false"
+                />
+                <span className="text-[13px] font-semibold text-[var(--color-text-primary)] select-none leading-none">Buddy</span>
+                {hasSelection && (
+                  <span className="text-[10.5px] font-medium px-1.5 py-[3px] rounded-md bg-[var(--color-bg-hover)] text-[var(--color-text-faint)] select-none leading-none">
+                    on your selection
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={onClose}
+                  className="ml-auto w-6 h-6 flex items-center justify-center rounded-md text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  title="Close"
                 >
-                  {menuOptions.map((opt, i) => {
-                    const Icon = opt.icon;
-                    const isActive = i === menuIndex;
-                    return (
-                      <motion.button
-                        key={opt.id}
-                        type="button"
-                        initial={{ opacity: 0, y: 10, scale: 0.9 }}
-                        animate={{
-                          opacity: opt.enabled ? 1 : 0.4,
-                          y: 0,
-                          scale: isActive && opt.enabled ? 1.04 : 1,
-                        }}
-                        transition={{ delay: 0.05 + i * 0.045, type: "spring", stiffness: 480, damping: 30 }}
-                        onMouseEnter={() => opt.enabled && setMenuIndex(i)}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => runMenuOption(opt)}
-                        title={opt.enabled ? opt.label : `${opt.label} — write something first`}
-                        className={`border-shape-squircle pointer-events-auto flex items-center border shadow-2xl transition-colors duration-150 outline-none ${
-                          opt.id === "ask" ? "justify-start px-2.5 gap-2.5" : "justify-center"
-                        } ${
-                          isActive && opt.enabled
-                            ? "bg-[var(--color-bg-hover)] border-[var(--color-border-hover)]"
-                            : "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]"
-                        } ${opt.enabled ? "" : "cursor-default"}`}
-                        style={{ "--r": "12px", height: SEG_H, width: opt.id === "ask" ? 132 : SEG_H }}
-                      >
-                        {opt.id === "ask" ? (
-                          <>
-                            <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
-                              <motion.img
-                                layoutId="buddy-face"
-                                src={getUrl(micError ? "error" : menuFace)}
-                                alt="Buddy"
-                                transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
-                                className="w-5 h-5 opacity-90 object-contain select-none drop-shadow-sm"
-                                draggable="false"
-                              />
-                            </div>
-                            <span className="text-[14px] select-none text-[var(--color-text-faint)]">
-                              Ask…
-                            </span>
-                          </>
-                        ) : (
-                          <Icon
-                            size={17}
-                            strokeWidth={2}
-                            className={`transition-colors duration-150 ${isActive && opt.enabled ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`}
-                          />
-                        )}
-                      </motion.button>
-                    );
-                  })}
-                </motion.div>
-              ) : (
-              <motion.div
-                key="buddy-io"
-                initial={{ opacity: 0, filter: "blur(4px)" }}
-                animate={{ opacity: 1, filter: "blur(0px)" }}
-                exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.12 } }}
-                transition={{ duration: 0.16 }}
-                className="flex flex-col"
-                style={{ width: activeWidth }}
-              >
+                  <X size={13} />
+                </button>
+              </div>
 
-                {isReviewing && (
-                  <div className="flex flex-col w-full">
-                    {/* The response — floating on the glass, no boxed panel */}
+              <AnimatePresence mode="popLayout" initial={false}>
+                {autoLabel ? (
+                  <motion.div
+                    key="panel-working"
+                    initial={{ opacity: 0, filter: "blur(3px)" }}
+                    animate={{ opacity: 1, filter: "blur(0px)" }}
+                    exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
+                    transition={{ duration: 0.16 }}
+                    className="flex items-center px-3.5 pt-1.5 pb-3"
+                  >
+                    <span className="buddy-shimmer-text text-[13px] font-medium select-none">{autoLabel}</span>
+                  </motion.div>
+                ) : isReviewing ? (
+                  <motion.div
+                    key="panel-results"
+                    initial={{ opacity: 0, filter: "blur(3px)" }}
+                    animate={{ opacity: 1, filter: "blur(0px)" }}
+                    exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
+                    transition={{ duration: 0.16 }}
+                    className="flex flex-col w-full"
+                  >
                     {(!isChangesApplied || isViewingChanges) && (
-                      <div className={`px-4 pt-3.5 pb-3 ${hasValidHtml ? 'max-h-[60vh]' : 'max-h-[35vh]'} min-h-[46px] overflow-y-auto no-scrollbar border-b border-[var(--color-border-primary)]/50`}>
+                      <div className={`px-3.5 pt-1 pb-3 ${hasValidHtml ? 'max-h-[55vh]' : 'max-h-[35vh]'} min-h-[40px] overflow-y-auto no-scrollbar`}>
                         {renderDiffPreview()}
 
                         {/* Chat replies get quiet inline actions right under the words */}
@@ -929,156 +847,158 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                         )}
                       </div>
                     )}
-                  </div>
-                )}
 
-                {autoLabel ? (
-                  <div className="flex items-center p-2.5 gap-2.5">
-                    <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
-                      <motion.img
-                        layoutId="buddy-face"
-                        src={getUrl(activeExpression)}
-                        alt="Buddy"
-                        transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
-                        className="w-5 h-5 opacity-90 object-contain drop-shadow-sm"
-                        draggable="false"
-                      />
-                    </div>
-                    <span className="buddy-shimmer-text flex-1 text-[13.5px] font-medium select-none">{autoLabel}</span>
-                    <Loader2 size={16} className="text-orange-500 animate-spin flex-shrink-0" />
-                  </div>
-                ) : isChangesApplied && !refineMode ? (
-                  /* Slim confirmation: Buddy + a checkmark, nothing shouting */
-                  <div className="flex items-center p-2.5 gap-2.5" style={{ minHeight: 41 }}>
-                    <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
-                      <motion.img
-                        layoutId="buddy-face"
-                        src={getUrl(activeExpression)}
-                        alt="Buddy"
-                        transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
-                        className="w-5 h-5 opacity-90 object-contain drop-shadow-sm"
-                        draggable="false"
-                      />
-                    </div>
-                    <span className="flex items-center gap-1.5 text-[13px] font-medium text-[var(--color-text-primary)] select-none">
-                      <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.05 }}>
-                        <Check size={13.5} className="text-green-500" strokeWidth={2.5} />
-                      </motion.span>
-                      Changed it
-                    </span>
-                    <span className="flex-1" />
-                    <div className="flex items-center gap-2.5 pr-1">
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => setIsViewingChanges(!isViewingChanges)}
-                        className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
-                      >
-                        {isViewingChanges ? "Hide" : "View"}
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={onClose}
-                        className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
-                      >
-                        Done
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                <form onSubmit={handleGenerate} className="flex relative items-center p-2.5 gap-2.5">
-                  <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
-                    <motion.img
-                      layoutId="buddy-face"
-                      src={getUrl(activeExpression)}
-                      alt="Buddy"
-                      transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
-                      className="w-5 h-5 opacity-90 object-contain drop-shadow-sm"
-                      draggable="false"
-                    />
-                  </div>
-                  
-                  <div className="flex-1 relative h-[20px] flex items-center">
-                    {/* Shadow DOM for highlighted text */}
-                    <div 
-                      id="buddy-shadow-text"
-                      className="absolute inset-0 pointer-events-none whitespace-pre text-[14px] text-[var(--color-text-primary)] overflow-hidden" 
-                      style={{ padding: 0, margin: 0, opacity: mentionedDocs.length > 0 ? 1 : 0 }}
-                    >
-                      {renderHighlightedText()}
-                    </div>
-                    
-                    {/* Real Input */}
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      value={input}
-                      onChange={handleInputChange}
-                      disabled={isLoading}
-                      onScroll={(e) => {
-                        const shadow = document.getElementById('buddy-shadow-text');
-                        if (shadow) shadow.scrollLeft = e.target.scrollLeft;
-                      }}
-                      placeholder={isReviewing ? "Tell Buddy what to change..." : (selectedText === "GLOBAL_CHAT" ? "Ask Buddy anything..." : isCollapsedSelection ? "Ask for a hand with your writing..." : "Ask Buddy about this...")}
-                      className="w-full h-full bg-transparent text-[14px] outline-none placeholder:text-[var(--color-text-faint)] relative z-10"
-                      style={{ 
-                        color: mentionedDocs.length > 0 ? "transparent" : "var(--color-text-primary)", 
-                        caretColor: "var(--color-text-primary)",
-                      }}
-                      onKeyDown={handleInputKeyDown}
-                    />
-                  </div>
-                  
-                  {isLoading ? (
-                    <Loader2 size={16} className="text-orange-500 animate-spin flex-shrink-0" />
-                  ) : (
-                    <button
-                      type="submit"
-                      disabled={!input.trim()}
-                      className={`flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-all duration-150 ${
-                        input.trim()
-                          ? 'btn-tactile-accent text-white'
-                          : 'bg-[var(--color-bg-hover)] text-[var(--color-text-faint)] cursor-default'
-                      }`}
-                    >
-                      <ArrowRight size={14} />
-                    </button>
-                  )}
-
-                  {/* Mention Dropdown UI */}
-                  <AnimatePresence>
-                    {mentionQuery !== null && filteredDocs.length > 0 && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 10, transition: { duration: 0.1 } }}
-                        className="absolute bottom-[calc(100%+8px)] left-0 w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg overflow-hidden z-[110]"
-                      >
-                        <div className="max-h-[200px] overflow-y-auto py-1 no-scrollbar">
-                          {filteredDocs.map((doc, idx) => (
-                            <button
-                              key={doc.id}
-                              type="button"
-                              onClick={() => insertMention(doc)}
-                              className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${idx === mentionIndex ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-hover)]'}`}
-                            >
-                              <div className="truncate font-medium text-[var(--color-text-primary)] flex items-center gap-1.5">
-                                <span className="opacity-90 flex items-center justify-center w-4 text-[13px]">{doc.emoji || <File size={13} className="text-[var(--color-icon-muted)]" />}</span>
-                                {doc.title}
-                              </div>
-                            </button>
-                          ))}
+                    {isChangesApplied && (
+                      <div className="flex items-center gap-2 px-3.5 pt-1 pb-2.5">
+                        <span className="flex items-center gap-1.5 text-[13px] font-medium text-[var(--color-text-primary)] select-none">
+                          <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.05 }}>
+                            <Check size={13.5} className="text-green-500" strokeWidth={2.5} />
+                          </motion.span>
+                          Changed it
+                        </span>
+                        <span className="flex-1" />
+                        <div className="flex items-center gap-2.5 pr-0.5">
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => setIsViewingChanges(!isViewingChanges)}
+                            className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
+                          >
+                            {isViewingChanges ? "Hide" : "View"}
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={onClose}
+                            className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
+                          >
+                            Done
+                          </button>
                         </div>
-                      </motion.div>
+                      </div>
                     )}
-                  </AnimatePresence>
-                </form>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="panel-actions"
+                    initial={{ opacity: 0, filter: "blur(3px)" }}
+                    animate={{ opacity: 1, filter: "blur(0px)" }}
+                    exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
+                    transition={{ duration: 0.16 }}
+                    className="flex flex-col px-1.5 pt-0.5 pb-1.5"
+                  >
+                    {menuOptions.map((opt, i) => {
+                      const Icon = opt.icon;
+                      const isActive = i === menuIndex && opt.enabled;
+                      return (
+                        <motion.button
+                          key={opt.id}
+                          type="button"
+                          initial={{ opacity: 0, y: 8, filter: "blur(2px)" }}
+                          animate={{ opacity: opt.enabled ? 1 : 0.4, y: 0, filter: "blur(0px)" }}
+                          transition={{ delay: 0.06 + i * 0.045, type: "spring", stiffness: 480, damping: 32 }}
+                          onMouseEnter={() => opt.enabled && setMenuIndex(i)}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => runMenuOption(opt)}
+                          title={opt.enabled ? opt.label : `${opt.label} — write something first`}
+                          className={`relative w-full text-left px-2.5 py-2 flex items-center gap-2.5 rounded-lg outline-none ${opt.enabled ? "" : "cursor-default"}`}
+                        >
+                          {isActive && (
+                            <motion.div
+                              layoutId="buddy-panel-hl"
+                              className="absolute inset-0 rounded-lg bg-[var(--color-bg-hover)]"
+                              transition={{ type: "spring", stiffness: 520, damping: 36 }}
+                            />
+                          )}
+                          <Icon size={15} strokeWidth={2} className={`relative z-10 flex-shrink-0 transition-colors duration-150 ${isActive ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`} />
+                          <div className="relative z-10 flex flex-col min-w-0">
+                            <span className="text-[13px] font-medium leading-tight text-[var(--color-text-primary)]">{opt.label}</span>
+                            <span className="text-[11px] leading-tight text-[var(--color-text-faint)] truncate">{opt.desc}</span>
+                          </div>
+                        </motion.button>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* The prompt bar — always here, pinned to the bottom */}
+              <form onSubmit={handleGenerate} className="flex relative items-center gap-2 py-2 pl-3.5 pr-2 border-t border-[var(--color-border-primary)]/60">
+                <div className="flex-1 relative h-[20px] flex items-center">
+                  {/* Shadow DOM for highlighted text */}
+                  <div
+                    id="buddy-shadow-text"
+                    className="absolute inset-0 pointer-events-none whitespace-pre text-[14px] text-[var(--color-text-primary)] overflow-hidden"
+                    style={{ padding: 0, margin: 0, opacity: mentionedDocs.length > 0 ? 1 : 0 }}
+                  >
+                    {renderHighlightedText()}
+                  </div>
+
+                  {/* Real Input */}
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={input}
+                    onChange={handleInputChange}
+                    disabled={isLoading}
+                    onScroll={(e) => {
+                      const shadow = document.getElementById('buddy-shadow-text');
+                      if (shadow) shadow.scrollLeft = e.target.scrollLeft;
+                    }}
+                    placeholder={isChangesApplied ? "Tell Buddy what to change..." : isReviewing ? "Anything else?" : (selectedText === "GLOBAL_CHAT" ? "Ask Buddy anything..." : isCollapsedSelection ? "Ask for a hand with your writing..." : "Ask Buddy about this...")}
+                    className="w-full h-full bg-transparent text-[14px] outline-none placeholder:text-[var(--color-text-faint)] relative z-10"
+                    style={{
+                      color: mentionedDocs.length > 0 ? "transparent" : "var(--color-text-primary)",
+                      caretColor: "var(--color-text-primary)",
+                    }}
+                    onKeyDown={handleInputKeyDown}
+                  />
+                </div>
+
+                {isLoading ? (
+                  <Loader2 size={16} className="text-orange-500 animate-spin flex-shrink-0 mr-1" />
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!input.trim()}
+                    className={`flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-all duration-150 ${
+                      input.trim()
+                        ? 'btn-tactile-accent text-white'
+                        : 'bg-[var(--color-bg-hover)] text-[var(--color-text-faint)] cursor-default'
+                    }`}
+                  >
+                    <ArrowRight size={14} />
+                  </button>
                 )}
 
-              </motion.div>
-              )}
-              </AnimatePresence>
+                {/* Mention Dropdown UI */}
+                <AnimatePresence>
+                  {mentionQuery !== null && filteredDocs.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10, transition: { duration: 0.1 } }}
+                      className="absolute bottom-[calc(100%+8px)] left-0 w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg overflow-hidden z-[110]"
+                    >
+                      <div className="max-h-[200px] overflow-y-auto py-1 no-scrollbar">
+                        {filteredDocs.map((doc, idx) => (
+                          <button
+                            key={doc.id}
+                            type="button"
+                            onClick={() => insertMention(doc)}
+                            className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${idx === mentionIndex ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-hover)]'}`}
+                          >
+                            <div className="truncate font-medium text-[var(--color-text-primary)] flex items-center gap-1.5">
+                              <span className="opacity-90 flex items-center justify-center w-4 text-[13px]">{doc.emoji || <File size={13} className="text-[var(--color-icon-muted)]" />}</span>
+                              {doc.title}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </form>
 
             </motion.div>
           )}
