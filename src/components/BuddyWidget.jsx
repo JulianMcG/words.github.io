@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
-import { Loader2, ArrowRight, CornerDownLeft, File, Check, MicOff, AudioLines, SpellCheck, Lightbulb, MessageCircle } from "lucide-react";
+import { Loader2, ArrowRight, File, Check, MicOff, AudioLines, SpellCheck, Lightbulb } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
 
@@ -162,7 +162,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     let t;
     if (isOpen) {
       setPhase("menu");
-      setMenuIndex(0);
+      setMenuIndex(1);
       setAutoLabel(null);
       setRefineMode(false);
       setInput("");
@@ -182,7 +182,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       // and permanently solves old text heights 'bleeding' open when you re-initiate him later!
       t = setTimeout(() => {
         setPhase("menu");
-        setMenuIndex(0);
+        setMenuIndex(1);
         setAutoLabel(null);
         setRefineMode(false);
         setInput("");
@@ -359,15 +359,17 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const hasSelection = selectedText && selectedText !== "GLOBAL_CHAT" && !isCollapsedSelection;
   const docHasWords = (fullDocumentText || "").replace(/<[^>]+>/g, "").trim().length > 0;
 
+  // The prompt bar, split into four opaque segments (whiteboard concept):
+  // [Live] [Buddy · Ask…] [Clean] [Suggest]. Ask expands into the classic bar.
   const menuOptions = [
-    { id: "live", icon: AudioLines, title: "Live", desc: "Talk it out — Buddy writes it up" },
-    docHasWords && { id: "clean", icon: SpellCheck, title: "Clean", desc: hasSelection ? "Polish the selected text" : "Polish spelling, grammar & flow" },
-    docHasWords && { id: "suggest", icon: Lightbulb, title: "Suggest", desc: hasSelection ? "Ideas for this selection" : "Ideas to make this better" },
-    { id: "ask", icon: MessageCircle, title: "Ask", desc: "Tell Buddy anything" },
-  ].filter(Boolean);
+    { id: "live", icon: AudioLines, label: "Live", desc: "Talk it out — Buddy writes it up", enabled: true },
+    { id: "ask", label: "Ask", desc: "Tell Buddy anything", enabled: true },
+    { id: "clean", icon: SpellCheck, label: "Clean", desc: hasSelection ? "Polish the selected text" : "Polish spelling, grammar & flow", enabled: docHasWords },
+    { id: "suggest", icon: Lightbulb, label: "Suggest", desc: hasSelection ? "Ideas for this selection" : "Ideas to make this better", enabled: docHasWords },
+  ];
 
   const runMenuOption = (opt) => {
-    if (!opt) return;
+    if (!opt || opt.enabled === false) return;
     if (opt.id === "live") {
       onClose();
       setTimeout(() => onStartLive?.(), 200);
@@ -384,16 +386,26 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     handleGenerate(null, opt);
   };
 
-  // Keyboard-first navigation while the menu is showing — no clicking needed
+  // Step left/right through the segments, skipping disabled ones
+  const stepSegment = (from, dir) => {
+    let i = from;
+    for (let n = 0; n < menuOptions.length; n++) {
+      i = (i + dir + menuOptions.length) % menuOptions.length;
+      if (menuOptions[i].enabled) return i;
+    }
+    return from;
+  };
+
+  // Keyboard-first navigation while the segments are showing — no clicking needed
   useEffect(() => {
     if (!isOpen || phase !== "menu" || autoLabel) return;
     const onKey = (e) => {
-      if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
+      if (e.key === "ArrowRight" || e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
         e.preventDefault(); e.stopPropagation();
-        setMenuIndex((i) => (i + 1) % menuOptions.length);
-      } else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
+        setMenuIndex((i) => stepSegment(i, 1));
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
         e.preventDefault(); e.stopPropagation();
-        setMenuIndex((i) => (i - 1 + menuOptions.length) % menuOptions.length);
+        setMenuIndex((i) => stepSegment(i, -1));
       } else if (e.key === "Enter") {
         e.preventDefault(); e.stopPropagation();
         runMenuOption(menuOptions[menuIndex]);
@@ -401,7 +413,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         e.preventDefault(); e.stopPropagation();
         onClose();
       } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        // Just start typing — Buddy slides straight into Ask with your letter
+        // Just start typing — Ask expands with your letter already in it
         e.preventDefault(); e.stopPropagation();
         setPhase("ask");
         setInput(e.key);
@@ -411,7 +423,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, phase, autoLabel, menuIndex, menuOptions.length]);
+  }, [isOpen, phase, autoLabel, menuIndex, menuOptions.length, docHasWords]);
 
   // After an applied change, the row is just "✓ Changed it" — typing brings
   // the refine input back; Enter or Escape wraps up
@@ -571,12 +583,12 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   const activeWidth = 380;
   const restingWidth = 48;
-  const menuWidth = 252;
+  const SEG_H = 46;
+  const menuWidth = 46 * 3 + 116 + 8 * 3; // three squares + the Ask segment + gaps
   const isMenuMode = isOpen && phase === "menu" && !autoLabel;
   const openWidth = isMenuMode ? menuWidth : activeWidth;
   // Buddy smiles at you while you choose (with his usual blinks)
   const menuFace = blinkState === "blink" ? "smileblink" : "smile";
-  const menuGreeting = hasSelection ? "About that selection…" : "Hey — what are we doing?";
 
   const safeX = Math.min(Math.max(position?.x || windowSize.width / 2, 8), windowSize.width - activeWidth - 8);
   const safeY = Math.min(position?.y || 100, windowSize.height - 220); 
@@ -699,10 +711,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           type: "spring", stiffness: 350, damping: 25, mass: 0.5,
         }}
         className={`fixed z-[100] transition-colors duration-200 print:hidden border-shape-squircle ${
-          isOpen ? 'shadow-2xl buddy-glass border border-[var(--color-border-primary)]/70 overflow-hidden pointer-events-auto flex flex-col' : 'bg-transparent overflow-visible pointer-events-none'
+          isOpen && !isMenuMode ? 'shadow-2xl bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden pointer-events-auto flex flex-col' : isOpen ? 'bg-transparent overflow-visible pointer-events-auto' : 'bg-transparent overflow-visible pointer-events-none'
         }`}
         style={{
           '--r': isOpen ? '12px' : '24px',
+          // While the segments are out, the outer is a transparent shell — a
+          // lisse clip-path here would crop the floating caption above the bar
+          '--lisse-skip': isMenuMode ? '1' : '0',
           maxHeight: isOpen ? "600px" : "auto",
           x: magnetX,
           y: magnetY,
@@ -802,7 +817,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
               exit={{ opacity: 0, filter: "blur(4px)" }}
               transition={{ duration: 0.2, delay: 0.05 }}
-              className="flex flex-col h-auto overflow-hidden"
+              className={`flex flex-col h-auto ${isMenuMode ? "overflow-visible" : "overflow-hidden"}`}
               style={{ width: openWidth }}
             >
 
@@ -814,23 +829,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   animate={{ opacity: 1, filter: "blur(0px)" }}
                   exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.12 } }}
                   transition={{ duration: 0.16 }}
-                  className="flex flex-col p-1.5"
-                  style={{ width: menuWidth }}
+                  className="relative flex items-center justify-end gap-2"
+                  style={{ width: menuWidth, height: SEG_H }}
                 >
-                  <div className="flex items-center gap-2.5 px-2.5 pt-2 pb-2.5">
-                    <motion.img
-                      layoutId="buddy-face"
-                      src={getUrl(micError ? "error" : menuFace)}
-                      alt="Buddy"
-                      transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
-                      className="w-6 h-6 object-contain select-none drop-shadow-sm"
-                      draggable="false"
-                    />
-                    <span className="text-[12.5px] font-medium text-[var(--color-text-muted)] select-none">
-                      {menuGreeting}
-                    </span>
-                  </div>
-
                   {menuOptions.map((opt, i) => {
                     const Icon = opt.icon;
                     const isActive = i === menuIndex;
@@ -838,55 +839,48 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                       <motion.button
                         key={opt.id}
                         type="button"
-                        initial={{ opacity: 0, y: 7, filter: "blur(2px)" }}
-                        animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                        transition={{ delay: 0.06 + i * 0.045, type: "spring", stiffness: 480, damping: 32 }}
-                        onMouseEnter={() => setMenuIndex(i)}
+                        initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                        animate={{
+                          opacity: opt.enabled ? 1 : 0.4,
+                          y: 0,
+                          scale: isActive && opt.enabled ? 1.04 : 1,
+                        }}
+                        transition={{ delay: 0.05 + i * 0.045, type: "spring", stiffness: 480, damping: 30 }}
+                        onMouseEnter={() => opt.enabled && setMenuIndex(i)}
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => runMenuOption(opt)}
-                        className="relative w-full text-left px-2.5 py-2 flex items-center gap-2.5 rounded-lg outline-none"
+                        title={opt.enabled ? opt.label : `${opt.label} — write something first`}
+                        className={`border-shape-squircle pointer-events-auto flex items-center justify-center gap-2 border shadow-lg transition-colors duration-150 outline-none ${
+                          isActive && opt.enabled
+                            ? "bg-[var(--color-bg-hover)] border-[var(--color-border-hover)]"
+                            : "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]"
+                        } ${opt.enabled ? "" : "cursor-default"}`}
+                        style={{ "--r": "14px", height: SEG_H, width: opt.id === "ask" ? 116 : SEG_H }}
                       >
-                        {isActive && (
-                          <motion.div
-                            layoutId="buddy-menu-glow"
-                            className="absolute inset-0 rounded-lg bg-[var(--color-bg-hover)]"
-                            transition={{ type: "spring", stiffness: 520, damping: 36 }}
+                        {opt.id === "ask" ? (
+                          <>
+                            <motion.img
+                              layoutId="buddy-face"
+                              src={getUrl(micError ? "error" : menuFace)}
+                              alt="Buddy"
+                              transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
+                              className="w-[19px] h-[19px] object-contain select-none drop-shadow-sm"
+                              draggable="false"
+                            />
+                            <span className={`text-[13px] font-medium select-none transition-colors duration-150 ${isActive ? "text-[var(--color-text-primary)]" : "text-[var(--color-text-faint)]"}`}>
+                              Ask…
+                            </span>
+                          </>
+                        ) : (
+                          <Icon
+                            size={17}
+                            strokeWidth={2}
+                            className={`transition-colors duration-150 ${isActive && opt.enabled ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`}
                           />
                         )}
-                        <Icon size={15} strokeWidth={2} className={`relative z-10 flex-shrink-0 transition-colors duration-150 ${isActive ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`} />
-                        <div className="relative z-10 flex flex-col min-w-0">
-                          <span className="text-[13px] font-medium leading-tight text-[var(--color-text-primary)]">{opt.title}</span>
-                          <span className="text-[11px] leading-tight text-[var(--color-text-faint)] truncate">{opt.desc}</span>
-                        </div>
-                        <AnimatePresence>
-                          {isActive && (
-                            <motion.span
-                              initial={{ opacity: 0, x: -4 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              exit={{ opacity: 0, x: -4 }}
-                              transition={{ duration: 0.12 }}
-                              className="relative z-10 ml-auto text-[var(--color-text-faint)]"
-                            >
-                              <CornerDownLeft size={12} />
-                            </motion.span>
-                          )}
-                        </AnimatePresence>
                       </motion.button>
                     );
                   })}
-
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: 0.3, duration: 0.25 }}
-                    className="flex items-center justify-center gap-1.5 pt-2 pb-1 text-[10.5px] text-[var(--color-text-faint)] select-none"
-                  >
-                    <span>↑↓ choose</span>
-                    <span className="opacity-40">·</span>
-                    <span>↵ go</span>
-                    <span className="opacity-40">·</span>
-                    <span>or just type</span>
-                  </motion.div>
                 </motion.div>
               ) : (
               <motion.div

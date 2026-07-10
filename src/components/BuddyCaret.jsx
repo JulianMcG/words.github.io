@@ -4,12 +4,26 @@ import { Check, PenLine, Lightbulb, MessageCircle, CornerDownLeft } from "lucide
 import { generateAIResponse } from "../utils/gemini";
 import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
 
-// The /buddy experience: no box. Buddy floats at your caret above a frosted
-// veil; his face is the fixed anchor and the option column slides so the
-// choice in line with him is the one you pick. Keyboard-first by design.
+// The /buddy experience: no box. Buddy floats at your caret; his face is the
+// fixed anchor and the option column slides so the choice in line with him is
+// the one you pick. Behind it all sits a soft-edged, 90%-opaque rounded
+// rectangle of the page background — legible, no glass. Keyboard-first.
 
 const ROW_H = 34;
 const SPRING = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
+const FACE_W = 28;
+const FACE_GAP = 24; // breathing room between Buddy and the options
+const BACKDROP_L = -(FACE_W + FACE_GAP + 28); // stretch left to tuck Buddy in
+const BACKDROP_PAD = 24; // blur(10px) feathers ~2x inward — keep content in the solid core
+
+const Backdrop = ({ style, animate, transition }) => (
+  <motion.div
+    className="buddy-backdrop"
+    style={style}
+    animate={animate}
+    transition={transition}
+  />
+);
 
 export default function BuddyCaret({
   isOpen,
@@ -194,7 +208,7 @@ export default function BuddyCaret({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, options.length, onClose]);
 
-  // Click anywhere off the content closes (the veil doesn't catch clicks)
+  // Click anywhere off the content closes
   useEffect(() => {
     if (!isOpen) return;
     const onDown = (e) => {
@@ -230,7 +244,7 @@ export default function BuddyCaret({
     onClose();
   };
 
-  // Geometry: face line pinned near the caret; rows slide behind the veil
+  // Geometry: face line pinned near the caret; rows slide behind the backdrop
   const PAD_Y = (options.length - 1) * ROW_H + 26;
   const width = 400;
   const lineTop = Math.min(Math.max((position?.y || 100) + 14, 60), window.innerHeight - 120);
@@ -251,17 +265,15 @@ export default function BuddyCaret({
       className="fixed z-[100] pointer-events-none print:hidden"
       style={{ left, top: lineTop - PAD_Y, width, transformOrigin: "60px 50%" }}
     >
-      <div className="buddy-veil" style={{ top: -18, bottom: -18, left: -24, right: -24 }} />
-
       <div className="relative" style={{ paddingTop: PAD_Y, paddingBottom: PAD_Y }}>
         {/* The line — Buddy's face is the anchor for everything */}
-        <div className="relative flex items-center gap-3" style={{ minHeight: ROW_H }}>
+        <div className="relative flex items-center" style={{ minHeight: ROW_H, gap: FACE_GAP }}>
           <motion.img
             layoutId="buddy-face"
             src={getUrl(face)}
             alt="Buddy"
             transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
-            className="w-7 h-7 object-contain select-none drop-shadow-sm flex-shrink-0 self-start"
+            className="relative z-10 w-7 h-7 object-contain select-none drop-shadow-sm flex-shrink-0 self-start"
             style={{ marginTop: (ROW_H - 28) / 2 }}
             draggable="false"
           />
@@ -276,6 +288,12 @@ export default function BuddyCaret({
                 className="relative"
                 style={{ height: ROW_H }}
               >
+                {/* Soft-edged opaque backdrop rides along with the sliding column */}
+                <Backdrop
+                  style={{ top: -BACKDROP_PAD, left: BACKDROP_L, right: -32, height: options.length * ROW_H + BACKDROP_PAD * 2 }}
+                  animate={{ y: -menuIndex * ROW_H }}
+                  transition={SPRING}
+                />
                 {/* Selection pill, fixed on the line, hugging the chosen option */}
                 <motion.div
                   className="buddy-pill absolute rounded-lg pointer-events-none"
@@ -287,7 +305,7 @@ export default function BuddyCaret({
                 <motion.div
                   animate={{ y: -menuIndex * ROW_H }}
                   transition={SPRING}
-                  className="relative"
+                  className="relative z-10"
                 >
                   {options.map((opt, i) => {
                     const Icon = opt.icon;
@@ -337,9 +355,10 @@ export default function BuddyCaret({
                 initial={{ opacity: 0, filter: "blur(3px)" }}
                 animate={{ opacity: 1, filter: "blur(0px)" }}
                 exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
-                className="pointer-events-auto flex items-center"
+                className="pointer-events-auto relative flex items-center"
                 style={{ height: ROW_H, width: 300 }}
               >
+                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, right: -32 }} />
                 <input
                   ref={inputRef}
                   type="text"
@@ -347,7 +366,7 @@ export default function BuddyCaret({
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={askKeyDown}
                   placeholder={refining ? "Tell Buddy what to change…" : "Ask for a hand with your writing…"}
-                  className="w-full bg-transparent outline-none border-none text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)]"
+                  className="relative z-10 w-full bg-transparent outline-none border-none text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)]"
                   style={{ caretColor: "var(--color-accent)" }}
                 />
               </motion.form>
@@ -359,10 +378,11 @@ export default function BuddyCaret({
                 initial={{ opacity: 0, filter: "blur(3px)" }}
                 animate={{ opacity: 1, filter: "blur(0px)" }}
                 exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
-                className="flex items-center"
+                className="relative flex items-center"
                 style={{ height: ROW_H }}
               >
-                <span className="buddy-shimmer-text text-[13.5px] font-medium select-none whitespace-nowrap">{workLabel}</span>
+                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, right: -32 }} />
+                <span className="relative z-10 buddy-shimmer-text text-[13.5px] font-medium select-none whitespace-nowrap">{workLabel}</span>
               </motion.div>
             )}
 
@@ -373,23 +393,44 @@ export default function BuddyCaret({
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
                 transition={SPRING}
-                className="flex items-center gap-3"
-                style={{ height: ROW_H }}
+                className="relative flex flex-col"
               >
-                <span className="flex items-center gap-1.5 text-[13.5px] font-medium text-[var(--color-text-primary)] whitespace-nowrap select-none">
-                  <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.1 }}>
-                    <Check size={14} className="text-green-500" strokeWidth={2.5} />
-                  </motion.span>
-                  Changed it
-                </span>
-                <span className="flex items-center gap-2.5">
-                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setShowDiff((v) => !v)} className={linkCls}>
-                    {showDiff ? "Hide" : "View"}
-                  </button>
-                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onClose} className={linkCls}>
-                    Done
-                  </button>
-                </span>
+                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, right: -32 }} />
+                <div className="relative z-10 flex items-center gap-3" style={{ height: ROW_H }}>
+                  <span className="flex items-center gap-1.5 text-[13.5px] font-medium text-[var(--color-text-primary)] whitespace-nowrap select-none">
+                    <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.1 }}>
+                      <Check size={14} className="text-green-500" strokeWidth={2.5} />
+                    </motion.span>
+                    Changed it
+                  </span>
+                  <span className="flex items-center gap-2.5">
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setShowDiff((v) => !v)} className={linkCls}>
+                      {showDiff ? "Hide" : "View"}
+                    </button>
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onClose} className={linkCls}>
+                      Done
+                    </button>
+                  </span>
+                </div>
+
+                {/* Expandable peek at what Buddy changed */}
+                <AnimatePresence>
+                  {showDiff && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0, filter: "blur(3px)" }}
+                      animate={{ opacity: 1, height: "auto", filter: "blur(0px)" }}
+                      exit={{ opacity: 0, height: 0, filter: "blur(3px)" }}
+                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                      className="relative z-10 pointer-events-auto overflow-hidden"
+                      style={{ maxWidth: 300 }}
+                    >
+                      <div
+                        className="editor-content !pb-0 mt-1.5 pl-3 border-l-2 border-[var(--color-accent)]/40 text-[13px] leading-relaxed text-[var(--color-text-muted)] max-h-[240px] overflow-y-auto no-scrollbar break-words [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0"
+                        dangerouslySetInnerHTML={{ __html: lastResponse?.generated_html || "" }}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             )}
 
@@ -400,14 +441,15 @@ export default function BuddyCaret({
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
                 transition={SPRING}
-                className="pointer-events-auto flex flex-col gap-2 py-1.5"
+                className="pointer-events-auto relative flex flex-col gap-2 py-1.5"
                 style={{ maxWidth: 320 }}
               >
+                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, right: -32 }} />
                 <div
-                  className="editor-content !pb-0 text-[13.5px] leading-relaxed text-[var(--color-text-primary)] max-h-[38vh] overflow-y-auto no-scrollbar break-words [&_p]:!my-0"
+                  className="editor-content !pb-0 relative z-10 text-[13.5px] leading-relaxed text-[var(--color-text-primary)] max-h-[38vh] overflow-y-auto no-scrollbar break-words [&_p]:!my-0"
                   dangerouslySetInnerHTML={{ __html: renderReplyHtml(lastResponse?.conversational_reply) }}
                 />
-                <div className="flex items-center gap-3">
+                <div className="relative z-10 flex items-center gap-3">
                   {!isError && lastResponse?.conversational_reply && (
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={insertReply} className="pointer-events-auto text-[11.5px] font-medium text-[var(--color-accent)] hover:opacity-75 transition-opacity select-none">
                       Insert
@@ -421,45 +463,6 @@ export default function BuddyCaret({
             )}
           </AnimatePresence>
         </div>
-
-        {/* Expandable peek at what Buddy changed */}
-        <AnimatePresence>
-          {phase === "done" && showDiff && (
-            <motion.div
-              initial={{ opacity: 0, height: 0, filter: "blur(3px)" }}
-              animate={{ opacity: 1, height: "auto", filter: "blur(0px)" }}
-              exit={{ opacity: 0, height: 0, filter: "blur(3px)" }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-              className="pointer-events-auto overflow-hidden"
-              style={{ marginLeft: 40, maxWidth: 320 }}
-            >
-              <div
-                className="editor-content !pb-0 mt-1.5 pl-3 border-l-2 border-[var(--color-accent)]/40 text-[13px] leading-relaxed text-[var(--color-text-muted)] max-h-[240px] overflow-y-auto no-scrollbar break-words [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0"
-                dangerouslySetInnerHTML={{ __html: lastResponse?.generated_html || "" }}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Whispered keyboard hints */}
-        <AnimatePresence>
-          {phase === "menu" && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0, transition: { duration: 0.1 } }}
-              transition={{ delay: 0.45, duration: 0.3 }}
-              className="absolute flex items-center gap-1.5 text-[10.5px] text-[var(--color-text-faint)] select-none whitespace-nowrap"
-              style={{ left: 40, top: PAD_Y + ROW_H * options.length + 6 }}
-            >
-              <span>↑↓ choose</span>
-              <span className="opacity-40">·</span>
-              <span>↵ go</span>
-              <span className="opacity-40">·</span>
-              <span>or just type</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     </motion.div>
   );
