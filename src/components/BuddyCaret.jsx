@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, PenLine, Lightbulb, MessageCircle, CornerDownLeft } from "lucide-react";
+import { Check, PenLine, Lightbulb, CornerDownLeft } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
 
@@ -42,13 +42,11 @@ export default function BuddyCaret({
   const [isError, setIsError] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
   const [refining, setRefining] = useState(false);
-  const [pillW, setPillW] = useState(150);
   const [blink, setBlink] = useState(false);
   const [joy, setJoy] = useState(false);
 
   const rootRef = useRef(null);
   const inputRef = useRef(null);
-  const rowRefs = useRef([]);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
@@ -63,9 +61,9 @@ export default function BuddyCaret({
 
   const docHasWords = (fullDocumentText || "").replace(/<[^>]+>/g, "").trim().length > 0;
   const options = [
+    { id: "ask", title: "How can I help..." },
     docHasWords && { id: "finish", icon: PenLine, title: "Finish thought" },
     docHasWords && { id: "suggest", icon: Lightbulb, title: "Suggest" },
-    { id: "ask", icon: MessageCircle, title: "Ask" },
   ].filter(Boolean);
 
   // Reset on open
@@ -101,13 +99,6 @@ export default function BuddyCaret({
   if (phase === "menu" || joy) face = blink ? "smileblink" : "smile";
   else if (isError && phase === "reply") face = "error";
   else face = blink ? "blink" : "idle";
-
-  // Pill hugs the selected option's width
-  useLayoutEffect(() => {
-    if (!isOpen || phase !== "menu") return;
-    const el = rowRefs.current[menuIndex];
-    if (el) setPillW(el.getBoundingClientRect().width + 26);
-  }, [isOpen, phase, menuIndex, options.length]);
 
   const run = async (promptText, presetId = null) => {
     if (!promptText?.trim()) return;
@@ -288,18 +279,19 @@ export default function BuddyCaret({
                 className="relative"
                 style={{ height: ROW_H }}
               >
-                {/* Soft-edged opaque backdrop rides along with the sliding column */}
+                {/* Stationary soft-edged opaque backdrop, sized for the whole roll */}
                 <Backdrop
-                  style={{ top: -BACKDROP_PAD, left: BACKDROP_L, right: -32, height: options.length * ROW_H + BACKDROP_PAD * 2 }}
-                  animate={{ y: -menuIndex * ROW_H }}
-                  transition={SPRING}
+                  style={{
+                    top: -((options.length - 1) * ROW_H + BACKDROP_PAD),
+                    left: BACKDROP_L,
+                    right: -36,
+                    height: (2 * options.length - 1) * ROW_H + BACKDROP_PAD * 2,
+                  }}
                 />
-                {/* Selection pill, fixed on the line, hugging the chosen option */}
-                <motion.div
-                  className="buddy-pill absolute rounded-lg pointer-events-none"
-                  animate={{ width: pillW }}
-                  transition={SPRING}
-                  style={{ height: ROW_H, top: 0, left: -13 }}
+                {/* Selection glow — fixed blurred orange square on Buddy's line */}
+                <div
+                  className="buddy-pill absolute pointer-events-none"
+                  style={{ width: 176, height: ROW_H, top: 0, left: -14 }}
                 />
                 {/* The column of options slides so the chosen one meets Buddy */}
                 <motion.div
@@ -315,19 +307,18 @@ export default function BuddyCaret({
                       <motion.button
                         key={opt.id}
                         type="button"
-                        ref={(el) => (rowRefs.current[i] = el)}
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => { setMenuIndex(i); setTimeout(() => runOption(opt), i === menuIndex ? 0 : 180); }}
                         animate={{
-                          opacity: active ? 1 : d === 1 ? 0.45 : 0.22,
-                          scale: active ? 1 : 0.96,
-                          filter: active ? "blur(0px)" : `blur(${Math.min(d * 0.6, 1.2)}px)`,
+                          opacity: active ? 1 : d === 1 ? 0.5 : 0.26,
+                          scale: active ? 1 : 0.965,
+                          x: active ? 0 : 12 + (d - 1) * 5,
                         }}
                         transition={SPRING}
                         className="pointer-events-auto flex items-center gap-2.5 text-left outline-none"
                         style={{ height: ROW_H }}
                       >
-                        <Icon size={15} strokeWidth={2} className={`flex-shrink-0 transition-colors duration-200 ${active ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`} />
+                        {Icon && <Icon size={15} strokeWidth={2} className={`flex-shrink-0 transition-colors duration-200 ${active ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`} />}
                         <span className="text-[14px] font-medium text-[var(--color-text-primary)] whitespace-nowrap leading-none">
                           {opt.title}
                         </span>

@@ -583,8 +583,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   const activeWidth = 380;
   const restingWidth = 48;
-  const SEG_H = 46;
-  const menuWidth = 46 * 3 + 116 + 8 * 3; // three squares + the Ask segment + gaps
+  const SEG_H = 44; // ≈ the prompt bar's own height, so the segments read as its pieces
+  const menuWidth = 44 * 3 + 132 + 8 * 3; // three squares + the Ask segment + gaps
   const isMenuMode = isOpen && phase === "menu" && !autoLabel;
   const openWidth = isMenuMode ? menuWidth : activeWidth;
   // Buddy smiles at you while you choose (with his usual blinks)
@@ -850,24 +850,28 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => runMenuOption(opt)}
                         title={opt.enabled ? opt.label : `${opt.label} — write something first`}
-                        className={`border-shape-squircle pointer-events-auto flex items-center justify-center gap-2 border shadow-lg transition-colors duration-150 outline-none ${
+                        className={`border-shape-squircle pointer-events-auto flex items-center border shadow-2xl transition-colors duration-150 outline-none ${
+                          opt.id === "ask" ? "justify-start px-2.5 gap-2.5" : "justify-center"
+                        } ${
                           isActive && opt.enabled
                             ? "bg-[var(--color-bg-hover)] border-[var(--color-border-hover)]"
                             : "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)]"
                         } ${opt.enabled ? "" : "cursor-default"}`}
-                        style={{ "--r": "14px", height: SEG_H, width: opt.id === "ask" ? 116 : SEG_H }}
+                        style={{ "--r": "12px", height: SEG_H, width: opt.id === "ask" ? 132 : SEG_H }}
                       >
                         {opt.id === "ask" ? (
                           <>
-                            <motion.img
-                              layoutId="buddy-face"
-                              src={getUrl(micError ? "error" : menuFace)}
-                              alt="Buddy"
-                              transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
-                              className="w-[19px] h-[19px] object-contain select-none drop-shadow-sm"
-                              draggable="false"
-                            />
-                            <span className={`text-[13px] font-medium select-none transition-colors duration-150 ${isActive ? "text-[var(--color-text-primary)]" : "text-[var(--color-text-faint)]"}`}>
+                            <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
+                              <motion.img
+                                layoutId="buddy-face"
+                                src={getUrl(micError ? "error" : menuFace)}
+                                alt="Buddy"
+                                transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
+                                className="w-5 h-5 opacity-90 object-contain select-none drop-shadow-sm"
+                                draggable="false"
+                              />
+                            </div>
+                            <span className="text-[14px] select-none text-[var(--color-text-faint)]">
                               Ask…
                             </span>
                           </>

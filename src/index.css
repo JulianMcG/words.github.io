@@ -956,13 +956,14 @@ html[data-reduce-motion="true"] *::after {
   position: absolute;
   background: var(--color-bg-primary);
   border-radius: 22px;
-  opacity: 0.9;
+  opacity: 0.95;
   filter: blur(6px);
   pointer-events: none;
 }
 
-/* Selection pill on the caret slider — width follows the chosen option */
+/* Selection glow on the caret slider — a fixed, softly blurred orange square */
 .buddy-pill {
-  background: color-mix(in srgb, var(--color-accent) 11%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 22%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  border-radius: 12px;
+  filter: blur(10px);
 }

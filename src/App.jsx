@@ -742,7 +742,8 @@ const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
   const setCaretTint = (on) => {
     hotRef.current = on;
     setHot(on);
-    if (editorRef.current) editorRef.current.style.caretColor = on ? "var(--color-accent)" : "";
+    // Hide the native blinking caret — a steady, thicker orange one takes over
+    if (editorRef.current) editorRef.current.style.caretColor = on ? "transparent" : "";
   };
 
   // Never leave a stray orange caret behind
@@ -766,12 +767,24 @@ const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
       <AnimatePresence>
         {hot && (
           <motion.div
+            key="caret-glow"
             initial={{ opacity: 0, scale: 0.5 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.5 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
             className="absolute inset-0 rounded-full pointer-events-none"
             style={{ background: "radial-gradient(closest-side, rgba(232, 87, 42, 0.22), rgba(232, 87, 42, 0))" }}
+          />
+        )}
+        {hot && (
+          <motion.div
+            key="caret-bar"
+            initial={{ width: 2, x: "-50%", opacity: 0 }}
+            animate={{ width: 3.5, x: "-50%", opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.1 } }}
+            transition={{ type: "spring", stiffness: 520, damping: 30 }}
+            className="absolute rounded-full pointer-events-none"
+            style={{ left: 9, top: 4, height: rect.h, background: "var(--color-accent)" }}
           />
         )}
       </AnimatePresence>
