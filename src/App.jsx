@@ -68,6 +68,7 @@ import GradualBlur from "./components/GradualBlur";
 import { Sparkles } from "lucide-react";
 import BuddyIcon from "./components/BuddyIcon";
 import BuddyWidget from "./components/BuddyWidget";
+import BuddyCaret from "./components/BuddyCaret";
 import { getEmojiForTitle } from "./utils/emojiMap";
 import EmojiPickerPanel from "./components/EmojiPicker";
 import { generateFolderName, generateDocTitle } from "./utils/gemini";
@@ -9259,7 +9260,8 @@ export default function App() {
       <LayoutGroup id="buddy">
       {user && !historyPanelOpen && (
         <BuddyWidget
-          isOpen={buddyState.show}
+          isOpen={buddyState.show && buddyState.origin !== "slash"}
+          suppressed={buddyState.show && buddyState.origin === "slash"}
           position={{ x: Math.min(Math.max(buddyState.x || window.innerWidth / 2, 0), window.innerWidth - 380), y: Math.max(buddyState.y || 100, 0) + 16 }}
           onClose={() => setBuddyState(p => ({ ...p, show: false }))}
           onApplyText={handleBuddyApply}
@@ -9272,9 +9274,6 @@ export default function App() {
           isDumpActive={buddyDumpActive}
           micError={buddyMicError}
           onDismissMicError={() => { clearTimeout(buddyMicErrorTimerRef.current); setBuddyMicError(null); }}
-          origin={buddyState.origin || "corner"}
-          cursorBeforeText={buddyState.beforeText || ""}
-          cursorAfterText={buddyState.afterText || ""}
           onStartLive={startBuddyLive}
           onLongPress={startBuddyLive}
           onGlobalClick={() => {
@@ -9310,6 +9309,21 @@ export default function App() {
           }}
         />
       )}
+
+      {/* Boxless, frosted /buddy experience at the caret */}
+      <AnimatePresence>
+        {user && !historyPanelOpen && buddyState.show && buddyState.origin === "slash" && (
+          <BuddyCaret
+            isOpen
+            position={{ x: buddyState.x, y: buddyState.y }}
+            onClose={() => setBuddyState(p => ({ ...p, show: false }))}
+            onApplyText={handleBuddyApply}
+            fullDocumentText={editorRef.current?.innerHTML || ""}
+            cursorBeforeText={buddyState.beforeText || ""}
+            cursorAfterText={buddyState.afterText || ""}
+          />
+        )}
+      </AnimatePresence>
 
       {user && !historyPanelOpen && (
         <CaretBuddyHotspot

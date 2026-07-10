@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
-import { Loader2, ArrowRight, CornerDownLeft, X, File, Check, MicOff, AudioLines, SpellCheck, Lightbulb, MessageCircle, PenLine } from "lucide-react";
+import { Loader2, ArrowRight, CornerDownLeft, File, Check, MicOff, AudioLines, SpellCheck, Lightbulb, MessageCircle } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
+import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
 
-export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId, onLongPress, onStartLive, origin = "corner", cursorBeforeText = "", cursorAfterText = "", isDumpActive = false, micError = null, onDismissMicError = null }) {
+export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId, onLongPress, onStartLive, suppressed = false, isDumpActive = false, micError = null, onDismissMicError = null }) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [previewText, setPreviewText] = useState("");
@@ -14,6 +15,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [menuIndex, setMenuIndex] = useState(0);
   // While a one-click action runs, this replaces the input with a shimmering status line
   const [autoLabel, setAutoLabel] = useState(null);
+  // After an auto-applied change, the input row becomes a slim "✓ Changed it"
+  // line; typing brings the refine input back
+  const [refineMode, setRefineMode] = useState(false);
   
   const [expression, setExpression] = useState("idle");
   const [isHovered, setIsHovered] = useState(false);
@@ -160,6 +164,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       setPhase("menu");
       setMenuIndex(0);
       setAutoLabel(null);
+      setRefineMode(false);
       setInput("");
       setPreviewText("");
       setIsReviewing(false);
@@ -179,6 +184,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         setPhase("menu");
         setMenuIndex(0);
         setAutoLabel(null);
+        setRefineMode(false);
         setInput("");
         setPreviewText("");
         setIsReviewing(false);
@@ -353,26 +359,12 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const hasSelection = selectedText && selectedText !== "GLOBAL_CHAT" && !isCollapsedSelection;
   const docHasWords = (fullDocumentText || "").replace(/<[^>]+>/g, "").trim().length > 0;
 
-  const menuOptions = origin === "slash"
-    ? [
-        docHasWords && { id: "finish", icon: PenLine, title: "Finish thought", desc: "Buddy writes the next line or two", label: "Finishing your thought…" },
-        docHasWords && { id: "suggest", icon: Lightbulb, title: "Suggest", desc: "Ideas to make this better", label: "Reading your words…" },
-        { id: "ask", icon: MessageCircle, title: "Ask", desc: "Tell Buddy what you need" },
-      ].filter(Boolean)
-    : [
-        { id: "live", icon: AudioLines, title: "Live", desc: "Talk it out — Buddy writes it up" },
-        docHasWords && { id: "clean", icon: SpellCheck, title: "Clean", desc: hasSelection ? "Polish the selected text" : "Polish spelling, grammar & flow", label: "Tidying up your words…" },
-        docHasWords && { id: "suggest", icon: Lightbulb, title: "Suggest", desc: hasSelection ? "Ideas for this selection" : "Ideas to make this better", label: "Reading your words…" },
-        { id: "ask", icon: MessageCircle, title: "Ask", desc: "Tell Buddy anything" },
-      ].filter(Boolean);
-
-  const PRESET_PROMPTS = {
-    finish: "Continue writing from exactly where my cursor is. Write the natural next sentence or two in my voice, tone, and style, continuing my train of thought. Output only the continuation — nothing else.",
-    suggest: "Read this and give me 2-3 short, specific suggestions that would make the writing better. Just ideas, warmly and concretely — don't rewrite it for me.",
-    clean: hasSelection
-      ? "Clean up this text: fix spelling, grammar, punctuation, and awkward phrasing. Keep my meaning, tone, and formatting exactly as they are."
-      : "Clean up my document: fix spelling, grammar, punctuation, and awkward phrasing throughout. Keep my meaning, tone, structure, and formatting — don't add or remove ideas.",
-  };
+  const menuOptions = [
+    { id: "live", icon: AudioLines, title: "Live", desc: "Talk it out — Buddy writes it up" },
+    docHasWords && { id: "clean", icon: SpellCheck, title: "Clean", desc: hasSelection ? "Polish the selected text" : "Polish spelling, grammar & flow" },
+    docHasWords && { id: "suggest", icon: Lightbulb, title: "Suggest", desc: hasSelection ? "Ideas for this selection" : "Ideas to make this better" },
+    { id: "ask", icon: MessageCircle, title: "Ask", desc: "Tell Buddy anything" },
+  ].filter(Boolean);
 
   const runMenuOption = (opt) => {
     if (!opt) return;
@@ -388,7 +380,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     }
     // One-click actions: Buddy just does it
     setPhase("ask");
-    setAutoLabel(opt.label);
+    setAutoLabel(buddyPresetLabel(opt.id));
     handleGenerate(null, opt);
   };
 
@@ -419,11 +411,32 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, phase, autoLabel, menuIndex, menuOptions.length, origin]);
+  }, [isOpen, phase, autoLabel, menuIndex, menuOptions.length]);
+
+  // After an applied change, the row is just "✓ Changed it" — typing brings
+  // the refine input back; Enter or Escape wraps up
+  useEffect(() => {
+    if (!isOpen || phase !== "ask" || autoLabel || isLoading || refineMode || !isChangesApplied) return;
+    const onKey = (e) => {
+      if (e.key === "Enter" || e.key === "Escape") {
+        e.preventDefault(); e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault(); e.stopPropagation();
+        setRefineMode(true);
+        setInput(e.key);
+        setTimeout(() => inputRef.current?.focus(), 80);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [isOpen, phase, autoLabel, isLoading, refineMode, isChangesApplied, onClose]);
 
   const handleGenerate = async (e, preset = null) => {
     e?.preventDefault();
-    const promptToUse = preset ? PRESET_PROMPTS[preset.id] : input;
+    const promptToUse = preset ? buddyPresetPrompt(preset.id, hasSelection) : input;
     if (!promptToUse?.trim() || isLoading) return;
 
     setIsLoading(true);
@@ -431,11 +444,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     try {
       let context = "";
 
-      if (preset?.id === "finish") {
-         context = `The user has a collapsed cursor and wants you to continue their writing from that exact point.${cursorBeforeText ? `\n\nText immediately BEFORE the cursor:\n"${cursorBeforeText}"` : ""}${cursorAfterText ? `\n\nText immediately AFTER the cursor:\n"${cursorAfterText}"` : ""}\n\nUse insert_at_cursor.`;
-      } else if (preset?.id === "suggest" && origin === "slash") {
-         context = `The user is working on their document and wants feedback. The full document HTML is:\n\n"${fullDocumentText}"`;
-      } else if (isReviewing && previewText) {
+      if (isReviewing && previewText) {
           const previousDraft = typeof previewText === 'object'
               ? (previewText.generated_html || previewText.conversational_reply || "")
               : previewText;
@@ -482,6 +491,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           setIsChangesApplied(true);
           setIsViewingChanges(false);
           setIsReviewing(true);
+          setRefineMode(false);
       } else {
           // chat: show in panel, no document change
           setIsReviewing(true);
@@ -519,25 +529,29 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
            {previewText.conversational_reply && (
              <div className="flex gap-3 items-start p-1">
                <div 
-                 className="editor-content w-full min-w-0 overflow-hidden text-[13.5px] leading-relaxed text-[var(--color-text-primary)] break-words whitespace-pre-wrap relative [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0"
+                 className="editor-content !pb-0 w-full min-w-0 overflow-hidden text-[13.5px] leading-relaxed text-[var(--color-text-primary)] break-words whitespace-pre-wrap relative [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0"
                  dangerouslySetInnerHTML={{ __html: previewText.conversational_reply.split('\n').filter(line => line.trim() !== "").map(line => `<p class="mb-2 last:mb-0">${line}</p>`).join('') }}
                />
              </div>
            )}
            
            {previewText.generated_html && (
-             <div className="flex flex-col gap-2 mt-2 w-full min-w-0">
-                 <div className="editor-content w-full min-w-0 overflow-hidden break-words whitespace-pre-wrap text-[13.5px] leading-relaxed relative [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0">
-                   {selectedText === "GLOBAL_CHAT" ? (
-                     <div className="text-[11px] text-orange-500 opacity-80 font-semibold uppercase tracking-wider mb-1">
-                       [ Document Rewrite ]
-                     </div>
-                   ) : (selectedHtml || selectedText) ? (
-                     <div className="text-red-500/70 dark:text-red-400/70 line-through decoration-red-500/40 mb-1" dangerouslySetInnerHTML={{ __html: selectedHtml || selectedText }} />
-                   ) : null}
-                   
-                   <div className="text-green-600 dark:text-green-400" dangerouslySetInnerHTML={{ __html: previewText.generated_html }} />
-                 </div>
+             <div className="flex flex-col gap-1.5 mt-2 w-full min-w-0">
+                 {selectedText === "GLOBAL_CHAT" ? (
+                   <div className="text-[11px] text-[var(--color-text-faint)] font-medium mb-0.5 select-none">
+                     Your document, now —
+                   </div>
+                 ) : (selectedHtml || selectedText) ? (
+                   <div
+                     className="editor-content !pb-0 w-full min-w-0 overflow-hidden break-words text-[12px] leading-relaxed text-[var(--color-text-faint)] line-through decoration-[var(--color-text-faint)]/50 opacity-70 [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0"
+                     dangerouslySetInnerHTML={{ __html: selectedHtml || selectedText }}
+                   />
+                 ) : null}
+
+                 <div
+                   className="editor-content !pb-0 w-full min-w-0 overflow-hidden break-words text-[13.5px] leading-relaxed text-[var(--color-text-primary)] pl-3 border-l-2 border-[var(--color-accent)]/40 [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0"
+                   dangerouslySetInnerHTML={{ __html: previewText.generated_html }}
+                 />
              </div>
            )}
          </div>
@@ -548,7 +562,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     return (
       <div className="flex gap-3 items-start p-1">
         <div 
-          className="editor-content w-full min-w-0 overflow-hidden break-words whitespace-pre-wrap text-[13.5px] leading-relaxed text-[var(--color-text-primary)] relative [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0"
+          className="editor-content !pb-0 w-full min-w-0 overflow-hidden break-words whitespace-pre-wrap text-[13.5px] leading-relaxed text-[var(--color-text-primary)] relative [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0"
           dangerouslySetInnerHTML={{ __html: (previewText || "").split('\n').filter(line => line.trim() !== "").map(line => `<p class="mb-2 last:mb-0">${line}</p>`).join('') }}
         />
       </div>
@@ -562,9 +576,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const openWidth = isMenuMode ? menuWidth : activeWidth;
   // Buddy smiles at you while you choose (with his usual blinks)
   const menuFace = blinkState === "blink" ? "smileblink" : "smile";
-  const menuGreeting = origin === "slash"
-    ? "What should happen here?"
-    : hasSelection ? "About that selection…" : "Hey — what are we doing?";
+  const menuGreeting = hasSelection ? "About that selection…" : "Hey — what are we doing?";
 
   const safeX = Math.min(Math.max(position?.x || windowSize.width / 2, 8), windowSize.width - activeWidth - 8);
   const safeY = Math.min(position?.y || 100, windowSize.height - 220); 
@@ -590,7 +602,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     <>
 
       {/* Invisible fixed hitbox block */}
-      {!isOpen && (
+      {!isOpen && !suppressed && (
         <div 
           className="fixed z-[99] cursor-pointer print:hidden"
           style={{ 
@@ -687,7 +699,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           type: "spring", stiffness: 350, damping: 25, mass: 0.5,
         }}
         className={`fixed z-[100] transition-colors duration-200 print:hidden border-shape-squircle ${
-          isOpen ? 'shadow-2xl bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden pointer-events-auto flex flex-col' : 'bg-transparent overflow-visible pointer-events-none'
+          isOpen ? 'shadow-2xl buddy-glass border border-[var(--color-border-primary)]/70 overflow-hidden pointer-events-auto flex flex-col' : 'bg-transparent overflow-visible pointer-events-none'
         }`}
         style={{
           '--r': isOpen ? '12px' : '24px',
@@ -700,7 +712,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         }}
       >
         <AnimatePresence mode="popLayout" initial={false}>
-          {!isOpen && !isDumpActive ? (
+          {suppressed ? null : !isOpen && !isDumpActive ? (
             <motion.div
               layout
               key="resting-icon"
@@ -889,65 +901,36 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
                 {isReviewing && (
                   <div className="flex flex-col w-full">
-                    {/* Render Diff if NOT Auto-Applied or if specifically Viewing Changes */}
+                    {/* The response — floating on the glass, no boxed panel */}
                     {(!isChangesApplied || isViewingChanges) && (
-                      <div className={`p-4 ${hasValidHtml ? 'max-h-[60vh]' : 'max-h-[35vh]'} min-h-[50px] overflow-y-auto border-b border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)]`}>
+                      <div className={`px-4 pt-3.5 pb-3 ${hasValidHtml ? 'max-h-[60vh]' : 'max-h-[35vh]'} min-h-[46px] overflow-y-auto no-scrollbar border-b border-[var(--color-border-primary)]/50`}>
                         {renderDiffPreview()}
+
+                        {/* Chat replies get quiet inline actions right under the words */}
+                        {!isChangesApplied && (
+                          <div className="flex items-center gap-3.5 mt-3">
+                            {((typeof previewText === 'object' && previewText?.conversational_reply) || (typeof previewText === 'string' && !hasError && previewText)) && (
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => handleApply("append", { generated_html: `<p>${typeof previewText === 'object' ? previewText.conversational_reply : previewText}</p>` })}
+                                className="text-[11.5px] font-medium text-[var(--color-accent)] hover:opacity-75 transition-opacity select-none"
+                              >
+                                Insert
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={onClose}
+                              className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
+                            >
+                              Done
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
-
-                    <div className="flex items-center justify-between p-2 bg-[var(--color-bg-primary)] border-b border-[var(--color-border-primary)]">
-
-                       {/* If Changes were Applied */}
-                       {isChangesApplied ? (
-                         <div className="flex items-center w-full justify-between">
-                           <span className="text-[12.5px] font-medium text-[var(--color-text-primary)] flex items-center gap-1.5 pl-2 select-none"><Check size={14} className="text-green-500" /> Automatically changed</span>
-                           <div className="flex gap-1.5">
-                             <button 
-                               type="button"
-                               onMouseDown={(e) => e.preventDefault()}
-                               onClick={() => setIsViewingChanges(!isViewingChanges)}
-                               className="px-2.5 py-1.5 rounded-md text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] text-[12px] font-medium transition-colors"
-                             >
-                               {isViewingChanges ? "Hide changes" : "View changes"}
-                             </button>
-                             <button 
-                               type="button"
-                               onMouseDown={(e) => e.preventDefault()}
-                               onClick={onClose}
-                               className="px-2.5 py-1.5 rounded-md bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] text-[12px] font-medium transition-colors border border-[var(--color-border-primary)]"
-                             >
-                               Done
-                             </button>
-                           </div>
-                         </div>
-                       ) : (
-                         /* Changes NOT Applied (e.g. conversational reply, or fallback/error) */
-                         <div className="flex items-center w-full justify-between px-1">
-                           <div className="flex gap-1.5">
-                              {((typeof previewText === 'object' && previewText?.conversational_reply) || (typeof previewText === 'string' && !hasError && previewText)) && (
-                                <button 
-                                  type="button"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => handleApply("append", { generated_html: `<p>${typeof previewText === 'object' ? previewText.conversational_reply : previewText}</p>` })}
-                                  className="flex-shrink-0 flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[#3b82f6] hover:bg-blue-50 dark:hover:bg-blue-900/20 text-[12px] font-medium transition-colors"
-                                >
-                                  <CornerDownLeft size={13} /> Insert
-                                </button>
-                              )}
-                           </div>
-                           <button 
-                             type="button"
-                             onMouseDown={(e) => e.preventDefault()}
-                             onClick={onClose}
-                             className="w-[26px] h-[26px] flex items-center justify-center rounded-md text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                             title="Dismiss"
-                           >
-                             <X size={15} />
-                           </button>
-                         </div>
-                       )}
-                    </div>
                   </div>
                 )}
 
@@ -965,6 +948,45 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     </div>
                     <span className="buddy-shimmer-text flex-1 text-[13.5px] font-medium select-none">{autoLabel}</span>
                     <Loader2 size={16} className="text-orange-500 animate-spin flex-shrink-0" />
+                  </div>
+                ) : isChangesApplied && !refineMode ? (
+                  /* Slim confirmation: Buddy + a checkmark, nothing shouting */
+                  <div className="flex items-center p-2.5 gap-2.5" style={{ minHeight: 41 }}>
+                    <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
+                      <motion.img
+                        layoutId="buddy-face"
+                        src={getUrl(activeExpression)}
+                        alt="Buddy"
+                        transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
+                        className="w-5 h-5 opacity-90 object-contain drop-shadow-sm"
+                        draggable="false"
+                      />
+                    </div>
+                    <span className="flex items-center gap-1.5 text-[13px] font-medium text-[var(--color-text-primary)] select-none">
+                      <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.05 }}>
+                        <Check size={13.5} className="text-green-500" strokeWidth={2.5} />
+                      </motion.span>
+                      Changed it
+                    </span>
+                    <span className="flex-1" />
+                    <div className="flex items-center gap-2.5 pr-1">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setIsViewingChanges(!isViewingChanges)}
+                        className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
+                      >
+                        {isViewingChanges ? "Hide" : "View"}
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={onClose}
+                        className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
+                      >
+                        Done
+                      </button>
+                    </div>
                   </div>
                 ) : (
                 <form onSubmit={handleGenerate} className="flex relative items-center p-2.5 gap-2.5">
@@ -1000,7 +1022,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                         const shadow = document.getElementById('buddy-shadow-text');
                         if (shadow) shadow.scrollLeft = e.target.scrollLeft;
                       }}
-                      placeholder={isReviewing ? "Tell Buddy what to change..." : (selectedText === "GLOBAL_CHAT" ? "Ask Buddy anything..." : isCollapsedSelection ? "Ask Buddy to write..." : "Ask Buddy to edit this...")}
+                      placeholder={isReviewing ? "Tell Buddy what to change..." : (selectedText === "GLOBAL_CHAT" ? "Ask Buddy anything..." : isCollapsedSelection ? "Ask for a hand with your writing..." : "Ask Buddy about this...")}
                       className="w-full h-full bg-transparent text-[14px] outline-none placeholder:text-[var(--color-text-faint)] relative z-10"
                       style={{ 
                         color: mentionedDocs.length > 0 ? "transparent" : "var(--color-text-primary)", 
