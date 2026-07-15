@@ -702,6 +702,7 @@ const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
   const hotRef = useRef(false);
   const armedRef = useRef(false);
   const dwellTimerRef = useRef(null);
+  const rectRef = useRef(null);
   // Hover is the whole point — skip touch devices entirely
   const canHoverRef = useRef(
     typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches
@@ -728,7 +729,12 @@ const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
         cr = { left: er.left, top: er.top, height: Math.min(er.height, 28) || 24 };
       }
       if (cr.top > window.innerHeight || cr.top + (cr.height || 24) < 0) { setRect(null); return; }
-      setRect({ x: cr.left, y: cr.top, h: cr.height || 24 });
+      const next = { x: cr.left, y: cr.top, h: cr.height || 24 };
+      // Caret moved (typing, clicking elsewhere) — any armed state is stale
+      const prev = rectRef.current;
+      if (prev && (Math.abs(prev.x - next.x) > 1 || Math.abs(prev.y - next.y) > 1)) disarmRef.current?.();
+      rectRef.current = next;
+      setRect(next);
     };
     const schedule = () => { if (raf == null) raf = requestAnimationFrame(measure); };
     document.addEventListener("selectionchange", schedule);
@@ -760,6 +766,34 @@ const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
     armedRef.current = false;
     setCaretTint(false);
   };
+  const disarmRef = useRef(null);
+  disarmRef.current = disarm;
+
+  // Dwell detection is passive (document mousemove), so the hotspot has no
+  // interactive element until it arms — double- and triple-click text
+  // selection at the caret keep working natively.
+  useEffect(() => {
+    if (!enabled || !rect || !canHoverRef.current) return;
+    const inside = (e) =>
+      e.clientX >= rect.x - 9 && e.clientX <= rect.x + 9 &&
+      e.clientY >= rect.y - 4 && e.clientY <= rect.y + rect.h + 4;
+    const onMove = (e) => {
+      if (inside(e)) {
+        if (!armedRef.current && dwellTimerRef.current == null) {
+          dwellTimerRef.current = setTimeout(() => {
+            dwellTimerRef.current = null;
+            armedRef.current = true;
+            setCaretTint(true);
+          }, CARET_DWELL_MS);
+        }
+      } else if (armedRef.current || dwellTimerRef.current != null) {
+        disarm();
+      }
+    };
+    document.addEventListener("mousemove", onMove);
+    return () => document.removeEventListener("mousemove", onMove);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, rect]);
 
   // Never leave a stray orange caret behind
   useEffect(() => {
@@ -773,16 +807,13 @@ const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
   return (
     <div
       className="fixed z-40 print:hidden"
-      style={{ left: rect.x - 9, top: rect.y - 4, width: 18, height: rect.h + 8, cursor: "pointer" }}
-      onMouseEnter={() => {
-        clearDwell();
-        // Require a brief, deliberate hover before the caret arms and can be clicked
-        dwellTimerRef.current = setTimeout(() => {
-          armedRef.current = true;
-          setCaretTint(true);
-        }, CARET_DWELL_MS);
+      style={{
+        left: rect.x - 9, top: rect.y - 4, width: 18, height: rect.h + 8,
+        cursor: "pointer",
+        // Invisible to the mouse until armed — clicks, double-clicks, and
+        // triple-clicks pass straight through to the text underneath
+        pointerEvents: hot ? "auto" : "none",
       }}
-      onMouseLeave={disarm}
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => { if (!armedRef.current) return; disarm(); onSummon(); }}
     >

@@ -32,7 +32,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const isLongPressRef = useRef(false);
   const micErrorDismissReadyRef = useRef(false);
   
-  const [isOpeningTransition, setIsOpeningTransition] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [isChangesApplied, setIsChangesApplied] = useState(false);
   const [isViewingChanges, setIsViewingChanges] = useState(false);
@@ -129,16 +128,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         clearBlinks();
     };
   }, [shouldBackgroundBlink]);
-
-  useEffect(() => {
-    if (!isMounted.current) {
-      isMounted.current = true;
-      return;
-    }
-    setIsOpeningTransition(true);
-    const t = setTimeout(() => setIsOpeningTransition(false), 200);
-    return () => clearTimeout(t);
-  }, [isOpen]);
 
   const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
 
@@ -717,7 +706,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           y: 0,
           width: isOpen ? activeWidth : restingWidth,
           height: isOpen ? (contentH ? contentH + 2 : "auto") : restingWidth,
-          filter: isOpeningTransition ? "blur(3px)" : "blur(0px)",
         }}
         transition={{
           type: "spring", stiffness: 440, damping: 32, mass: 0.85,
@@ -812,12 +800,15 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 )}
               </AnimatePresence>
 
+              {/* Rendered oversized (48 x 1.4) and scaled DOWN at rest, so the
+                  hover grow tops out at scale 1 — the raster is never upscaled
+                  and Buddy stays crisp */}
               <motion.img
                 layoutId="buddy-face"
                 src={getUrl(activeExpression)}
                 alt="Buddy"
                 animate={{
-                  scale: isClicked ? 1.25 : (micError ? 1.2 : isHovered ? 1.4 : 1),
+                  scale: isClicked ? 0.893 : (micError ? 0.857 : isHovered ? 1 : 0.714),
                   opacity: isOpen ? 1 : (micError || isHovered ? 1 : 0.45)
                 }}
                 transition={{
@@ -825,8 +816,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   opacity: { type: "spring", stiffness: 400, damping: 20 },
                   layout: { type: "tween", duration: 0.55, ease: [0.22, 1, 0.36, 1] },
                 }}
-                style={{ originY: 1, rotateX: tiltX, rotateY: tiltY, transformPerspective: 320 }}
-                className="w-full h-full object-contain select-none"
+                style={{ width: 68, height: 68, maxWidth: "none", bottom: 0, left: "50%", x: "-50%", originY: 1, rotateX: tiltX, rotateY: tiltY, transformPerspective: 320 }}
+                className="absolute object-contain select-none"
                 draggable="false"
               />
             </motion.div>
@@ -1017,13 +1008,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       </motion.div>
 
       {/* Quick-action pills — lisse capsules floating above the bar */}
-      <AnimatePresence>
-        {isOpen && !isReviewing && !autoLabel && !isLoading && (
+      <AnimatePresence custom={input.trim() ? "typing" : "close"}>
+        {isOpen && !isReviewing && !autoLabel && !isLoading && !input.trim() && (
           <motion.div
             key="buddy-pills"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: { duration: 0.14 } }}
+            exit={{ opacity: 0, transition: { duration: 0.16 } }}
             className="fixed z-[100] flex items-center justify-start gap-1.5 print:hidden"
             style={{ right: 20, bottom: 75, width: activeWidth }}
           >
@@ -1033,9 +1024,16 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               return (
                 <motion.div
                   key={opt.id}
-                  initial={{ opacity: 0, x: 36, y: 26, scale: 0.75, filter: "blur(3px)" }}
-                  animate={{ opacity: opt.enabled ? 1 : 0.45, x: 0, y: 0, scale: 1, filter: "blur(0px)" }}
-                  exit={{ opacity: 0, x: 24, y: 16, scale: 0.85, filter: "blur(2px)", transition: { duration: 0.15, delay: i * 0.03 } }}
+                  initial={{ opacity: 0, x: 36, y: 26, scale: 0.75 }}
+                  animate={{ opacity: opt.enabled ? 1 : 0.45, x: 0, y: 0, scale: 1 }}
+                  variants={{
+                    // Typing: pills duck straight down behind the bar — the
+                    // opening rise in reverse, no sideways drift
+                    out: (reason) => reason === "typing"
+                      ? { opacity: 0, y: 26, scale: 0.85, transition: { duration: 0.16, ease: "easeIn", delay: i * 0.025 } }
+                      : { opacity: 0, x: 24, y: 16, scale: 0.85, transition: { duration: 0.15, delay: i * 0.03 } },
+                  }}
+                  exit="out"
                   transition={{ delay: 0.16 + (menuOptions.length - 1 - i) * 0.06, type: "spring", stiffness: 380, damping: 26, mass: 0.9 }}
                   whileTap={opt.enabled ? { scale: 0.95 } : undefined}
                   style={{ filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.10)) drop-shadow(0 1px 3px rgba(0,0,0,0.06))" }}
