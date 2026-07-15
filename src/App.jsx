@@ -694,10 +694,14 @@ const A11ySwitch = ({ checked, onChange, label }) => (
 
 // Invisible hover target that rides the text caret. Hovering tints the caret
 // orange with a soft glow; clicking summons Buddy right at the insertion point.
+const CARET_DWELL_MS = 380; // must hover this long before the caret arms and becomes clickable
+
 const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
   const [rect, setRect] = useState(null);
   const [hot, setHot] = useState(false);
   const hotRef = useRef(false);
+  const armedRef = useRef(false);
+  const dwellTimerRef = useRef(null);
   // Hover is the whole point — skip touch devices entirely
   const canHoverRef = useRef(
     typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches
@@ -746,12 +750,23 @@ const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
     if (editorRef.current) editorRef.current.style.caretColor = on ? "transparent" : "";
   };
 
+  const clearDwell = () => {
+    clearTimeout(dwellTimerRef.current);
+    dwellTimerRef.current = null;
+  };
+
+  const disarm = () => {
+    clearDwell();
+    armedRef.current = false;
+    setCaretTint(false);
+  };
+
   // Never leave a stray orange caret behind
   useEffect(() => {
-    if (!enabled && hotRef.current) setCaretTint(false);
+    if (!enabled && hotRef.current) disarm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
-  useEffect(() => () => { if (editorRef.current) editorRef.current.style.caretColor = ""; }, [editorRef]);
+  useEffect(() => () => { clearDwell(); if (editorRef.current) editorRef.current.style.caretColor = ""; }, [editorRef]);
 
   if (!enabled || !rect || !canHoverRef.current) return null;
 
@@ -759,10 +774,17 @@ const CaretBuddyHotspot = ({ editorRef, enabled, onSummon }) => {
     <div
       className="fixed z-40 print:hidden"
       style={{ left: rect.x - 9, top: rect.y - 4, width: 18, height: rect.h + 8, cursor: "pointer" }}
-      onMouseEnter={() => setCaretTint(true)}
-      onMouseLeave={() => setCaretTint(false)}
+      onMouseEnter={() => {
+        clearDwell();
+        // Require a brief, deliberate hover before the caret arms and can be clicked
+        dwellTimerRef.current = setTimeout(() => {
+          armedRef.current = true;
+          setCaretTint(true);
+        }, CARET_DWELL_MS);
+      }}
+      onMouseLeave={disarm}
       onMouseDown={(e) => e.preventDefault()}
-      onClick={() => { setCaretTint(false); onSummon(); }}
+      onClick={() => { if (!armedRef.current) return; disarm(); onSummon(); }}
     >
       <AnimatePresence>
         {hot && (
