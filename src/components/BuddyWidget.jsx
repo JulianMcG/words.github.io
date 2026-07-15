@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
-import { Loader2, ArrowRight, X, File, Check, MicOff, AudioLines, SpellCheck, Lightbulb } from "lucide-react";
+import { Loader2, ArrowRight, File, Check, MicOff, AudioLines, SpellCheck, Lightbulb } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
 
@@ -157,7 +157,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   useEffect(() => {
     let t;
     if (isOpen) {
-      setMenuIndex(0);
+      setMenuIndex(-1);
       setAutoLabel(null);
       setInput("");
       setTimeout(() => inputRef.current?.focus(), 300);
@@ -176,7 +176,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       // This guarantees Buddy's internal height resets without interrupting the Framer Motion popLayout,
       // and permanently solves old text heights 'bleeding' open when you re-initiate him later!
       t = setTimeout(() => {
-        setMenuIndex(0);
+        setMenuIndex(-1);
         setAutoLabel(null);
         setInput("");
         setPreviewText("");
@@ -343,11 +343,11 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const hasSelection = selectedText && selectedText !== "GLOBAL_CHAT" && !isCollapsedSelection;
   const docHasWords = (fullDocumentText || "").replace(/<[^>]+>/g, "").trim().length > 0;
 
-  // Buddy's panel: quick actions up top, the prompt bar always at the bottom
+  // Quick-action pills that float above the bar
   const menuOptions = [
-    { id: "clean", icon: SpellCheck, label: hasSelection ? "Clean up the selection" : "Clean up my writing", desc: "Spelling, grammar & flow — your voice stays", enabled: docHasWords },
-    { id: "suggest", icon: Lightbulb, label: "Suggest improvements", desc: "Ideas to make it better — no rewriting", enabled: docHasWords },
-    { id: "live", icon: AudioLines, label: "Buddy Live", desc: "Talk it out — Buddy writes it up", enabled: true },
+    { id: "live", icon: AudioLines, label: "Live", enabled: true },
+    { id: "clean", icon: SpellCheck, label: "Clean", enabled: docHasWords },
+    { id: "suggest", icon: Lightbulb, label: "Suggest", enabled: docHasWords },
   ];
 
   const runMenuOption = (opt) => {
@@ -364,7 +364,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   // Step through the quick actions, skipping disabled ones
   const stepAction = (from, dir) => {
-    let i = from;
+    let i = from < 0 ? (dir > 0 ? -1 : 0) : from;
     for (let n = 0; n < menuOptions.length; n++) {
       i = (i + dir + menuOptions.length) % menuOptions.length;
       if (menuOptions[i].enabled) return i;
@@ -372,8 +372,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     return from;
   };
 
-  // Panel keyboard: type to ask (the input is focused), arrows pick a quick
-  // action, Enter runs it when the prompt is empty, Escape closes
+  // Bar keyboard: type to ask (the input is focused). Arrow up lifts you onto
+  // the pills, left/right walk them, down comes home, Enter runs the pill
+  // when the prompt is empty. Escape closes.
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e) => {
@@ -384,13 +385,19 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         return;
       }
       if (autoLabel || isLoading || isReviewing) return;
-      if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
+      if (e.key === "ArrowUp" || (e.key === "Tab" && !e.shiftKey)) {
         e.preventDefault(); e.stopPropagation();
         setMenuIndex((i) => stepAction(i, 1));
-      } else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault(); e.stopPropagation();
+        setMenuIndex(-1);
+      } else if (e.key === "ArrowRight" && menuIndex >= 0) {
+        e.preventDefault(); e.stopPropagation();
+        setMenuIndex((i) => stepAction(i, 1));
+      } else if ((e.key === "ArrowLeft" || (e.key === "Tab" && e.shiftKey)) && menuIndex >= 0) {
         e.preventDefault(); e.stopPropagation();
         setMenuIndex((i) => stepAction(i, -1));
-      } else if (e.key === "Enter" && !input.trim()) {
+      } else if (e.key === "Enter" && !input.trim() && menuIndex >= 0) {
         e.preventDefault(); e.stopPropagation();
         runMenuOption(menuOptions[menuIndex]);
       }
@@ -536,9 +543,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   const activeWidth = 380;
   const restingWidth = 48;
-  // Buddy smiles from the panel header while you choose; expressions take
-  // over once he's working or reacting
-  const headerFace = micError ? "error" : (isOpen && !isReviewing && !autoLabel && !isLoading)
+  // Buddy smiles from the bar while you choose; expressions take over once
+  // he's working or reacting
+  const barFace = micError ? "error" : (isOpen && !isReviewing && !autoLabel && !isLoading)
     ? (blinkState === "blink" ? "smileblink" : "smile")
     : activeExpression;
 
@@ -660,7 +667,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           filter: isOpeningTransition ? "blur(3px)" : "blur(0px)",
         }}
         transition={{
-          type: "spring", stiffness: 350, damping: 25, mass: 0.5,
+          type: "spring", stiffness: 440, damping: 32, mass: 0.85,
         }}
         className={`fixed z-[100] transition-colors duration-200 print:hidden border-shape-squircle ${
           isOpen ? 'shadow-2xl bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden pointer-events-auto flex flex-col' : 'bg-transparent overflow-visible pointer-events-none'
@@ -770,56 +777,18 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               style={{ width: activeWidth }}
             >
 
-              {/* Panel header — Buddy lives up here */}
-              <div className="flex items-center gap-2 pl-3 pr-1.5 pt-2 pb-1">
-                <motion.img
-                  layoutId="buddy-face"
-                  src={getUrl(headerFace)}
-                  alt="Buddy"
-                  transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
-                  className="w-[22px] h-[22px] object-contain select-none drop-shadow-sm"
-                  draggable="false"
-                />
-                <span className="text-[13px] font-semibold text-[var(--color-text-primary)] select-none leading-none">Buddy</span>
-                {hasSelection && (
-                  <span className="text-[10.5px] font-medium px-1.5 py-[3px] rounded-md bg-[var(--color-bg-hover)] text-[var(--color-text-faint)] select-none leading-none">
-                    on your selection
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={onClose}
-                  className="ml-auto w-6 h-6 flex items-center justify-center rounded-md text-[var(--color-icon-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                  title="Close"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-
               <AnimatePresence mode="popLayout" initial={false}>
-                {autoLabel ? (
-                  <motion.div
-                    key="panel-working"
-                    initial={{ opacity: 0, filter: "blur(3px)" }}
-                    animate={{ opacity: 1, filter: "blur(0px)" }}
-                    exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
-                    transition={{ duration: 0.16 }}
-                    className="flex items-center px-3.5 pt-1.5 pb-3"
-                  >
-                    <span className="buddy-shimmer-text text-[13px] font-medium select-none">{autoLabel}</span>
-                  </motion.div>
-                ) : isReviewing ? (
+                {isReviewing && (
                   <motion.div
                     key="panel-results"
-                    initial={{ opacity: 0, filter: "blur(3px)" }}
-                    animate={{ opacity: 1, filter: "blur(0px)" }}
+                    initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                     exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
-                    transition={{ duration: 0.16 }}
+                    transition={{ y: { type: "spring", stiffness: 440, damping: 32, mass: 0.85 }, opacity: { duration: 0.2 }, filter: { duration: 0.22 } }}
                     className="flex flex-col w-full"
                   >
                     {(!isChangesApplied || isViewingChanges) && (
-                      <div className={`px-3.5 pt-1 pb-3 ${hasValidHtml ? 'max-h-[55vh]' : 'max-h-[35vh]'} min-h-[40px] overflow-y-auto no-scrollbar`}>
+                      <div className={`px-3.5 pt-3 pb-3 ${hasValidHtml ? 'max-h-[55vh]' : 'max-h-[35vh]'} min-h-[40px] overflow-y-auto no-scrollbar`}>
                         {renderDiffPreview()}
 
                         {/* Chat replies get quiet inline actions right under the words */}
@@ -849,7 +818,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     )}
 
                     {isChangesApplied && (
-                      <div className="flex items-center gap-2 px-3.5 pt-1 pb-2.5">
+                      <div className="flex items-center gap-2 px-3.5 pt-2.5 pb-2.5">
                         <span className="flex items-center gap-1.5 text-[13px] font-medium text-[var(--color-text-primary)] select-none">
                           <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.05 }}>
                             <Check size={13.5} className="text-green-500" strokeWidth={2.5} />
@@ -878,52 +847,25 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                       </div>
                     )}
                   </motion.div>
-                ) : (
-                  <motion.div
-                    key="panel-actions"
-                    initial={{ opacity: 0, filter: "blur(3px)" }}
-                    animate={{ opacity: 1, filter: "blur(0px)" }}
-                    exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
-                    transition={{ duration: 0.16 }}
-                    className="flex flex-col px-1.5 pt-0.5 pb-1.5"
-                  >
-                    {menuOptions.map((opt, i) => {
-                      const Icon = opt.icon;
-                      const isActive = i === menuIndex && opt.enabled;
-                      return (
-                        <motion.button
-                          key={opt.id}
-                          type="button"
-                          initial={{ opacity: 0, y: 8, filter: "blur(2px)" }}
-                          animate={{ opacity: opt.enabled ? 1 : 0.4, y: 0, filter: "blur(0px)" }}
-                          transition={{ delay: 0.06 + i * 0.045, type: "spring", stiffness: 480, damping: 32 }}
-                          onMouseEnter={() => opt.enabled && setMenuIndex(i)}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => runMenuOption(opt)}
-                          title={opt.enabled ? opt.label : `${opt.label} — write something first`}
-                          className={`relative w-full text-left px-2.5 py-2 flex items-center gap-2.5 rounded-lg outline-none ${opt.enabled ? "" : "cursor-default"}`}
-                        >
-                          {isActive && (
-                            <motion.div
-                              layoutId="buddy-panel-hl"
-                              className="absolute inset-0 rounded-lg bg-[var(--color-bg-hover)]"
-                              transition={{ type: "spring", stiffness: 520, damping: 36 }}
-                            />
-                          )}
-                          <Icon size={15} strokeWidth={2} className={`relative z-10 flex-shrink-0 transition-colors duration-150 ${isActive ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`} />
-                          <div className="relative z-10 flex flex-col min-w-0">
-                            <span className="text-[13px] font-medium leading-tight text-[var(--color-text-primary)]">{opt.label}</span>
-                            <span className="text-[11px] leading-tight text-[var(--color-text-faint)] truncate">{opt.desc}</span>
-                          </div>
-                        </motion.button>
-                      );
-                    })}
-                  </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* The prompt bar — always here, pinned to the bottom */}
-              <form onSubmit={handleGenerate} className="flex relative items-center gap-2 py-2 pl-3.5 pr-2 border-t border-[var(--color-border-primary)]/60">
+              {/* The bar — Buddy's original prompt bar; results morph out of it */}
+              <form onSubmit={handleGenerate} className={`flex relative items-center gap-2.5 p-2.5 ${isReviewing ? "border-t border-[var(--color-border-primary)]/60" : ""}`}>
+                <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
+                  <motion.img
+                    layoutId="buddy-face"
+                    src={getUrl(barFace)}
+                    alt="Buddy"
+                    transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
+                    className="w-5 h-5 opacity-90 object-contain select-none drop-shadow-sm"
+                    draggable="false"
+                  />
+                </div>
+
+                {autoLabel ? (
+                  <span className="buddy-shimmer-text flex-1 text-[13.5px] font-medium select-none whitespace-nowrap overflow-hidden">{autoLabel}</span>
+                ) : (
                 <div className="flex-1 relative h-[20px] flex items-center">
                   {/* Shadow DOM for highlighted text */}
                   <div
@@ -954,6 +896,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     onKeyDown={handleInputKeyDown}
                   />
                 </div>
+                )}
 
                 {isLoading ? (
                   <Loader2 size={16} className="text-orange-500 animate-spin flex-shrink-0 mr-1" />
@@ -1004,6 +947,53 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           )}
         </AnimatePresence>
       </motion.div>
+
+      {/* Quick-action pills — lisse capsules floating above the bar */}
+      <AnimatePresence>
+        {isOpen && !isReviewing && !autoLabel && !isLoading && (
+          <motion.div
+            key="buddy-pills"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.12 } }}
+            className="fixed z-[100] flex items-center gap-1.5 print:hidden"
+            style={{ right: 20, bottom: 75 }}
+          >
+            {menuOptions.map((opt, i) => {
+              const Icon = opt.icon;
+              const isActive = i === menuIndex && opt.enabled;
+              return (
+                <motion.div
+                  key={opt.id}
+                  initial={{ opacity: 0, y: 14, scale: 0.85 }}
+                  animate={{ opacity: opt.enabled ? 1 : 0.45, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.9, transition: { duration: 0.12 } }}
+                  transition={{ delay: 0.16 + i * 0.05, type: "spring", stiffness: 480, damping: 28 }}
+                  style={{ filter: "drop-shadow(0 5px 14px rgba(0,0,0,0.13)) drop-shadow(0 1px 4px rgba(0,0,0,0.07))" }}
+                >
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => opt.enabled && setMenuIndex(i)}
+                    onMouseLeave={() => setMenuIndex(-1)}
+                    onClick={() => runMenuOption(opt)}
+                    title={opt.enabled ? opt.label : `${opt.label} — write something first`}
+                    className={`border-shape-squircle flex items-center gap-1.5 pl-2.5 pr-3 h-[30px] border text-[12px] font-medium transition-colors duration-150 select-none outline-none ${
+                      isActive
+                        ? "bg-[var(--color-bg-hover)] border-[var(--color-border-hover)] text-[var(--color-text-primary)]"
+                        : "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)] text-[var(--color-text-muted)]"
+                    } ${opt.enabled ? "" : "cursor-default"}`}
+                    style={{ "--r": "9999px", "--lisse-capsule": "1" }}
+                  >
+                    <Icon size={13} strokeWidth={2} className={`transition-colors duration-150 ${isActive ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`} />
+                    {opt.label}
+                  </button>
+                </motion.div>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

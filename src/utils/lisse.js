@@ -46,8 +46,13 @@ function shouldSkip(el, cs, width, height) {
   if (hasOuterShadow(cs)) return true;
   const r = cornerRadius(cs);
   if (r <= 0) return true;
-  // Fully round (pill/circle): native border-radius already nails it.
-  if (r * 2 >= Math.min(width, height) - 0.5) return true;
+  // Fully round (pill/circle): native border-radius already nails it —
+  // unless the element opts into lisse capsules (`--lisse-capsule: 1`),
+  // which @lisse/core ≥ 0.4 renders with smoothed round ends.
+  if (
+    r * 2 >= Math.min(width, height) - 0.5 &&
+    cs.getPropertyValue('--lisse-capsule').trim() !== '1'
+  ) return true;
   return false;
 }
 

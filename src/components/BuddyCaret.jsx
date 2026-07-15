@@ -13,9 +13,11 @@ const ROW_H = 34;
 const SPRING = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
 const FACE_W = 28;
 const FACE_GAP = 24; // breathing room between Buddy and the options
-const BACKDROP_L = -(FACE_W + FACE_GAP + 34); // stretch left to tuck Buddy in
-const BACKDROP_PAD = 40; // blur(12px) feathers ~3x inward — keep content in the solid core
+const CONTENT_W = 220; // the "How can I help..." input, the widest thing on a row
 const BACKDROP_W = 400; // fixed width: the shape never reacts to option changes
+const BACKDROP_PAD = 52; // blur(16px) feathers ~3x inward — keep content in the solid core
+// Centered on the whole UI (face + options), not hugging Buddy's edge
+const BACKDROP_L = (CONTENT_W - FACE_W - FACE_GAP) / 2 - BACKDROP_W / 2;
 
 const Backdrop = ({ style, animate, transition }) => (
   <motion.div
@@ -390,7 +392,7 @@ export default function BuddyCaret({
                 className="pointer-events-auto relative flex items-center"
                 style={{ height: ROW_H, width: 300 }}
               >
-                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, right: -32 }} />
+                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, width: BACKDROP_W }} />
                 <input
                   ref={inputRef}
                   type="text"
@@ -413,7 +415,7 @@ export default function BuddyCaret({
                 className="relative flex items-center"
                 style={{ height: ROW_H }}
               >
-                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, right: -32 }} />
+                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, width: BACKDROP_W }} />
                 <span className="relative z-10 buddy-shimmer-text text-[13.5px] font-medium select-none whitespace-nowrap">{workLabel}</span>
               </motion.div>
             )}
@@ -427,7 +429,7 @@ export default function BuddyCaret({
                 transition={SPRING}
                 className="relative flex flex-col"
               >
-                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, right: -32 }} />
+                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, width: BACKDROP_W }} />
                 <div className="relative z-10 flex items-center gap-3" style={{ height: ROW_H }}>
                   <span className="flex items-center gap-1.5 text-[13.5px] font-medium text-[var(--color-text-primary)] whitespace-nowrap select-none">
                     <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.1 }}>
@@ -476,7 +478,7 @@ export default function BuddyCaret({
                 className="pointer-events-auto relative flex flex-col gap-2 py-1.5"
                 style={{ maxWidth: 320 }}
               >
-                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, right: -32 }} />
+                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, width: BACKDROP_W }} />
                 <div
                   className="editor-content !pb-0 relative z-10 text-[13.5px] leading-relaxed text-[var(--color-text-primary)] max-h-[38vh] overflow-y-auto no-scrollbar break-words [&_p]:!my-0"
                   dangerouslySetInnerHTML={{ __html: renderReplyHtml(lastResponse?.conversational_reply) }}
