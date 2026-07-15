@@ -16,6 +16,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [autoLabel, setAutoLabel] = useState(null);
   // After an applied change the bar reads "✓ Changed it"; typing brings the input back
   const [showRefine, setShowRefine] = useState(false);
+  // Pills ride in from the right only on open; returning after typing they rise straight up
+  const pillsShownRef = useRef(false);
   
   const [expression, setExpression] = useState("idle");
   const [isHovered, setIsHovered] = useState(false);
@@ -76,7 +78,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHovered, isOpen]);
 
-  const isMounted = useRef(false);
   const hoverSequenceStartedRef = useRef(false);
 
   const shouldBackgroundBlink = isOpen || (isHovered && isHoverSequenceComplete);
@@ -177,6 +178,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       // Safely flush heavy DOM rendering block state 400ms after closing animation begins.
       // This guarantees Buddy's internal height resets without interrupting the Framer Motion popLayout,
       // and permanently solves old text heights 'bleeding' open when you re-initiate him later!
+      pillsShownRef.current = false;
       t = setTimeout(() => {
         setMenuIndex(-1);
         setAutoLabel(null);
@@ -577,6 +579,14 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   const widgetRef = useRef(null);
   const contentRef = useRef(null);
+  // Card chrome (bg, border, clip, shadow) lags the close by ~300ms so the
+  // box visibly shrinks INTO Buddy instead of dissolving mid-air
+  const [cardChrome, setCardChrome] = useState(false);
+  useEffect(() => {
+    if (isOpen) { setCardChrome(true); return; }
+    const t = setTimeout(() => setCardChrome(false), 300);
+    return () => clearTimeout(t);
+  }, [isOpen]);
   const [contentH, setContentH] = useState(null);
 
   // Measure the open card's natural height so every state change is a real
@@ -700,7 +710,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       {/* Visually animated physics layer */}
       <motion.div
         ref={widgetRef}
-        layout="position"
         initial={{ y: 150, width: restingWidth, height: restingWidth }}
         animate={{
           y: 0,
@@ -708,7 +717,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           height: isOpen ? (contentH ? contentH + 2 : "auto") : restingWidth,
         }}
         transition={{
-          type: "spring", stiffness: 440, damping: 32, mass: 0.85,
+          type: "spring", visualDuration: 0.42, bounce: 0.26,
         }}
         className={`fixed z-[100] print:hidden ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
         style={{
@@ -724,21 +733,25 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         <div
           className="w-full h-full"
           style={{
-            filter: isOpen ? 'drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))' : 'none',
+            filter: cardChrome ? 'drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))' : 'none',
             transition: 'filter 0.35s ease',
           }}
         >
         <div
           className={`w-full h-full border-shape-squircle transition-colors duration-200 ${
-            isOpen ? 'bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden flex flex-col justify-end' : 'bg-transparent overflow-visible'
+            cardChrome ? 'bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden flex flex-col justify-end' : 'bg-transparent overflow-visible'
           }`}
-          style={{ '--r': isOpen ? '14px' : '24px' }}
+          style={{ '--r': cardChrome ? '14px' : '24px' }}
         >
-        <AnimatePresence mode="popLayout" initial={false}>
+        <AnimatePresence mode="popLayout" initial={false} custom={suppressed ? "flight" : "normal"}>
           {suppressed ? null : !isOpen && !isDumpActive ? (
             <motion.div
-              layout
               key="resting-icon"
+              variants={{
+                out: (reason) => reason === "flight"
+                  ? { opacity: 0, transition: { duration: 0.35, ease: "easeOut" } }
+                  : { opacity: 0, scale: 0.9, filter: "blur(4px)" },
+              }}
               initial={{ opacity: 0 }}
               animate={{
                 opacity: 1,
@@ -747,7 +760,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   ? -40
                   : (!isShaking && isHovered && !isClicked ? [0, -4, 0] : 0),
               }}
-              exit={{ opacity: 0, scale: 0.9, filter: "blur(4px)" }}
+              exit="out"
               transition={{
                 opacity: { duration: 0.15, delay: 0.15 },
                 x: isShaking
@@ -760,6 +773,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     : { type: "spring", stiffness: 300, damping: 20 }),
               }}
               className="w-[48px] h-[48px] flex m-auto items-center justify-center origin-bottom relative"
+              style={{ rotateX: tiltX, rotateY: tiltY, transformPerspective: 320 }}
             >
               {/* Mic error popover */}
               <AnimatePresence>
@@ -816,7 +830,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   opacity: { type: "spring", stiffness: 400, damping: 20 },
                   layout: { type: "tween", duration: 0.55, ease: [0.22, 1, 0.36, 1] },
                 }}
-                style={{ width: 68, height: 68, maxWidth: "none", bottom: 0, left: "50%", x: "-50%", originY: 1, rotateX: tiltX, rotateY: tiltY, transformPerspective: 320 }}
+                style={{ width: 68, height: 68, maxWidth: "none", bottom: 0, left: -10, originY: 1 }}
                 className="absolute object-contain select-none"
                 draggable="false"
               />
@@ -826,7 +840,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               key="active-ui"
               initial={{ opacity: 0, filter: "blur(8px)", y: 10 }}
               animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-              exit={{ opacity: 0, filter: "blur(4px)" }}
+              exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.12 } }}
               transition={{ duration: 0.2, delay: 0.05 }}
               ref={contentRef}
               className="flex flex-col h-auto flex-shrink-0 overflow-hidden"
@@ -840,7 +854,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
                     animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                     exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
-                    transition={{ y: { type: "spring", stiffness: 440, damping: 32, mass: 0.85 }, opacity: { duration: 0.2 }, filter: { duration: 0.22 } }}
+                    transition={{ y: { type: "spring", visualDuration: 0.4, bounce: 0.22 }, opacity: { duration: 0.2 }, filter: { duration: 0.22 } }}
                     className="flex flex-col w-full"
                   >
                     {(!isChangesApplied || isViewingChanges) && (
@@ -970,34 +984,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   </button>
                 )}
 
-                {/* Mention Dropdown UI */}
-                <AnimatePresence>
-                  {mentionQuery !== null && filteredDocs.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 10, transition: { duration: 0.1 } }}
-                      className="absolute bottom-[calc(100%+8px)] left-0 w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg overflow-hidden z-[110]"
-                      style={{ filter: "drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))" }}
-                    >
-                      <div className="max-h-[200px] overflow-y-auto py-1 no-scrollbar">
-                        {filteredDocs.map((doc, idx) => (
-                          <button
-                            key={doc.id}
-                            type="button"
-                            onClick={() => insertMention(doc)}
-                            className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${idx === mentionIndex ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-hover)]'}`}
-                          >
-                            <div className="truncate font-medium text-[var(--color-text-primary)] flex items-center gap-1.5">
-                              <span className="opacity-90 flex items-center justify-center w-4 text-[13px]">{doc.emoji || <File size={13} className="text-[var(--color-icon-muted)]" />}</span>
-                              {doc.title}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </form>
 
             </motion.div>
@@ -1005,6 +991,35 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         </AnimatePresence>
         </div>
         </div>
+
+        {/* Mention Dropdown UI */}
+        <AnimatePresence>
+          {mentionQuery !== null && filteredDocs.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10, transition: { duration: 0.1 } }}
+              className="absolute bottom-[calc(100%+8px)] left-3 w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg overflow-hidden z-[110]"
+              style={{ filter: "drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))" }}
+            >
+              <div className="max-h-[200px] overflow-y-auto py-1 no-scrollbar">
+                {filteredDocs.map((doc, idx) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => insertMention(doc)}
+                    className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${idx === mentionIndex ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]'}`}
+                  >
+                    <div className="truncate font-medium text-[var(--color-text-primary)] flex items-center gap-1.5">
+                      <span className="opacity-90 flex items-center justify-center w-4 text-[13px]">{doc.emoji || <File size={13} className="text-[var(--color-icon-muted)]" />}</span>
+                      {doc.title}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
 
       {/* Quick-action pills — lisse capsules floating above the bar */}
@@ -1015,29 +1030,35 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.16 } }}
-            className="fixed z-[100] flex items-center justify-start gap-1.5 print:hidden"
+            onAnimationComplete={() => { pillsShownRef.current = true; }}
+            className="fixed z-[99] flex items-center justify-start gap-1.5 print:hidden"
             style={{ right: 20, bottom: 75, width: activeWidth }}
           >
             {menuOptions.map((opt, i) => {
               const Icon = opt.icon;
               const isActive = i === menuIndex && opt.enabled;
+              const fromSide = !pillsShownRef.current;
               return (
                 <motion.div
                   key={opt.id}
-                  initial={{ opacity: 0, x: 36, y: 26, scale: 0.75 }}
-                  animate={{ opacity: opt.enabled ? 1 : 0.45, x: 0, y: 0, scale: 1 }}
+                  initial={fromSide
+                    ? { opacity: 0, x: 36, y: 26, scale: 0.75, filter: "blur(4px)" }
+                    : { opacity: 0, x: 0, y: 26, scale: 0.85, filter: "blur(4px)" }}
+                  animate={{ opacity: opt.enabled ? 1 : 0.45, x: 0, y: 0, scale: 1, filter: "blur(0px)" }}
                   variants={{
                     // Typing: pills duck straight down behind the bar — the
                     // opening rise in reverse, no sideways drift
                     out: (reason) => reason === "typing"
-                      ? { opacity: 0, y: 26, scale: 0.85, transition: { duration: 0.16, ease: "easeIn", delay: i * 0.025 } }
-                      : { opacity: 0, x: 24, y: 16, scale: 0.85, transition: { duration: 0.15, delay: i * 0.03 } },
+                      ? { opacity: 0, y: 26, scale: 0.85, filter: "blur(3px)", transition: { duration: 0.16, ease: "easeIn", delay: i * 0.025 } }
+                      : { opacity: 0, x: 24, y: 16, scale: 0.85, filter: "blur(3px)", transition: { duration: 0.15, delay: i * 0.03 } },
                   }}
                   exit="out"
-                  transition={{ delay: 0.16 + (menuOptions.length - 1 - i) * 0.06, type: "spring", stiffness: 380, damping: 26, mass: 0.9 }}
+                  transition={fromSide
+                    ? { delay: 0.16 + (menuOptions.length - 1 - i) * 0.06, type: "spring", stiffness: 380, damping: 26, mass: 0.9 }
+                    : { delay: i * 0.04, type: "spring", stiffness: 400, damping: 27, mass: 0.85 }}
                   whileTap={opt.enabled ? { scale: 0.95 } : undefined}
-                  style={{ filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.10)) drop-shadow(0 1px 3px rgba(0,0,0,0.06))" }}
                 >
+                <div style={{ filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.10)) drop-shadow(0 1px 3px rgba(0,0,0,0.06))" }}>
                   <button
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
@@ -1054,6 +1075,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     <Icon size={13} strokeWidth={2} className={`transition-colors duration-150 ${isActive ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"}`} />
                     {opt.label}
                   </button>
+                </div>
                 </motion.div>
               );
             })}
