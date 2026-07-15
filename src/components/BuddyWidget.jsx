@@ -47,6 +47,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     setIsClicked(false);
     rawMagnetX.set(0);
     rawMagnetY.set(0);
+    rawTiltX.set(0);
+    rawTiltY.set(0);
     // Require a fresh down+up after the error shows — the mouseUp that triggered
     // the long-press should not immediately dismiss
     micErrorDismissReadyRef.current = false;
@@ -59,12 +61,20 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const rawMagnetY = useMotionValue(0);
   const magnetX = useSpring(rawMagnetX, { stiffness: 180, damping: 22, mass: 0.5 });
   const magnetY = useSpring(rawMagnetY, { stiffness: 180, damping: 22, mass: 0.5 });
+  // A slight 3D lean toward the cursor, like the membership card / Spotlight paper
+  const rawTiltX = useMotionValue(0);
+  const rawTiltY = useMotionValue(0);
+  const tiltX = useSpring(rawTiltX, { stiffness: 320, damping: 26, mass: 0.55 });
+  const tiltY = useSpring(rawTiltY, { stiffness: 320, damping: 26, mass: 0.55 });
 
   useEffect(() => {
     if (!isHovered || isOpen) {
       rawMagnetX.set(0);
       rawMagnetY.set(0);
+      rawTiltX.set(0);
+      rawTiltY.set(0);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHovered, isOpen]);
 
   const isMounted = useRef(false);
@@ -630,11 +640,17 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             const cap = 8;
             rawMagnetX.set(Math.max(-cap, Math.min(cap, dx * 0.22)));
             rawMagnetY.set(Math.max(-cap, Math.min(cap, dy * 0.22)));
+            const nx = Math.max(-1, Math.min(1, dx / (hitboxSize / 2)));
+            const ny = Math.max(-1, Math.min(1, dy / (hitboxSize / 2)));
+            rawTiltY.set(nx * 8);
+            rawTiltX.set(ny * -8);
           }}
           onMouseLeave={() => {
             clearTimeout(longPressTimerRef.current);
             rawMagnetX.set(0);
             rawMagnetY.set(0);
+            rawTiltX.set(0);
+            rawTiltY.set(0);
             if (micError) return;
             setIsHovered(false);
             setIsClicked(false);
@@ -720,7 +736,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         <div
           className="w-full h-full"
           style={{
-            filter: isOpen ? 'drop-shadow(0 16px 36px rgba(0,0,0,0.16)) drop-shadow(0 3px 10px rgba(0,0,0,0.10))' : 'none',
+            filter: isOpen ? 'drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))' : 'none',
             transition: 'filter 0.35s ease',
           }}
         >
@@ -809,7 +825,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   opacity: { type: "spring", stiffness: 400, damping: 20 },
                   layout: { type: "tween", duration: 0.55, ease: [0.22, 1, 0.36, 1] },
                 }}
-                style={{ originY: 1 }}
+                style={{ originY: 1, rotateX: tiltX, rotateY: tiltY, transformPerspective: 320 }}
                 className="w-full h-full object-contain select-none"
                 draggable="false"
               />
@@ -873,11 +889,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               {/* The bar — Buddy's original prompt bar; results morph out of it */}
               <form onSubmit={handleGenerate} className={`flex relative items-center gap-2.5 p-2.5 ${isReviewing ? "border-t border-[var(--color-border-primary)]/60" : ""}`}>
                 <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
-                  <motion.img
-                    layoutId="buddy-face"
+                  <img
                     src={getUrl(barFace)}
                     alt="Buddy"
-                    transition={{ layout: { type: "tween", duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
                     className="w-5 h-5 opacity-90 object-contain select-none drop-shadow-sm"
                     draggable="false"
                   />
@@ -973,7 +987,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 10, transition: { duration: 0.1 } }}
                       className="absolute bottom-[calc(100%+8px)] left-0 w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg overflow-hidden z-[110]"
-                      style={{ filter: "drop-shadow(0 10px 24px rgba(0,0,0,0.15)) drop-shadow(0 2px 8px rgba(0,0,0,0.08))" }}
+                      style={{ filter: "drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))" }}
                     >
                       <div className="max-h-[200px] overflow-y-auto py-1 no-scrollbar">
                         {filteredDocs.map((doc, idx) => (
@@ -1019,13 +1033,12 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               return (
                 <motion.div
                   key={opt.id}
-                  initial={{ opacity: 0, y: 28, scale: 0.7, filter: "blur(3px)" }}
-                  animate={{ opacity: opt.enabled ? 1 : 0.45, y: 0, scale: 1, filter: "blur(0px)" }}
-                  exit={{ opacity: 0, y: 18, scale: 0.85, filter: "blur(2px)", transition: { duration: 0.15, delay: (menuOptions.length - 1 - i) * 0.035 } }}
-                  transition={{ delay: 0.18 + i * 0.07, type: "spring", stiffness: 380, damping: 25, mass: 0.9 }}
-                  whileHover={opt.enabled ? { y: -2 } : undefined}
+                  initial={{ opacity: 0, x: 36, y: 26, scale: 0.75, filter: "blur(3px)" }}
+                  animate={{ opacity: opt.enabled ? 1 : 0.45, x: 0, y: 0, scale: 1, filter: "blur(0px)" }}
+                  exit={{ opacity: 0, x: 24, y: 16, scale: 0.85, filter: "blur(2px)", transition: { duration: 0.15, delay: i * 0.03 } }}
+                  transition={{ delay: 0.16 + (menuOptions.length - 1 - i) * 0.06, type: "spring", stiffness: 380, damping: 26, mass: 0.9 }}
                   whileTap={opt.enabled ? { scale: 0.95 } : undefined}
-                  style={{ filter: "drop-shadow(0 5px 14px rgba(0,0,0,0.13)) drop-shadow(0 1px 4px rgba(0,0,0,0.07))" }}
+                  style={{ filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.10)) drop-shadow(0 1px 3px rgba(0,0,0,0.06))" }}
                 >
                   <button
                     type="button"
@@ -1035,7 +1048,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     onClick={() => runMenuOption(opt)}
                     className={`border-shape-squircle flex items-center gap-1.5 pl-2.5 pr-3 h-[30px] border text-[12px] font-medium transition-colors duration-150 select-none outline-none ${
                       isActive
-                        ? "bg-[var(--color-bg-hover)] border-[var(--color-border-hover)] text-[var(--color-text-primary)]"
+                        ? "bg-[var(--color-bg-hover)] border-[var(--color-border-primary)] text-[var(--color-text-primary)]"
                         : "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)] text-[var(--color-text-muted)]"
                     } ${opt.enabled ? "" : "cursor-default"}`}
                     style={{ "--r": "9999px", "--lisse-capsule": "1" }}

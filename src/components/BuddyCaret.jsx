@@ -15,7 +15,7 @@ const FACE_W = 28;
 const FACE_GAP = 24; // breathing room between Buddy and the options
 const CONTENT_W = 190; // the "How can I help..." input, the widest thing on a row
 const BACKDROP_W = 340; // fixed width: the shape never reacts to option changes
-const BACKDROP_PAD = 54; // blur(18px) feathers ~3x inward — keep content in the solid core
+const BACKDROP_PAD = 46; // blur(18px) feathers inward — keep content in the solid core
 // Centered on the whole UI (face + options), not hugging Buddy's edge
 const BACKDROP_L = (CONTENT_W - FACE_W - FACE_GAP) / 2 - BACKDROP_W / 2;
 
