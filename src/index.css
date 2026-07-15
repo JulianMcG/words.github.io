@@ -957,7 +957,7 @@ html[data-reduce-motion="true"] *::after {
   background: var(--color-bg-primary);
   border-radius: 48px;
   opacity: 0.96;
-  filter: blur(16px);
+  filter: blur(18px);
   pointer-events: none;
 }
 

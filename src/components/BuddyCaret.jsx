@@ -13,9 +13,9 @@ const ROW_H = 34;
 const SPRING = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
 const FACE_W = 28;
 const FACE_GAP = 24; // breathing room between Buddy and the options
-const CONTENT_W = 220; // the "How can I help..." input, the widest thing on a row
-const BACKDROP_W = 400; // fixed width: the shape never reacts to option changes
-const BACKDROP_PAD = 52; // blur(16px) feathers ~3x inward — keep content in the solid core
+const CONTENT_W = 190; // the "How can I help..." input, the widest thing on a row
+const BACKDROP_W = 340; // fixed width: the shape never reacts to option changes
+const BACKDROP_PAD = 54; // blur(18px) feathers ~3x inward — keep content in the solid core
 // Centered on the whole UI (face + options), not hugging Buddy's edge
 const BACKDROP_L = (CONTENT_W - FACE_W - FACE_GAP) / 2 - BACKDROP_W / 2;
 
@@ -289,11 +289,10 @@ export default function BuddyCaret({
         {/* The line — Buddy's face is the anchor for everything */}
         <div className="relative flex items-center" style={{ minHeight: ROW_H, gap: FACE_GAP }}>
           <motion.img
+            layoutId="buddy-face"
             src={getUrl(face)}
             alt="Buddy"
-            initial={{ scale: 0.5, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: "spring", stiffness: 420, damping: 26 }}
+            transition={{ layout: { type: "tween", duration: 0.55, ease: [0.22, 1, 0.36, 1] } }}
             className="relative z-10 object-contain select-none drop-shadow-sm flex-shrink-0 self-start"
             style={{ width: FACE_W, height: FACE_W, aspectRatio: "1 / 1", marginTop: (ROW_H - FACE_W) / 2 }}
             draggable="false"
@@ -354,7 +353,7 @@ export default function BuddyCaret({
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             placeholder="How can I help..."
-                            className="bg-transparent outline-none border-none text-[14px] font-medium text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] w-[220px]"
+                            className="bg-transparent outline-none border-none text-[14px] font-medium text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] w-[190px]"
                             style={{ caretColor: "var(--color-accent)" }}
                           />
                         </motion.div>
@@ -371,7 +370,7 @@ export default function BuddyCaret({
                         className="pointer-events-auto flex items-center gap-2.5 text-left outline-none"
                         style={{ height: ROW_H }}
                       >
-                        {Icon && <Icon size={15} strokeWidth={2} className={`flex-shrink-0 transition-colors duration-200 ${active ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`} />}
+                        {Icon && <Icon size={15} strokeWidth={2} className={`flex-shrink-0 transition-colors duration-200 ${active ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"}`} />}
                         <span className="text-[14px] font-medium text-[var(--color-text-primary)] whitespace-nowrap leading-none">
                           {opt.title}
                         </span>

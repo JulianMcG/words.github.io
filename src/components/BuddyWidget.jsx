@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
-import { Loader2, ArrowRight, File, Check, MicOff, AudioLines, SpellCheck, Lightbulb } from "lucide-react";
+import { Loader2, ArrowRight, File, Check, MicOff, Mic, BrushCleaning, Lightbulb } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
 
@@ -14,6 +14,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [menuIndex, setMenuIndex] = useState(0);
   // While a one-click action runs, this shows as a shimmering status line
   const [autoLabel, setAutoLabel] = useState(null);
+  // After an applied change the bar reads "✓ Changed it"; typing brings the input back
+  const [showRefine, setShowRefine] = useState(false);
   
   const [expression, setExpression] = useState("idle");
   const [isHovered, setIsHovered] = useState(false);
@@ -159,6 +161,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     if (isOpen) {
       setMenuIndex(-1);
       setAutoLabel(null);
+      setShowRefine(false);
       setInput("");
       setTimeout(() => inputRef.current?.focus(), 300);
       setPreviewText("");
@@ -178,6 +181,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       t = setTimeout(() => {
         setMenuIndex(-1);
         setAutoLabel(null);
+        setShowRefine(false);
         setInput("");
         setPreviewText("");
         setIsReviewing(false);
@@ -345,8 +349,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   // Quick-action pills that float above the bar
   const menuOptions = [
-    { id: "live", icon: AudioLines, label: "Live", enabled: true },
-    { id: "clean", icon: SpellCheck, label: "Clean", enabled: docHasWords },
+    { id: "live", icon: Mic, label: "Live", enabled: true },
+    { id: "clean", icon: BrushCleaning, label: "Clean", enabled: docHasWords },
     { id: "suggest", icon: Lightbulb, label: "Suggest", enabled: docHasWords },
   ];
 
@@ -371,6 +375,26 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     }
     return from;
   };
+
+  // While the bar shows "✓ Changed it", typing brings the refine input back
+  useEffect(() => {
+    if (!isOpen || !isChangesApplied || showRefine || autoLabel || isLoading) return;
+    const onKey = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault(); e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault(); e.stopPropagation();
+        setShowRefine(true);
+        setInput(e.key);
+        setTimeout(() => inputRef.current?.focus(), 80);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [isOpen, isChangesApplied, showRefine, autoLabel, isLoading, onClose]);
 
   // Bar keyboard: type to ask (the input is focused). Arrow up lifts you onto
   // the pills, left/right walk them, down comes home, Enter runs the pill
@@ -464,6 +488,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           setIsChangesApplied(true);
           setIsViewingChanges(false);
           setIsReviewing(true);
+          setShowRefine(false);
       } else {
           // chat: show in panel, no document change
           setIsReviewing(true);
@@ -543,11 +568,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   const activeWidth = 380;
   const restingWidth = 48;
-  // Buddy smiles from the bar while you choose; expressions take over once
-  // he's working or reacting
-  const barFace = micError ? "error" : (isOpen && !isReviewing && !autoLabel && !isLoading)
-    ? (blinkState === "blink" ? "smileblink" : "smile")
-    : activeExpression;
+  // The bar wears Buddy's original face — the full expression + blink engine
+  const barFace = micError ? "error" : activeExpression;
 
   const safeX = Math.min(Math.max(position?.x || windowSize.width / 2, 8), windowSize.width - activeWidth - 8);
   const safeY = Math.min(position?.y || 100, windowSize.height - 220); 
@@ -555,6 +577,21 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const isGlobal = selectedText === "GLOBAL_CHAT";
 
   const widgetRef = useRef(null);
+  const contentRef = useRef(null);
+  const [contentH, setContentH] = useState(null);
+
+  // Measure the open card's natural height so every state change is a real
+  // morph (animating to "auto" only works once; contents change constantly)
+  useEffect(() => {
+    if (!isOpen) { setContentH(null); return; }
+    let raf;
+    const measure = () => { if (contentRef.current) setContentH(contentRef.current.offsetHeight); };
+    const ro = new ResizeObserver(() => { raf = requestAnimationFrame(measure); });
+    const t = setTimeout(() => {
+      if (contentRef.current) { ro.observe(contentRef.current); measure(); }
+    }, 30);
+    return () => { clearTimeout(t); ro.disconnect(); cancelAnimationFrame(raf); };
+  }, [isOpen]);
 
   useEffect(() => {
     const handleOutsideClick = (e) => {
@@ -663,17 +700,14 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         animate={{
           y: 0,
           width: isOpen ? activeWidth : restingWidth,
-          height: isOpen ? "auto" : restingWidth,
+          height: isOpen ? (contentH ? contentH + 2 : "auto") : restingWidth,
           filter: isOpeningTransition ? "blur(3px)" : "blur(0px)",
         }}
         transition={{
           type: "spring", stiffness: 440, damping: 32, mass: 0.85,
         }}
-        className={`fixed z-[100] transition-colors duration-200 print:hidden border-shape-squircle ${
-          isOpen ? 'shadow-2xl bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden pointer-events-auto flex flex-col' : 'bg-transparent overflow-visible pointer-events-none'
-        }`}
+        className={`fixed z-[100] print:hidden ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
         style={{
-          '--r': isOpen ? '14px' : '24px',
           maxHeight: isOpen ? "600px" : "auto",
           x: magnetX,
           y: magnetY,
@@ -682,6 +716,20 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
              : { top: safeY, left: safeX })
         }}
       >
+        {/* drop-shadow follows the lisse clip-path, unlike box-shadow which it would crop */}
+        <div
+          className="w-full h-full"
+          style={{
+            filter: isOpen ? 'drop-shadow(0 16px 36px rgba(0,0,0,0.16)) drop-shadow(0 3px 10px rgba(0,0,0,0.10))' : 'none',
+            transition: 'filter 0.35s ease',
+          }}
+        >
+        <div
+          className={`w-full h-full border-shape-squircle transition-colors duration-200 ${
+            isOpen ? 'bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden flex flex-col justify-end' : 'bg-transparent overflow-visible'
+          }`}
+          style={{ '--r': isOpen ? '14px' : '24px' }}
+        >
         <AnimatePresence mode="popLayout" initial={false}>
           {suppressed ? null : !isOpen && !isDumpActive ? (
             <motion.div
@@ -773,12 +821,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
               exit={{ opacity: 0, filter: "blur(4px)" }}
               transition={{ duration: 0.2, delay: 0.05 }}
-              className="flex flex-col h-auto overflow-hidden"
+              ref={contentRef}
+              className="flex flex-col h-auto flex-shrink-0 overflow-hidden"
               style={{ width: activeWidth }}
             >
 
               <AnimatePresence mode="popLayout" initial={false}>
-                {isReviewing && (
+                {isReviewing && (!isChangesApplied || isViewingChanges) && (
                   <motion.div
                     key="panel-results"
                     initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
@@ -793,7 +842,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
                         {/* Chat replies get quiet inline actions right under the words */}
                         {!isChangesApplied && (
-                          <div className="flex items-center gap-3.5 mt-3">
+                          <div className="flex items-center justify-end gap-4 mt-2.5">
                             {((typeof previewText === 'object' && previewText?.conversational_reply) || (typeof previewText === 'string' && !hasError && previewText)) && (
                               <button
                                 type="button"
@@ -817,35 +866,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                       </div>
                     )}
 
-                    {isChangesApplied && (
-                      <div className="flex items-center gap-2 px-3.5 pt-2.5 pb-2.5">
-                        <span className="flex items-center gap-1.5 text-[13px] font-medium text-[var(--color-text-primary)] select-none">
-                          <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.05 }}>
-                            <Check size={13.5} className="text-green-500" strokeWidth={2.5} />
-                          </motion.span>
-                          Changed it
-                        </span>
-                        <span className="flex-1" />
-                        <div className="flex items-center gap-2.5 pr-0.5">
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => setIsViewingChanges(!isViewingChanges)}
-                            className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
-                          >
-                            {isViewingChanges ? "Hide" : "View"}
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={onClose}
-                            className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
-                          >
-                            Done
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -865,6 +885,37 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
                 {autoLabel ? (
                   <span className="buddy-shimmer-text flex-1 text-[13.5px] font-medium select-none whitespace-nowrap overflow-hidden">{autoLabel}</span>
+                ) : isChangesApplied && !showRefine ? (
+                  <div className="flex-1 flex items-center gap-2 h-[20px] min-w-0">
+                    <motion.span
+                      initial={{ scale: 0, rotate: -30 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.1 }}
+                      className="flex items-center flex-shrink-0"
+                    >
+                      <Check size={14} className="text-green-500" strokeWidth={2.5} />
+                    </motion.span>
+                    <span className="text-[13.5px] font-medium text-[var(--color-text-primary)] select-none whitespace-nowrap">Changed it</span>
+                    <span className="flex-1" />
+                    <span className="flex items-center gap-2.5 pr-1">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setIsViewingChanges(!isViewingChanges)}
+                        className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
+                      >
+                        {isViewingChanges ? "Hide" : "View"}
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={onClose}
+                        className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
+                      >
+                        Done
+                      </button>
+                    </span>
+                  </div>
                 ) : (
                 <div className="flex-1 relative h-[20px] flex items-center">
                   {/* Shadow DOM for highlighted text */}
@@ -900,7 +951,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
                 {isLoading ? (
                   <Loader2 size={16} className="text-orange-500 animate-spin flex-shrink-0 mr-1" />
-                ) : (
+                ) : isChangesApplied && !showRefine && !autoLabel ? null : (
                   <button
                     type="submit"
                     disabled={!input.trim()}
@@ -921,7 +972,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 10, transition: { duration: 0.1 } }}
-                      className="absolute bottom-[calc(100%+8px)] left-0 w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] shadow-xl rounded-lg overflow-hidden z-[110]"
+                      className="absolute bottom-[calc(100%+8px)] left-0 w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg overflow-hidden z-[110]"
+                      style={{ filter: "drop-shadow(0 10px 24px rgba(0,0,0,0.15)) drop-shadow(0 2px 8px rgba(0,0,0,0.08))" }}
                     >
                       <div className="max-h-[200px] overflow-y-auto py-1 no-scrollbar">
                         {filteredDocs.map((doc, idx) => (
@@ -946,6 +998,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
+        </div>
       </motion.div>
 
       {/* Quick-action pills — lisse capsules floating above the bar */}
@@ -955,9 +1009,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             key="buddy-pills"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: { duration: 0.12 } }}
-            className="fixed z-[100] flex items-center gap-1.5 print:hidden"
-            style={{ right: 20, bottom: 75 }}
+            exit={{ opacity: 0, transition: { duration: 0.14 } }}
+            className="fixed z-[100] flex items-center justify-start gap-1.5 print:hidden"
+            style={{ right: 20, bottom: 75, width: activeWidth }}
           >
             {menuOptions.map((opt, i) => {
               const Icon = opt.icon;
@@ -965,10 +1019,12 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               return (
                 <motion.div
                   key={opt.id}
-                  initial={{ opacity: 0, y: 14, scale: 0.85 }}
-                  animate={{ opacity: opt.enabled ? 1 : 0.45, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.9, transition: { duration: 0.12 } }}
-                  transition={{ delay: 0.16 + i * 0.05, type: "spring", stiffness: 480, damping: 28 }}
+                  initial={{ opacity: 0, y: 28, scale: 0.7, filter: "blur(3px)" }}
+                  animate={{ opacity: opt.enabled ? 1 : 0.45, y: 0, scale: 1, filter: "blur(0px)" }}
+                  exit={{ opacity: 0, y: 18, scale: 0.85, filter: "blur(2px)", transition: { duration: 0.15, delay: (menuOptions.length - 1 - i) * 0.035 } }}
+                  transition={{ delay: 0.18 + i * 0.07, type: "spring", stiffness: 380, damping: 25, mass: 0.9 }}
+                  whileHover={opt.enabled ? { y: -2 } : undefined}
+                  whileTap={opt.enabled ? { scale: 0.95 } : undefined}
                   style={{ filter: "drop-shadow(0 5px 14px rgba(0,0,0,0.13)) drop-shadow(0 1px 4px rgba(0,0,0,0.07))" }}
                 >
                   <button
@@ -977,7 +1033,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     onMouseEnter={() => opt.enabled && setMenuIndex(i)}
                     onMouseLeave={() => setMenuIndex(-1)}
                     onClick={() => runMenuOption(opt)}
-                    title={opt.enabled ? opt.label : `${opt.label} — write something first`}
                     className={`border-shape-squircle flex items-center gap-1.5 pl-2.5 pr-3 h-[30px] border text-[12px] font-medium transition-colors duration-150 select-none outline-none ${
                       isActive
                         ? "bg-[var(--color-bg-hover)] border-[var(--color-border-hover)] text-[var(--color-text-primary)]"
@@ -985,7 +1040,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     } ${opt.enabled ? "" : "cursor-default"}`}
                     style={{ "--r": "9999px", "--lisse-capsule": "1" }}
                   >
-                    <Icon size={13} strokeWidth={2} className={`transition-colors duration-150 ${isActive ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"}`} />
+                    <Icon size={13} strokeWidth={2} className={`transition-colors duration-150 ${isActive ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"}`} />
                     {opt.label}
                   </button>
                 </motion.div>
