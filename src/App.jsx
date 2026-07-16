@@ -1983,6 +1983,21 @@ export default function App() {
   const [buddyDumpActive, setBuddyDumpActive] = useState(false);
   const [buddyMicError, setBuddyMicError] = useState(null); // null | 'no-mic' | 'no-permission' | 'error'
   const buddyMicErrorTimerRef = useRef(null);
+  // Buddy preferences — hidden, hat, custom skills. Cached locally for instant
+  // load; the cloud copy rides inside the users/{uid} metadata document.
+  const [buddyPrefs, setBuddyPrefs] = useState(() => {
+    try {
+      return { hidden: false, hat: null, skills: [], ...JSON.parse(localStorage.getItem("words_buddy_prefs") || "{}") };
+    } catch {
+      return { hidden: false, hat: null, skills: [] };
+    }
+  });
+  const buddyPrefsRef = useRef(buddyPrefs);
+  useEffect(() => {
+    buddyPrefsRef.current = buddyPrefs;
+    try { localStorage.setItem("words_buddy_prefs", JSON.stringify(buddyPrefs)); } catch { /* full/blocked storage is fine */ }
+  }, [buddyPrefs]);
+  const updateBuddyPrefs = (patch) => setBuddyPrefs((p) => ({ ...p, ...patch }));
   const [isSpacingAnimating, setIsSpacingAnimating] = useState(false);
   const alignFlipRef = useRef(null); // Map(el → pre-change x) captured by the Align control, consumed by the FLIP effect
 
@@ -2083,7 +2098,7 @@ export default function App() {
 
   const filteredCommands = COMMANDS.filter(
     (cmd) =>
-      (cmd.id !== "buddy" || user) &&
+      (cmd.id !== "buddy" || (user && !buddyPrefs.hidden)) &&
       (cmd.title.toLowerCase().includes(slashState.query.toLowerCase()) ||
        cmd.id.toLowerCase().includes(slashState.query.toLowerCase())),
   ).sort((a, b) => {
@@ -2584,7 +2599,7 @@ export default function App() {
       const stripped = stripCloudHeavy(docs).filter(d => d && d.id) // guard against missing IDs
         .map((d, i) => ({ ...d, sortIndex: i }));
       const ops = [
-        { type: 'set', ref: doc(db, "users", user.uid), data: { ...metadata, schemaVersion: 2 } },
+        { type: 'set', ref: doc(db, "users", user.uid), data: { ...metadata, buddyPrefs: buddyPrefsRef.current, schemaVersion: 2 } },
         ...stripped.map(d => ({ type: 'set', ref: doc(db, "users", user.uid, "docs", d.id), data: d })),
       ];
       return commitInBatches(db, ops);
@@ -2598,6 +2613,7 @@ export default function App() {
         lastKnownCloudDocCountRef.current = docs.length;
       }
       if (data.groups) setGroups(data.groups);
+      if (data.buddyPrefs) setBuddyPrefs((prev) => ({ ...prev, ...data.buddyPrefs }));
       setLockPasscode(data.lockPasscode || null);
       if (data.trashedDocs) {
         const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
@@ -2828,7 +2844,7 @@ export default function App() {
           {
             type: 'set',
             ref: doc(db, "users", user.uid),
-            data: { groups, activeDocId, lockPasscode, trashedDocs: trashedDocsRef.current, lastUpdated: writeTime, schemaVersion: 2 },
+            data: { groups, activeDocId, lockPasscode, trashedDocs: trashedDocsRef.current, buddyPrefs: buddyPrefsRef.current, lastUpdated: writeTime, schemaVersion: 2 },
           },
           ...changedDocs.map(d => ({ type: 'set', ref: doc(db, "users", user.uid, "docs", d.id), data: d })),
           ...deletedIds.map(id => ({ type: 'delete', ref: doc(db, "users", user.uid, "docs", id) })),
@@ -2849,7 +2865,7 @@ export default function App() {
 
     const timeout = setTimeout(syncData, 500);
     return () => clearTimeout(timeout);
-  }, [docs, groups, activeDocId, lockPasscode, trashedDocs, user, syncVersion]);
+  }, [docs, groups, activeDocId, lockPasscode, trashedDocs, buddyPrefs, user, syncVersion]);
 
   // Auto-name "New Folder" groups once they accumulate 2+ docs
   useEffect(() => {
@@ -9351,6 +9367,10 @@ export default function App() {
           activeDocId={activeDocId}
           isDumpActive={buddyDumpActive}
           micError={buddyMicError}
+          customSkills={buddyPrefs.skills || []}
+          buddyHat={buddyPrefs.hat || null}
+          buddyHidden={!!buddyPrefs.hidden}
+          onUpdateBuddyPrefs={updateBuddyPrefs}
           onDismissMicError={() => { clearTimeout(buddyMicErrorTimerRef.current); setBuddyMicError(null); }}
           onStartLive={startBuddyLive}
           onLongPress={startBuddyLive}
@@ -9403,7 +9423,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {user && !historyPanelOpen && (
+      {user && !historyPanelOpen && !buddyPrefs.hidden && (
         <CaretBuddyHotspot
           editorRef={editorRef}
           enabled={!buddyState.show && !buddyDumpActive && !slashState.isOpen}

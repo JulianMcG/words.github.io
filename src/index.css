@@ -968,13 +968,12 @@ html[data-reduce-motion="true"] *::after {
   filter: blur(10px);
 }
 
-/* Dark mode: lift the backdrop off the page and sharpen its edge a touch —
- * pure bg-primary at 96% reads muddy against dark text underneath */
+/* Dark mode: the backdrop stays the page's own background — fully opaque so
+ * the text underneath can't bleed through and muddy it */
 @media (prefers-color-scheme: dark) {
   .buddy-backdrop {
-    background: color-mix(in srgb, var(--color-bg-primary) 90%, white);
+    background: var(--color-bg-primary);
     opacity: 1;
-    filter: blur(14px);
   }
   .buddy-pill {
     background: color-mix(in srgb, var(--color-accent) 34%, transparent);

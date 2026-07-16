@@ -1,10 +1,73 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
-import { Loader2, ArrowRight, File, Check, MicOff, Mic, BrushCleaning, Lightbulb } from "lucide-react";
+import { Loader2, ArrowRight, File, Check, MicOff, Mic, BrushCleaning, Lightbulb, Plus, Paintbrush, EyeOff, Eye, Trash2, Sparkles, Wand2, PenLine, ListChecks, Languages, Scissors, Smile, BookOpen, Zap, Quote } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
 
-export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId, onLongPress, onStartLive, suppressed = false, isDumpActive = false, micError = null, onDismissMicError = null }) {
+// Icons a custom skill can wear — stored by id so prefs stay serializable
+const SKILL_ICONS = {
+  sparkles: Sparkles,
+  wand: Wand2,
+  pen: PenLine,
+  list: ListChecks,
+  languages: Languages,
+  scissors: Scissors,
+  smile: Smile,
+  book: BookOpen,
+  zap: Zap,
+  quote: Quote,
+};
+const SKILL_ICON_IDS = Object.keys(SKILL_ICONS);
+
+// Placeholder hat shapes — stand-ins until Julian's PNGs arrive
+const BUDDY_HATS = [
+  { id: "party", label: "Party" },
+  { id: "top", label: "Top hat" },
+  { id: "beanie", label: "Beanie" },
+  { id: "bow", label: "Bow" },
+];
+
+function BuddyHat({ hat, size = 22 }) {
+  const ink = "var(--color-text-primary)";
+  const accent = "var(--color-accent)";
+  if (hat === "party") {
+    return (
+      <svg width={size} height={size * 0.9} viewBox="0 0 24 22">
+        <polygon points="12,3 19,21 5,21" fill={accent} />
+        <circle cx="12" cy="3" r="2.6" fill={ink} />
+      </svg>
+    );
+  }
+  if (hat === "top") {
+    return (
+      <svg width={size} height={size * 0.82} viewBox="0 0 24 20">
+        <rect x="6.5" y="1" width="11" height="14" rx="1.5" fill={ink} />
+        <rect x="2" y="14.5" width="20" height="3.5" rx="1.75" fill={ink} />
+      </svg>
+    );
+  }
+  if (hat === "beanie") {
+    return (
+      <svg width={size} height={size * 0.82} viewBox="0 0 24 20">
+        <circle cx="12" cy="3.4" r="2.4" fill={ink} />
+        <path d="M3 17 A 9 8.4 0 0 1 21 17 Z" fill={accent} />
+        <rect x="3" y="15.4" width="18" height="3.4" rx="1.7" fill={ink} />
+      </svg>
+    );
+  }
+  if (hat === "bow") {
+    return (
+      <svg width={size} height={size * 0.66} viewBox="0 0 24 16">
+        <polygon points="2,2 10.5,8 2,14" fill={accent} />
+        <polygon points="22,2 13.5,8 22,14" fill={accent} />
+        <circle cx="12" cy="8" r="2.6" fill={ink} />
+      </svg>
+    );
+  }
+  return null;
+}
+
+export default function BuddyWidget({ isOpen, position, onClose, onApplyText, selectedText, selectedHtml, isCollapsedSelection, fullDocumentText, onGlobalClick, docs = [], activeDocId, onLongPress, onStartLive, suppressed = false, isDumpActive = false, micError = null, onDismissMicError = null, customSkills = [], buddyHat = null, buddyHidden = false, onUpdateBuddyPrefs = null }) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [previewText, setPreviewText] = useState("");
@@ -32,6 +95,20 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const longPressTimerRef = useRef(null);
   const isLongPressRef = useRef(false);
   const micErrorDismissReadyRef = useRef(false);
+
+  // Right-click menu under resting Buddy: 'menu' | 'customize' | 'unhide'
+  const [ctxMenu, setCtxMenu] = useState(null);
+  const ctxMenuRef = useRef(null);
+  // Right-click menu on a custom chip: { skillId, x, y }
+  const [chipMenu, setChipMenu] = useState(null);
+  const chipMenuRef = useRef(null);
+  // "New Skill" creation form state
+  const [isCreatingSkill, setIsCreatingSkill] = useState(false);
+  const [skillName, setSkillName] = useState("");
+  const [skillPrompt, setSkillPrompt] = useState("");
+  const [skillIcon, setSkillIcon] = useState("sparkles");
+  const skillNameRef = useRef(null);
+  const pendingCreateSkillRef = useRef(false);
   
   const [hasError, setHasError] = useState(false);
   const [isChangesApplied, setIsChangesApplied] = useState(false);
@@ -79,7 +156,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   const hoverSequenceStartedRef = useRef(false);
 
-  const shouldBackgroundBlink = isOpen || (isHovered && isHoverSequenceComplete);
+  const shouldBackgroundBlink = isOpen || (isHovered && isHoverSequenceComplete) || ctxMenu === "menu" || ctxMenu === "customize";
 
   useEffect(() => {
     if (!shouldBackgroundBlink) {
@@ -156,6 +233,15 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       setAutoLabel(null);
       setShowRefine(false);
       setInput("");
+      setCtxMenu(null);
+      if (pendingCreateSkillRef.current) {
+        // "New Skill" chosen from the right-click menu — open straight into the form
+        pendingCreateSkillRef.current = false;
+        setIsCreatingSkill(true);
+        setTimeout(() => skillNameRef.current?.focus(), 350);
+      } else {
+        setIsCreatingSkill(false);
+      }
       setTimeout(() => inputRef.current?.focus(), 300);
       setPreviewText("");
       setIsReviewing(false);
@@ -235,9 +321,14 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   }, [isClicked, isOpen]);
 
   let activeExpression = hasError || micError ? "error" : expression;
-  
+
   if (!hasError && (expression === "idle" || expression === "smile") && blinkState === "blink" && shouldBackgroundBlink) {
      activeExpression = expression === "idle" ? "blink" : "smileblink";
+  }
+
+  // Hovering above his right-click menu, Buddy smiles
+  if (!hasError && !micError && !isOpen && (ctxMenu === "menu" || ctxMenu === "customize")) {
+     activeExpression = blinkState === "blink" ? "smileblink" : "smile";
   }
 
   // Handle @ Mentions
@@ -341,11 +432,22 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const hasSelection = selectedText && selectedText !== "GLOBAL_CHAT" && !isCollapsedSelection;
   const docHasWords = (fullDocumentText || "").replace(/<[^>]+>/g, "").trim().length > 0;
 
-  // Quick-action pills that float above the bar
+  // Quick-action pills that float above the bar: the built-in three, the
+  // user's own skills, then the + chip that mints a new one
   const menuOptions = [
     { id: "live", icon: Mic, label: "Live", enabled: true },
     { id: "clean", icon: BrushCleaning, label: "Clean", enabled: docHasWords },
     { id: "suggest", icon: Lightbulb, label: "Suggest", enabled: docHasWords },
+    ...(customSkills || []).map((s) => ({
+      id: `skill:${s.id}`,
+      skillId: s.id,
+      icon: SKILL_ICONS[s.icon] || Sparkles,
+      label: s.name,
+      prompt: s.prompt,
+      enabled: docHasWords,
+      custom: true,
+    })),
+    { id: "add", icon: Plus, label: "", enabled: true, isAdd: true },
   ];
 
   const runMenuOption = (opt) => {
@@ -355,8 +457,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       setTimeout(() => onStartLive?.(), 200);
       return;
     }
+    if (opt.id === "add") {
+      setIsCreatingSkill(true);
+      setTimeout(() => skillNameRef.current?.focus(), 250);
+      return;
+    }
     // One-click actions: Buddy just does it
-    setAutoLabel(buddyPresetLabel(opt.id));
+    setAutoLabel(opt.custom ? `${opt.label}…` : buddyPresetLabel(opt.id));
     handleGenerate(null, opt);
   };
 
@@ -365,6 +472,34 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const applySuggestions = () => {
     setAutoLabel(buddyPresetLabel("apply"));
     handleGenerate(null, { id: "apply" });
+  };
+
+  const createSkill = () => {
+    const name = skillName.trim();
+    const prompt = skillPrompt.trim();
+    if (!name || !prompt || !onUpdateBuddyPrefs) return;
+    onUpdateBuddyPrefs({
+      skills: [...(customSkills || []), { id: Math.random().toString(36).slice(2, 9), name, prompt, icon: skillIcon }],
+    });
+    setIsCreatingSkill(false);
+    setSkillName("");
+    setSkillPrompt("");
+    setSkillIcon("sparkles");
+    setTimeout(() => inputRef.current?.focus(), 250);
+  };
+
+  const cancelSkill = () => {
+    setIsCreatingSkill(false);
+    setSkillName("");
+    setSkillPrompt("");
+    setSkillIcon("sparkles");
+    setTimeout(() => inputRef.current?.focus(), 250);
+  };
+
+  const deleteSkill = (skillId) => {
+    if (!onUpdateBuddyPrefs) return;
+    onUpdateBuddyPrefs({ skills: (customSkills || []).filter((s) => s.id !== skillId) });
+    setChipMenu(null);
   };
 
   // Step through the quick actions, skipping disabled ones
@@ -406,9 +541,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       if (mentionQuery !== null) return; // the input's own handler owns the mention list
       if (e.key === "Escape") {
         e.preventDefault(); e.stopPropagation();
-        onClose();
+        if (isCreatingSkill) { cancelSkill(); } else { onClose(); }
         return;
       }
+      if (isCreatingSkill) return; // the form's inputs own the rest of the keys
       if (autoLabel || isLoading || isReviewing) return;
       if (e.key === "ArrowUp" || (e.key === "Tab" && !e.shiftKey)) {
         e.preventDefault(); e.stopPropagation();
@@ -430,11 +566,11 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, autoLabel, isLoading, isReviewing, input, menuIndex, mentionQuery, menuOptions.length, docHasWords]);
+  }, [isOpen, autoLabel, isLoading, isReviewing, isCreatingSkill, input, menuIndex, mentionQuery, menuOptions.length, docHasWords]);
 
   const handleGenerate = async (e, preset = null) => {
     e?.preventDefault();
-    const promptToUse = preset ? buddyPresetPrompt(preset.id, hasSelection) : input;
+    const promptToUse = preset ? (preset.prompt || buddyPresetPrompt(preset.id, hasSelection)) : input;
     if (!promptToUse?.trim() || isLoading) return;
 
     setIsLoading(true);
@@ -617,18 +753,118 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [isOpen, onClose]);
 
+  // Right-click menus close on outside click or Escape
+  useEffect(() => {
+    if (!ctxMenu && !chipMenu) return;
+    const onDown = (e) => {
+      if (ctxMenuRef.current && ctxMenuRef.current.contains(e.target)) return;
+      if (chipMenuRef.current && chipMenuRef.current.contains(e.target)) return;
+      setCtxMenu(null);
+      setChipMenu(null);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { setCtxMenu(null); setChipMenu(null); }
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [ctxMenu, chipMenu]);
+
+  // While hidden, a right-click in Buddy's old corner brings up "Show Buddy"
+  useEffect(() => {
+    if (!buddyHidden) return;
+    const onCtx = (e) => {
+      if (window.innerWidth - e.clientX < 150 && window.innerHeight - e.clientY < 150) {
+        e.preventDefault();
+        setCtxMenu("unhide");
+      }
+    };
+    document.addEventListener("contextmenu", onCtx);
+    return () => document.removeEventListener("contextmenu", onCtx);
+  }, [buddyHidden]);
+
+  // House menu item — same dress code as the slash & context menus
+  const ctxItemCls = "w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-hover)] select-none";
+
+  // Hidden: nothing renders except the corner's "Show Buddy" right-click menu
+  if (buddyHidden) {
+    return (
+      <AnimatePresence>
+        {ctxMenu === "unhide" && (
+          <motion.div
+            key="buddy-unhide-menu"
+            ref={ctxMenuRef}
+            initial={{ opacity: 0, y: -6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98, transition: { duration: 0.12 } }}
+            transition={{ type: "spring", stiffness: 420, damping: 30 }}
+            className="fixed z-[130] print:hidden"
+            style={{ right: 20, bottom: 34 }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="relative">
+              {/* Tail — pointing down at Buddy's old resting spot */}
+              <div style={{
+                position: 'absolute',
+                bottom: -5,
+                right: 18,
+                width: 10,
+                height: 10,
+                background: 'var(--color-bg-primary)',
+                borderRight: '1px solid var(--color-border-primary)',
+                borderBottom: '1px solid var(--color-border-primary)',
+                borderRadius: 2,
+                transform: 'rotate(45deg)',
+              }} />
+              <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-44">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setCtxMenu(null);
+                    onUpdateBuddyPrefs?.({ hidden: false });
+                  }}
+                  className={ctxItemCls}
+                >
+                  <Eye size={14} className="text-[var(--color-icon-muted)]" />
+                  Show Buddy
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    );
+  }
+
   return (
     <>
 
       {/* Invisible fixed hitbox block */}
       {!isOpen && !suppressed && (
-        <div 
+        <div
           className="fixed z-[99] cursor-pointer print:hidden"
-          style={{ 
-            width: restingWidth + 40, 
-            height: restingWidth + 40, 
-            bottom: 0, 
-            right: 15 
+          style={{
+            width: restingWidth + 40,
+            height: restingWidth + 40,
+            bottom: 0,
+            right: 15,
+            pointerEvents: ctxMenu ? "none" : undefined,
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            if (micError) return;
+            clearTimeout(longPressTimerRef.current);
+            setIsClicked(false);
+            setIsHovered(false);
+            rawMagnetX.set(0);
+            rawMagnetY.set(0);
+            rawTiltX.set(0);
+            rawTiltY.set(0);
+            setCtxMenu("menu");
           }}
           onMouseEnter={() => { if (!micError) setIsHovered(true); }}
           onMouseMove={(e) => {
@@ -717,7 +953,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           y: 0,
           width: isOpen ? activeWidth : restingWidth,
           height: isOpen ? (contentH ? contentH + 2 : "auto") : restingWidth,
-          bottom: isOpen ? 20 : (isHovered ? 15 : -20),
+          // While his right-click menu is up, Buddy rises and hovers above it
+          bottom: isOpen ? 20 : (ctxMenu === "customize" ? 156 : ctxMenu === "menu" ? 128 : (isHovered ? 15 : -20)),
           right: isOpen ? 20 : 30,
         }}
         transition={{
@@ -815,6 +1052,29 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 )}
               </AnimatePresence>
 
+              {/* Hat — placeholder shapes riding Buddy's tilt and bounce */}
+              <AnimatePresence>
+                {buddyHat && (
+                  <motion.div
+                    key={`hat-${buddyHat}`}
+                    className="absolute pointer-events-none z-10"
+                    style={{ top: 0, left: "50%" }}
+                    initial={{ opacity: 0, x: "-50%", y: -4, rotate: -8, scale: 0.6 }}
+                    animate={{
+                      opacity: isOpen ? 1 : (micError || isHovered || ctxMenu ? 1 : 0.45),
+                      x: "-50%",
+                      y: isHovered && !isClicked ? -30 : -13,
+                      rotate: -8,
+                      scale: isHovered ? 1.15 : 1,
+                    }}
+                    exit={{ opacity: 0, y: -20, scale: 0.6, transition: { duration: 0.15 } }}
+                    transition={{ type: "spring", stiffness: 320, damping: 22 }}
+                  >
+                    <BuddyHat hat={buddyHat} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {/* Rendered oversized (48 x 1.4) and scaled DOWN at rest, so the
                   hover grow tops out at scale 1 — the raster is never upscaled
                   and Buddy stays crisp */}
@@ -825,7 +1085,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 animate={{
                   width: isClicked ? 60 : (micError ? 58 : isHovered ? 68 : 48),
                   height: isClicked ? 60 : (micError ? 58 : isHovered ? 68 : 48),
-                  opacity: isOpen ? 1 : (micError || isHovered ? 1 : 0.45)
+                  opacity: isOpen ? 1 : (micError || isHovered || ctxMenu ? 1 : 0.45)
                 }}
                 transition={{
                   width: { type: "spring", stiffness: 400, damping: 20 },
@@ -851,7 +1111,85 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             >
 
               <AnimatePresence mode="popLayout" initial={false}>
-                {isReviewing && (!isChangesApplied || isViewingChanges) && (
+                {isCreatingSkill && (
+                  <motion.div
+                    key="skill-form"
+                    initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                    exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
+                    transition={{ y: { type: "spring", stiffness: 440, damping: 32, mass: 0.85 }, opacity: { duration: 0.2 }, filter: { duration: 0.22 } }}
+                    className="flex flex-col gap-2 px-3.5 pt-3 pb-3 w-full"
+                  >
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[13px] font-semibold text-[var(--color-text-primary)] select-none">New Skill</span>
+                      <span className="text-[11px] text-[var(--color-text-faint)] select-none">a chip that runs your prompt</span>
+                    </div>
+
+                    {/* Icon picker */}
+                    <div className="flex items-center gap-1">
+                      {SKILL_ICON_IDS.map((id) => {
+                        const IconOpt = SKILL_ICONS[id];
+                        const active = id === skillIcon;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => setSkillIcon(id)}
+                            className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${active ? "bg-[var(--color-bg-hover)] text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)]"}`}
+                          >
+                            <IconOpt size={14} strokeWidth={2} />
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <input
+                      ref={skillNameRef}
+                      type="text"
+                      value={skillName}
+                      onChange={(e) => setSkillName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.target.parentElement.querySelector("textarea")?.focus(); } }}
+                      placeholder="Name your skill…"
+                      maxLength={24}
+                      className="w-full bg-[var(--color-bg-hover)] rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] outline-none border border-transparent focus:border-[var(--color-border-primary)] transition-colors"
+                    />
+                    <textarea
+                      value={skillPrompt}
+                      onChange={(e) => setSkillPrompt(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); createSkill(); } }}
+                      rows={3}
+                      placeholder="What should Buddy do? e.g. Make my writing warmer and more direct."
+                      className="w-full bg-[var(--color-bg-hover)] rounded-md px-2.5 py-1.5 text-[13px] leading-relaxed text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] outline-none border border-transparent focus:border-[var(--color-border-primary)] transition-colors resize-none no-scrollbar"
+                    />
+
+                    <div className="flex items-center justify-end gap-3 mt-0.5">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={cancelSkill}
+                        className="text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={createSkill}
+                        disabled={!skillName.trim() || !skillPrompt.trim()}
+                        className={`px-3 h-7 rounded-md text-[12px] font-medium transition-all duration-150 select-none ${
+                          skillName.trim() && skillPrompt.trim()
+                            ? "btn-tactile-accent text-white"
+                            : "bg-[var(--color-bg-hover)] text-[var(--color-text-faint)] cursor-default"
+                        }`}
+                      >
+                        Create Skill
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+
+                {!isCreatingSkill && isReviewing && (!isChangesApplied || isViewingChanges) && (
                   <motion.div
                     key="panel-results"
                     initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
@@ -897,6 +1235,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               {/* The bar — Buddy's original prompt bar; results morph out of it */}
               {/* min-h keeps the bar's height steady when the send button or
                   loader swaps out — without it the bar shrinks a few px */}
+              {!isCreatingSkill && (
               <form onSubmit={handleGenerate} className={`flex relative items-center gap-2.5 p-2.5 min-h-[48px] ${isReviewing ? "border-t border-[var(--color-border-primary)]/60" : ""}`}>
                 <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
                   <img
@@ -990,6 +1329,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 )}
 
               </form>
+              )}
 
             </motion.div>
           )}
@@ -1049,8 +1389,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       {/* Quick-action pills — lisse capsules floating above the bar. When a
           chip is clicked (autoLabel/loading) the pills duck down behind the
           bar like they do on typing — Buddy is working, not dismissing */}
-      <AnimatePresence custom={(input.trim() || autoLabel || isLoading || isReviewing) ? "typing" : "close"}>
-        {isOpen && !isReviewing && !autoLabel && !isLoading && !input.trim() && (
+      <AnimatePresence custom={(input.trim() || autoLabel || isLoading || isReviewing || isCreatingSkill) ? "typing" : "close"}>
+        {isOpen && !isReviewing && !autoLabel && !isLoading && !isCreatingSkill && !input.trim() && (
           <motion.div
             key="buddy-pills"
             ref={pillsRef}
@@ -1061,8 +1401,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               // exits complete too — only the entrance (opacity: 1) counts
               if (definition && definition.opacity === 1) pillsShownRef.current = true;
             }}
-            className="fixed z-[99] flex items-center justify-start gap-1.5 print:hidden"
-            style={{ right: 20, bottom: 75, width: activeWidth }}
+            className="fixed z-[99] flex flex-wrap items-center justify-start gap-1.5 print:hidden no-scrollbar"
+            style={{ right: 20, bottom: 75, width: activeWidth, maxHeight: 112, overflowY: "auto" }}
           >
             {menuOptions.map((opt, i) => {
               const Icon = opt.icon;
@@ -1095,7 +1435,14 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     onMouseEnter={() => opt.enabled && setMenuIndex(i)}
                     onMouseLeave={() => setMenuIndex(-1)}
                     onClick={() => runMenuOption(opt)}
-                    className={`border-shape-squircle flex items-center gap-1.5 pl-2.5 pr-3 h-[30px] border text-[12px] font-medium transition-colors duration-150 select-none outline-none ${
+                    onContextMenu={(e) => {
+                      if (!opt.custom) return;
+                      e.preventDefault();
+                      setChipMenu({ skillId: opt.skillId, x: e.clientX, y: e.clientY });
+                    }}
+                    className={`border-shape-squircle flex items-center h-[30px] border text-[12px] font-medium transition-colors duration-150 select-none outline-none ${
+                      opt.isAdd ? "w-[30px] justify-center p-0" : "gap-1.5 pl-2.5 pr-3"
+                    } ${
                       isActive
                         ? "bg-[var(--color-bg-hover)] border-[var(--color-border-primary)] text-[var(--color-text-primary)]"
                         : "bg-[var(--color-bg-primary)] border-[var(--color-border-primary)] text-[var(--color-text-muted)]"
@@ -1109,6 +1456,152 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 </motion.div>
               );
             })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Right-click menu — Buddy rises and hovers above it, tail pointing up at him */}
+      <AnimatePresence>
+        {(ctxMenu === "menu" || ctxMenu === "customize") && !isOpen && (
+          <motion.div
+            key="buddy-ctx-menu"
+            ref={ctxMenuRef}
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.98, transition: { duration: 0.12 } }}
+            transition={{ type: "spring", stiffness: 420, damping: 30 }}
+            className="fixed z-[130] print:hidden"
+            style={{ right: 20, bottom: 16 }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="relative">
+              {/* Tail — rendered behind the card so its overlapping half hides
+                  under the opaque background; only the tip pokes up at Buddy */}
+              <div style={{
+                position: 'absolute',
+                top: -5,
+                right: 18,
+                width: 10,
+                height: 10,
+                background: 'var(--color-bg-primary)',
+                borderLeft: '1px solid var(--color-border-primary)',
+                borderTop: '1px solid var(--color-border-primary)',
+                borderRadius: 2,
+                transform: 'rotate(45deg)',
+              }} />
+              <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-44">
+                {ctxMenu === "menu" ? (
+                  <>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setCtxMenu("customize")}
+                      className={ctxItemCls}
+                    >
+                      <Paintbrush size={14} className="text-[var(--color-icon-muted)]" />
+                      Customize
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setCtxMenu(null);
+                        pendingCreateSkillRef.current = true;
+                        onGlobalClick?.();
+                      }}
+                      className={ctxItemCls}
+                    >
+                      <Plus size={14} className="text-[var(--color-icon-muted)]" />
+                      New Skill
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setCtxMenu(null);
+                        onUpdateBuddyPrefs?.({ hidden: true });
+                      }}
+                      className={ctxItemCls}
+                    >
+                      <EyeOff size={14} className="text-[var(--color-icon-muted)]" />
+                      Hide Buddy
+                    </button>
+                  </>
+                ) : (
+                  <div className="px-1 pt-1 pb-1.5">
+                    <div className="flex items-center justify-between px-1 pb-1.5">
+                      <span className="text-[11px] font-semibold text-[var(--color-text-faint)] uppercase tracking-wide select-none">Hats</span>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setCtxMenu("menu")}
+                        className="text-[11px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none"
+                      >
+                        Back
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => onUpdateBuddyPrefs?.({ hat: null })}
+                        className={`h-9 rounded-md flex items-center justify-center border transition-colors ${
+                          !buddyHat ? "bg-[var(--color-bg-hover)] border-[var(--color-border-primary)]" : "border-transparent hover:bg-[var(--color-bg-hover)]"
+                        }`}
+                      >
+                        <span className="text-[10px] font-medium text-[var(--color-text-faint)] select-none">None</span>
+                      </button>
+                      {BUDDY_HATS.map((h) => (
+                        <button
+                          key={h.id}
+                          type="button"
+                          title={h.label}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => onUpdateBuddyPrefs?.({ hat: h.id })}
+                          className={`h-9 rounded-md flex items-center justify-center border transition-colors ${
+                            buddyHat === h.id ? "bg-[var(--color-bg-hover)] border-[var(--color-border-primary)]" : "border-transparent hover:bg-[var(--color-bg-hover)]"
+                          }`}
+                        >
+                          <BuddyHat hat={h.id} size={20} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Right-click on a custom chip — delete it */}
+      <AnimatePresence>
+        {chipMenu && (
+          <motion.div
+            key="chip-menu"
+            ref={chipMenuRef}
+            initial={{ opacity: 0, y: 4, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 3, scale: 0.98, transition: { duration: 0.1 } }}
+            transition={{ type: "spring", stiffness: 420, damping: 30 }}
+            className="fixed z-[130] print:hidden"
+            style={{
+              left: Math.min(chipMenu.x, window.innerWidth - 170),
+              bottom: window.innerHeight - chipMenu.y + 8,
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-40">
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => deleteSkill(chipMenu.skillId)}
+                className={ctxItemCls}
+              >
+                <Trash2 size={14} className="text-[var(--color-icon-muted)]" />
+                Delete Skill
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
