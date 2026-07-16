@@ -360,6 +360,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     handleGenerate(null, opt);
   };
 
+  // Buddy applies his own suggestions to the document instead of pasting
+  // the reply text in
+  const applySuggestions = () => {
+    setAutoLabel(buddyPresetLabel("apply"));
+    handleGenerate(null, { id: "apply" });
+  };
+
   // Step through the quick actions, skipping disabled ones
   const stepAction = (from, dir) => {
     let i = from < 0 ? (dir > 0 ? -1 : 0) : from;
@@ -435,7 +442,12 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     try {
       let context = "";
 
-      if (isReviewing && previewText) {
+      if (preset?.id === "apply") {
+          const prevReply = typeof previewText === 'object'
+              ? (previewText?.conversational_reply || "")
+              : (previewText || "");
+          context = `You previously reviewed the user's document and replied with these suggestions:\n\n"${prevReply}"\n\nThe full document HTML is:\n\n"${fullDocumentText}"\n\nApply those suggestions to the document now. Use replace_document and return the complete updated document HTML.`;
+      } else if (isReviewing && previewText) {
           const previousDraft = typeof previewText === 'object'
               ? (previewText.generated_html || previewText.conversational_reply || "")
               : previewText;
@@ -504,24 +516,28 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     }
   };
 
-  const handleApply = (mode, overrideText = null) => {
-    onApplyText(overrideText || previewText, mode);
-    onClose();
-  };
-
-  const hasValidHtml = typeof previewText === 'object' && previewText !== null && 
+  const hasValidHtml = typeof previewText === 'object' && previewText !== null &&
     typeof previewText?.generated_html === 'string' &&
     previewText.generated_html.replace(/<[^>]+>/g, '').trim() !== "";
 
+  // Replies may carry light structure (<h3> section headings, lists) — render
+  // them as HTML; plain text still gets wrapped line by line
+  const renderReplyHtml = (text) => {
+    const t = (text || "").trim();
+    if (/<\/?(h[1-6]|p|ul|ol|li|blockquote)\b/i.test(t)) return { html: t.replace(/>\s*\n+\s*</g, "><"), isHtml: true };
+    return { html: t.split('\n').filter(line => line.trim() !== "").map(line => `<p class="mb-2 last:mb-0">${line}</p>`).join(''), isHtml: false };
+  };
+
   const renderDiffPreview = () => {
     if (typeof previewText === 'object' && previewText !== null) {
+       const reply = renderReplyHtml(previewText.conversational_reply);
        return (
          <div className="flex flex-col gap-3">
            {previewText.conversational_reply && (
              <div className="flex gap-3 items-start p-1">
-               <div 
-                 className="editor-content !pb-0 w-full min-w-0 overflow-hidden text-[13.5px] leading-relaxed text-[var(--color-text-primary)] break-words whitespace-pre-wrap relative [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0"
-                 dangerouslySetInnerHTML={{ __html: previewText.conversational_reply.split('\n').filter(line => line.trim() !== "").map(line => `<p class="mb-2 last:mb-0">${line}</p>`).join('') }}
+               <div
+                 className={`editor-content buddy-reply !pb-0 w-full min-w-0 overflow-hidden text-[13.5px] leading-relaxed text-[var(--color-text-primary)] break-words relative [&_p]:!my-0 [&_ul]:!my-0 [&_ol]:!my-0 ${reply.isHtml ? "" : "whitespace-pre-wrap"}`}
+                 dangerouslySetInnerHTML={{ __html: reply.html }}
                />
              </div>
            )}
@@ -567,6 +583,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
 
   const widgetRef = useRef(null);
+  const pillsRef = useRef(null);
   const contentRef = useRef(null);
   const [contentH, setContentH] = useState(null);
 
@@ -585,6 +602,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   useEffect(() => {
     const handleOutsideClick = (e) => {
+      // The pills live OUTSIDE widgetRef (fixed sibling layer) — clicking one
+      // must not read as an outside click, or the chip dismisses Buddy before
+      // its action ever runs
+      if (pillsRef.current && pillsRef.current.contains(e.target)) return;
       if (isOpen && widgetRef.current && !widgetRef.current.contains(e.target)) {
         // Only close if clicking outside the widget entirely
         onClose();
@@ -846,14 +867,14 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                         {/* Chat replies get quiet inline actions right under the words */}
                         {!isChangesApplied && (
                           <div className="flex items-center justify-end gap-4 mt-2.5">
-                            {((typeof previewText === 'object' && previewText?.conversational_reply) || (typeof previewText === 'string' && !hasError && previewText)) && (
+                            {docHasWords && !hasError && ((typeof previewText === 'object' && previewText?.conversational_reply) || (typeof previewText === 'string' && previewText)) && (
                               <button
                                 type="button"
                                 onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => handleApply("append", { generated_html: `<p>${typeof previewText === 'object' ? previewText.conversational_reply : previewText}</p>` })}
+                                onClick={applySuggestions}
                                 className="text-[11.5px] font-medium text-[var(--color-accent)] hover:opacity-75 transition-opacity select-none"
                               >
-                                Insert
+                                Apply changes
                               </button>
                             )}
                             <button
@@ -874,7 +895,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               </AnimatePresence>
 
               {/* The bar — Buddy's original prompt bar; results morph out of it */}
-              <form onSubmit={handleGenerate} className={`flex relative items-center gap-2.5 p-2.5 ${isReviewing ? "border-t border-[var(--color-border-primary)]/60" : ""}`}>
+              {/* min-h keeps the bar's height steady when the send button or
+                  loader swaps out — without it the bar shrinks a few px */}
+              <form onSubmit={handleGenerate} className={`flex relative items-center gap-2.5 p-2.5 min-h-[48px] ${isReviewing ? "border-t border-[var(--color-border-primary)]/60" : ""}`}>
                 <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
                   <img
                     src={getUrl(barFace)}
@@ -1023,11 +1046,14 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         </AnimatePresence>
       </motion.div>
 
-      {/* Quick-action pills — lisse capsules floating above the bar */}
-      <AnimatePresence custom={input.trim() ? "typing" : "close"}>
+      {/* Quick-action pills — lisse capsules floating above the bar. When a
+          chip is clicked (autoLabel/loading) the pills duck down behind the
+          bar like they do on typing — Buddy is working, not dismissing */}
+      <AnimatePresence custom={(input.trim() || autoLabel || isLoading || isReviewing) ? "typing" : "close"}>
         {isOpen && !isReviewing && !autoLabel && !isLoading && !input.trim() && (
           <motion.div
             key="buddy-pills"
+            ref={pillsRef}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.16 } }}

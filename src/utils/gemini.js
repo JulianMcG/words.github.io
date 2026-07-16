@@ -133,7 +133,7 @@ The class="checklist" renders each <li> as a real interactive checkbox in the ed
 Always output a valid JSON object. Never wrap it in markdown code fences.
 
 For replace_selection, replace_document, insert_at_cursor: populate "generated_html" with the complete HTML output.
-For chat: populate "conversational_reply" with plain text (newlines OK, no HTML tags). Never end a conversational_reply with instructions about commands, hotkeys, or prompts for the user to type something.${referenceSection}`;
+For chat: populate "conversational_reply". It may be plain text (newlines OK), or — when structure genuinely helps, like multiple suggestions or distinct sections — light HTML using ONLY <h3> (a short heading of a few words per section), <p>, <ul>/<ol> with <li>, <strong>, and <em>. Never mix markdown into it. Never end a conversational_reply with instructions about commands, hotkeys, or prompts for the user to type something.${referenceSection}`;
 
   const userMessageText = `${context}\n\nUser request: ${userPrompt}`;
 

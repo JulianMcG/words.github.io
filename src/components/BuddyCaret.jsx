@@ -18,15 +18,10 @@ const BACKDROP_W = 340; // fixed width: the shape never reacts to option changes
 const BACKDROP_PAD = 46; // blur(18px) feathers inward — keep content in the solid core
 // Centered on the whole UI (face + options), not hugging Buddy's edge
 const BACKDROP_L = (CONTENT_W - FACE_W - FACE_GAP) / 2 - BACKDROP_W / 2;
-
-const Backdrop = ({ style, animate, transition }) => (
-  <motion.div
-    className="buddy-backdrop"
-    style={style}
-    animate={animate}
-    transition={transition}
-  />
-);
+const CONTENT_X = FACE_W + FACE_GAP; // where content starts, in line coords
+// The backdrop is ONE persistent element that morphs between phase shapes —
+// Dynamic Island style — instead of remounting (and snapping) per phase.
+const BACKDROP_SPRING = { type: "spring", stiffness: 360, damping: 32, mass: 0.8 };
 
 export default function BuddyCaret({
   isOpen,
@@ -55,6 +50,11 @@ export default function BuddyCaret({
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
+  // Measure the done/reply content so the backdrop always covers the whole
+  // response area (fixed-size rects left long replies hanging off the edge)
+  const contentElRef = useRef(null);
+  const [contentBox, setContentBox] = useState({ w: CONTENT_W, h: ROW_H });
+
   const [isDark, setIsDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -63,6 +63,16 @@ export default function BuddyCaret({
     return () => mq.removeEventListener("change", onChange);
   }, []);
   const getUrl = (key) => `/buddy expressions/buddy${isDark ? "dark" : "light"}${key === "idle" ? "" : key}.png`;
+
+  useEffect(() => {
+    const el = contentElRef.current;
+    if (!el || (phase !== "done" && phase !== "reply")) return;
+    const measure = () => setContentBox({ w: el.offsetWidth, h: el.offsetHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [phase]);
 
   const docHasWords = (fullDocumentText || "").replace(/<[^>]+>/g, "").trim().length > 0;
   const options = [
@@ -112,7 +122,10 @@ export default function BuddyCaret({
     setIsError(false);
     try {
       let context;
-      if (refining && lastResponse) {
+      if (presetId === "apply") {
+        const prev = lastResponse?.conversational_reply || "";
+        context = `You previously reviewed the user's document and replied with these suggestions:\n\n"${prev}"\n\nThe full document HTML is:\n\n"${fullDocumentText}"\n\nApply those suggestions to the document now. Use replace_document and return the complete updated document HTML.`;
+      } else if (refining && lastResponse) {
         const prev = lastResponse.generated_html || lastResponse.conversational_reply || "";
         context = `The user is refining your previous response. Here is your previous draft:\n\n"${prev}"`;
       } else if (presetId === "finish") {
@@ -258,10 +271,10 @@ export default function BuddyCaret({
     }
   };
 
-  const insertReply = () => {
-    const reply = lastResponse?.conversational_reply;
-    if (reply) onApplyText({ generated_html: `<p>${reply}</p>` }, "append");
-    onClose();
+  // Buddy applies his own suggestions to the document instead of pasting
+  // the reply text in
+  const applySuggestions = () => {
+    run(buddyPresetPrompt("apply"), "apply");
   };
 
   // Geometry: face line pinned near the caret; rows slide behind the backdrop
@@ -270,8 +283,37 @@ export default function BuddyCaret({
   const lineTop = Math.min(Math.max((position?.y || 100) + 14, 60), window.innerHeight - 120);
   const left = Math.min(Math.max((position?.x || 100) - 54, 8), window.innerWidth - width - 8);
 
-  const renderReplyHtml = (text) =>
-    (text || "").split("\n").filter((l) => l.trim() !== "").map((l) => `<p class="mb-1.5 last:mb-0">${l}</p>`).join("");
+  // Replies may carry light structure (<h3> section headings, lists) — render
+  // them as HTML; plain text still gets wrapped line by line
+  const renderReplyHtml = (text) => {
+    const t = (text || "").trim();
+    if (/<\/?(h[1-6]|p|ul|ol|li|blockquote)\b/i.test(t)) return t.replace(/>\s*\n+\s*</g, "><");
+    return t.split("\n").filter((l) => l.trim() !== "").map((l) => `<p class="mb-1.5 last:mb-0">${l}</p>`).join("");
+  };
+
+  // The one morphing backdrop: shaped per phase, sized to the measured
+  // response when there is one. Coordinates are in line-container space.
+  const backdropRect =
+    phase === "menu"
+      ? {
+          top: -((options.length - 1) * ROW_H + BACKDROP_PAD),
+          left: CONTENT_X + BACKDROP_L,
+          width: BACKDROP_W,
+          height: (2 * options.length - 1) * ROW_H + BACKDROP_PAD * 2,
+        }
+      : phase === "ask" || phase === "working"
+      ? {
+          top: -BACKDROP_PAD,
+          left: CONTENT_X + BACKDROP_L,
+          width: BACKDROP_W,
+          height: ROW_H + BACKDROP_PAD * 2,
+        }
+      : {
+          top: -BACKDROP_PAD,
+          left: -BACKDROP_PAD,
+          width: CONTENT_X + Math.max(contentBox.w, CONTENT_W) + BACKDROP_PAD * 2,
+          height: Math.max(contentBox.h, ROW_H) + BACKDROP_PAD * 2,
+        };
 
   const linkCls = "pointer-events-auto text-[11.5px] font-medium text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors select-none";
 
@@ -288,6 +330,14 @@ export default function BuddyCaret({
       <div className="relative" style={{ paddingTop: PAD_Y, paddingBottom: PAD_Y }}>
         {/* The line — Buddy's face is the anchor for everything */}
         <div className="relative flex items-center" style={{ minHeight: ROW_H, gap: FACE_GAP }}>
+          {/* Stationary soft-edged opaque backdrop — one persistent shape that
+              morphs between phases instead of remounting, so changes glide */}
+          <motion.div
+            className="buddy-backdrop"
+            initial={false}
+            animate={backdropRect}
+            transition={BACKDROP_SPRING}
+          />
           <motion.img
             layoutId="buddy-face"
             src={getUrl(face)}
@@ -310,15 +360,6 @@ export default function BuddyCaret({
                 onMouseEnter={() => setMenuHovered(true)}
                 onMouseLeave={() => setMenuHovered(false)}
               >
-                {/* Stationary soft-edged opaque backdrop — one fixed, generous shape */}
-                <Backdrop
-                  style={{
-                    top: -((options.length - 1) * ROW_H + BACKDROP_PAD),
-                    left: BACKDROP_L,
-                    width: BACKDROP_W,
-                    height: (2 * options.length - 1) * ROW_H + BACKDROP_PAD * 2,
-                  }}
-                />
                 {/* Selection glow — fixed blurred orange square on Buddy's line */}
                 <div
                   className="buddy-pill absolute pointer-events-none"
@@ -391,7 +432,6 @@ export default function BuddyCaret({
                 className="pointer-events-auto relative flex items-center"
                 style={{ height: ROW_H, width: 300 }}
               >
-                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, width: BACKDROP_W }} />
                 <input
                   ref={inputRef}
                   type="text"
@@ -414,7 +454,6 @@ export default function BuddyCaret({
                 className="relative flex items-center"
                 style={{ height: ROW_H }}
               >
-                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, width: BACKDROP_W }} />
                 <span className="relative z-10 buddy-shimmer-text text-[13.5px] font-medium select-none whitespace-nowrap">{workLabel}</span>
               </motion.div>
             )}
@@ -426,9 +465,9 @@ export default function BuddyCaret({
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
                 transition={SPRING}
+                ref={contentElRef}
                 className="relative flex flex-col"
               >
-                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, width: BACKDROP_W }} />
                 <div className="relative z-10 flex items-center gap-3" style={{ height: ROW_H }}>
                   <span className="flex items-center gap-1.5 text-[13.5px] font-medium text-[var(--color-text-primary)] whitespace-nowrap select-none">
                     <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 18, delay: 0.1 }}>
@@ -474,18 +513,18 @@ export default function BuddyCaret({
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
                 transition={SPRING}
+                ref={contentElRef}
                 className="pointer-events-auto relative flex flex-col gap-2 py-1.5"
                 style={{ maxWidth: 320 }}
               >
-                <Backdrop style={{ top: -BACKDROP_PAD, bottom: -BACKDROP_PAD, left: BACKDROP_L, width: BACKDROP_W }} />
                 <div
-                  className="editor-content !pb-0 relative z-10 text-[13.5px] leading-relaxed text-[var(--color-text-primary)] max-h-[38vh] overflow-y-auto no-scrollbar break-words [&_p]:!my-0"
+                  className="editor-content buddy-reply !pb-0 relative z-10 text-[13.5px] leading-relaxed text-[var(--color-text-primary)] max-h-[38vh] overflow-y-auto no-scrollbar break-words [&_p]:!my-0"
                   dangerouslySetInnerHTML={{ __html: renderReplyHtml(lastResponse?.conversational_reply) }}
                 />
                 <div className="relative z-10 flex items-center gap-3">
-                  {!isError && lastResponse?.conversational_reply && (
-                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={insertReply} className="pointer-events-auto text-[11.5px] font-medium text-[var(--color-accent)] hover:opacity-75 transition-opacity select-none">
-                      Insert
+                  {!isError && docHasWords && lastResponse?.conversational_reply && (
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={applySuggestions} className="pointer-events-auto text-[11.5px] font-medium text-[var(--color-accent)] hover:opacity-75 transition-opacity select-none">
+                      Apply changes
                     </button>
                   )}
                   <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onClose} className={linkCls}>

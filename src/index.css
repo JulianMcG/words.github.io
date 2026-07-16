@@ -967,3 +967,49 @@ html[data-reduce-motion="true"] *::after {
   border-radius: 12px;
   filter: blur(10px);
 }
+
+/* Dark mode: lift the backdrop off the page and sharpen its edge a touch —
+ * pure bg-primary at 96% reads muddy against dark text underneath */
+@media (prefers-color-scheme: dark) {
+  .buddy-backdrop {
+    background: color-mix(in srgb, var(--color-bg-primary) 90%, white);
+    opacity: 1;
+    filter: blur(14px);
+  }
+  .buddy-pill {
+    background: color-mix(in srgb, var(--color-accent) 34%, transparent);
+  }
+}
+
+/* ── Buddy's reply typography ─────────────────────────────────────────────
+ * Suggestion replies carry <h3> section headings. Inside the small reply
+ * panels they wear the house serif at reply scale — real headings with a
+ * line of air above, not shouty document-size ones. */
+.editor-content.buddy-reply h1,
+.editor-content.buddy-reply h2,
+.editor-content.buddy-reply h3 {
+  font-family: 'Averia Serif Libre', Georgia, serif;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-top: 14px;
+  margin-bottom: 4px;
+}
+.editor-content.buddy-reply h1 { font-size: 20px; }
+.editor-content.buddy-reply h2 { font-size: 18px; }
+.editor-content.buddy-reply h3 { font-size: 16.5px; }
+.editor-content.buddy-reply > h1:first-child,
+.editor-content.buddy-reply > h2:first-child,
+.editor-content.buddy-reply > h3:first-child {
+  margin-top: 2px;
+}
+/* Reply body text stays at panel scale — .editor-content p/li force 1rem */
+.editor-content.buddy-reply p,
+.editor-content.buddy-reply li {
+  font-size: 13.5px !important;
+}
+.editor-content.buddy-reply p {
+  margin-bottom: 6px !important;
+}
+.editor-content.buddy-reply > :last-child {
+  margin-bottom: 0 !important;
+}
