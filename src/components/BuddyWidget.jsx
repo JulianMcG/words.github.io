@@ -349,9 +349,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
      activeExpression = expression === "idle" ? "blink" : "smileblink";
   }
 
-  // Hovering above his right-click menu, Buddy smiles
-  if (!hasError && !micError && !isOpen && (ctxMenu === "menu" || ctxMenu === "customize")) {
+  // Hovering above his right-click menu, Buddy smiles. In the hats menu he
+  // wears his normal face — a fitting-room mirror, not a grin.
+  if (!hasError && !micError && !isOpen && ctxMenu === "menu") {
      activeExpression = blinkState === "blink" ? "smileblink" : "smile";
+  }
+  if (!hasError && !micError && !isOpen && ctxMenu === "customize") {
+     activeExpression = blinkState === "blink" ? "blink" : "idle";
   }
 
   // ...unless the cursor is on Hide Buddy — then he's sad (and stays sad
@@ -1000,7 +1004,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           height: isOpen ? (contentH ? contentH + 2 : "auto") : restingWidth,
           // While his right-click menu is up, Buddy rises and hovers above it;
           // he dissolves in place if Hide Buddy is chosen
-          bottom: isOpen ? 20 : (ctxMenu === "customize" ? 156 : (ctxMenu === "menu" || isHiding) ? 128 : (isHovered ? 15 : -20)),
+          bottom: isOpen ? 20 : (ctxMenu === "customize" ? 175 : (ctxMenu === "menu" || isHiding) ? 150 : (isHovered ? 15 : -20)),
           right: isOpen ? 20 : 30,
         }}
         transition={{
@@ -1041,9 +1045,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 opacity: isHiding ? 0 : 1,
                 scale: isHiding ? 0.3 : 1,
                 filter: isHiding ? "blur(10px)" : "blur(0px)",
-                x: isShaking
-                  ? [-9, 9, -7, 7, -4, 4, 0]
-                  : (hideHovered && ctxMenu === "menu" ? [0, -1.2, 1.2, -1.2, 1.2, 0] : 0),
+                x: isShaking ? [-9, 9, -7, 7, -4, 4, 0] : 0,
+                // Scared of Hide Buddy: iOS-icon wiggle — a quick rotation
+                // oscillation, not a positional shake
+                rotate: hideHovered && ctxMenu === "menu" ? [-2.2, 2.2] : 0,
                 y: micError
                   ? -40
                   : (!isShaking && isHovered && !isClicked ? [0, -4, 0] : 0),
@@ -1055,9 +1060,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 filter: { duration: 0.4, ease: "easeIn" },
                 x: isShaking
                   ? { duration: 0.5, ease: "easeInOut" }
-                  : (hideHovered && ctxMenu === "menu"
-                    ? { repeat: Infinity, duration: 0.5, ease: "easeInOut" }
-                    : { type: "spring", stiffness: 300, damping: 20 }),
+                  : { type: "spring", stiffness: 300, damping: 20 },
+                rotate: hideHovered && ctxMenu === "menu"
+                  ? { repeat: Infinity, repeatType: "mirror", duration: 0.13, ease: "easeInOut" }
+                  : { type: "spring", stiffness: 300, damping: 20 },
                 y: micError
                   ? { type: "spring", stiffness: 260, damping: 22 }
                   : (!isShaking && isHovered && !isClicked
@@ -1103,9 +1109,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     animate={{
                       opacity: isOpen ? 1 : (micError || isHovered || ctxMenu ? 1 : 0.45),
                       x: "-50%",
-                      y: isHovered && !isClicked ? -30 : -13,
+                      y: (isHovered && !isClicked) || ctxMenu === "customize" ? -30 : -13,
                       rotate: -8,
-                      scale: isHovered ? 1.15 : 1,
+                      scale: isHovered || ctxMenu === "customize" ? 1.15 : 1,
                     }}
                     exit={{ opacity: 0, y: -20, scale: 0.6, transition: { duration: 0.15 } }}
                     transition={{ type: "spring", stiffness: 320, damping: 22 }}
@@ -1123,8 +1129,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 src={getUrl(activeExpression)}
                 alt="Buddy"
                 animate={{
-                  width: isClicked ? 60 : (micError ? 58 : isHovered ? 68 : 48),
-                  height: isClicked ? 60 : (micError ? 58 : isHovered ? 68 : 48),
+                  width: isClicked ? 60 : (micError ? 58 : (isHovered || ctxMenu === "customize") ? 68 : 48),
+                  height: isClicked ? 60 : (micError ? 58 : (isHovered || ctxMenu === "customize") ? 68 : 48),
                   opacity: isOpen ? 1 : (micError || isHovered || ctxMenu ? 1 : 0.45)
                 }}
                 transition={{
@@ -1448,13 +1454,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               // exits complete too — only the entrance (opacity: 1) counts
               if (definition && definition.opacity === 1) pillsShownRef.current = true;
             }}
-            className="fixed z-[99] flex flex-wrap items-center justify-start gap-1.5 print:hidden no-scrollbar"
+            className="fixed z-[99] flex items-center justify-start gap-1.5 print:hidden no-scrollbar"
             style={{
-              // 10px of inner padding keeps the chips' drop-shadows inside the
-              // scroll box instead of being cut off at its edges; the position
-              // compensates so the chips sit exactly where they used to
+              // One row that scrolls sideways — chips never stack. The 10px of
+              // inner padding keeps their drop-shadows inside the scroll box
+              // (position-compensated so chips sit exactly where they used to).
               right: 10, bottom: 65, width: activeWidth + 20,
-              maxHeight: 132, overflowY: "auto", padding: 10,
+              overflowX: "auto", overflowY: "hidden", padding: 10,
             }}
           >
             {menuOptions.map((opt, i) => {
@@ -1480,6 +1486,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     ? { delay: 0.16 + (menuOptions.length - 1 - i) * 0.06, type: "spring", stiffness: 380, damping: 26, mass: 0.9 }
                     : { delay: i * 0.04, type: "spring", stiffness: 400, damping: 27, mass: 0.85 }}
                   whileTap={opt.enabled ? { scale: 0.95 } : undefined}
+                  className="flex-shrink-0"
                 >
                 <div style={{ filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.10)) drop-shadow(0 1px 3px rgba(0,0,0,0.06))" }}>
                   <button
@@ -1493,7 +1500,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                       e.preventDefault();
                       setChipMenu({ skillId: opt.skillId, x: e.clientX, y: e.clientY });
                     }}
-                    className={`border-shape-squircle flex items-center h-[30px] border text-[12px] font-medium transition-colors duration-150 select-none outline-none ${
+                    className={`border-shape-squircle flex items-center h-[30px] border text-[12px] font-medium whitespace-nowrap transition-colors duration-150 select-none outline-none ${
                       opt.isAdd ? "w-[30px] justify-center p-0" : "gap-1.5 pl-2.5 pr-3"
                     } ${
                       isActive
