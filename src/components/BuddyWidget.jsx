@@ -10,6 +10,9 @@ import EmojiPickerPanel from "./EmojiPicker";
 // the user chooses one from the native picker
 const FALLBACK_SKILL_EMOJI = "✨";
 
+// Customize (hats) is parked until the real hat art arrives
+const SHOW_CUSTOMIZE = false;
+
 // The house menu tail — the same curved swoosh the ... options menu wears.
 // Drawn AFTER the card at z-10 so its fill covers the card's border where
 // they meet: tail and menu read as one shape.
@@ -95,6 +98,41 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [showRefine, setShowRefine] = useState(false);
   // Pills ride in from the right only on open; returning after typing they rise straight up
   const pillsShownRef = useRef(false);
+  // Depth cue for the scrolling chip row: chips nearing the container edge
+  // fade and shrink, like the /buddy rolling list. id → 0..1 (1 = fully in)
+  const [chipDepth, setChipDepth] = useState({});
+  const chipDepthRef = useRef({});
+  const chipElsRef = useRef({});
+
+  const measureChipDepth = () => {
+    const cont = pillsRef.current;
+    if (!cont) return;
+    const cr = cont.getBoundingClientRect();
+    const next = {};
+    for (const [id, el] of Object.entries(chipElsRef.current)) {
+      if (!el || !el.isConnected) continue;
+      const r = el.getBoundingClientRect();
+      // Asymmetric depth: chips exit LEFT as you scroll right through the row
+      // (scrolled-past — they should dissolve away completely, matching the
+      // house "gone, not clipped" illusion) while chips are still arriving on
+      // the RIGHT (not yet scrolled to — a partial fade there is a "there's
+      // more, keep scrolling" affordance, so they never go fully invisible).
+      // The 48px padding runway gives room for both curves to resolve.
+      const leftGap = r.left - cr.left;
+      const rightGap = cr.right - r.right;
+      const leftDepth = Math.max(0, Math.min(1, (leftGap - 16) / 32));
+      const RIGHT_FLOOR = 0.4;
+      const rightDepth = RIGHT_FLOOR + (1 - RIGHT_FLOOR) * Math.max(0, Math.min(1, rightGap / 40));
+      next[id] = Math.min(leftDepth, rightDepth);
+    }
+    const prev = chipDepthRef.current;
+    const ids = Object.keys(next);
+    const changed = ids.length !== Object.keys(prev).length || ids.some((k) => Math.abs((prev[k] ?? -1) - next[k]) > 0.01);
+    if (changed) {
+      chipDepthRef.current = next;
+      setChipDepth(next);
+    }
+  };
   
   const [expression, setExpression] = useState("idle");
   const [isHovered, setIsHovered] = useState(false);
@@ -615,6 +653,15 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, autoLabel, isLoading, isReviewing, isCreatingSkill, skillPickerOpen, input, menuIndex, mentionQuery, menuOptions.length, docHasWords]);
 
+  // Re-measure chip depth whenever the row (re)appears or the set changes;
+  // the second pass runs after the entrance animation has settled
+  useEffect(() => {
+    if (!isOpen || isReviewing || autoLabel || isLoading || isCreatingSkill || input.trim()) return;
+    const t1 = setTimeout(measureChipDepth, 60);
+    const t2 = setTimeout(measureChipDepth, 800);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [isOpen, isReviewing, autoLabel, isLoading, isCreatingSkill, input, customSkills.length]);
+
   // The skill emoji picker closes on any click outside it
   useEffect(() => {
     if (!skillPickerOpen) return;
@@ -1004,7 +1051,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           height: isOpen ? (contentH ? contentH + 2 : "auto") : restingWidth,
           // While his right-click menu is up, Buddy rises and hovers above it;
           // he dissolves in place if Hide Buddy is chosen
-          bottom: isOpen ? 20 : (ctxMenu === "customize" ? 175 : (ctxMenu === "menu" || isHiding) ? 150 : (isHovered ? 15 : -20)),
+          bottom: isOpen ? 20 : (ctxMenu === "customize" ? 175 : (ctxMenu === "menu" || isHiding) ? (SHOW_CUSTOMIZE ? 150 : 122) : (isHovered ? 15 : -20)),
           right: isOpen ? 20 : 30,
         }}
         transition={{
@@ -1454,22 +1501,28 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               // exits complete too — only the entrance (opacity: 1) counts
               if (definition && definition.opacity === 1) pillsShownRef.current = true;
             }}
+            onScroll={() => requestAnimationFrame(measureChipDepth)}
             className="fixed z-[99] flex items-center justify-start gap-1.5 print:hidden no-scrollbar"
             style={{
-              // One row that scrolls sideways — chips never stack. The 10px of
-              // inner padding keeps their drop-shadows inside the scroll box
-              // (position-compensated so chips sit exactly where they used to).
-              right: 10, bottom: 65, width: activeWidth + 20,
-              overflowX: "auto", overflowY: "hidden", padding: 10,
+              // One row that scrolls sideways — chips never stack. 48px of
+              // side padding is the fade runway: scrolled chips reach full
+              // transparency before the clip edge, so they dissolve instead
+              // of getting sliced. Position compensates so the chips' rest
+              // slots line up with the bar exactly as before; 10px above and
+              // below keeps drop-shadows inside the scroll box.
+              right: -28, bottom: 65, width: activeWidth + 96,
+              overflowX: "auto", overflowY: "hidden", padding: "10px 48px",
             }}
           >
             {menuOptions.map((opt, i) => {
               const Icon = opt.icon;
               const isActive = i === menuIndex && opt.enabled;
               const fromSide = !pillsShownRef.current;
+              const depth = chipDepth[opt.id] ?? 1;
               return (
                 <motion.div
                   key={opt.id}
+                  ref={(el) => { chipElsRef.current[opt.id] = el; }}
                   initial={fromSide
                     ? { opacity: 0, x: 36, y: 26, scale: 0.75, filter: "blur(4px)" }
                     : { opacity: 0, x: 0, y: 26, scale: 0.85, filter: "blur(4px)" }}
@@ -1488,7 +1541,16 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   whileTap={opt.enabled ? { scale: 0.95 } : undefined}
                   className="flex-shrink-0"
                 >
-                <div style={{ filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.10)) drop-shadow(0 1px 3px rgba(0,0,0,0.06))" }}>
+                <div
+                  style={{
+                    filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.10)) drop-shadow(0 1px 3px rgba(0,0,0,0.06))",
+                    // Depth: chips receding past the container edge fade to
+                    // nothing and shrink — the /buddy rolling-list treatment
+                    opacity: depth,
+                    transform: `scale(${0.75 + 0.25 * depth})`,
+                    transition: "opacity 0.12s linear, transform 0.12s linear",
+                  }}
+                >
                   <button
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
@@ -1542,15 +1604,19 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-44">
                 {ctxMenu === "menu" ? (
                   <>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setCtxMenu("customize")}
-                      className={ctxItemCls}
-                    >
-                      <Paintbrush size={14} className="text-[var(--color-icon-muted)]" />
-                      Customize
-                    </button>
+                    {/* Customize (hats) is parked for now — flip SHOW_CUSTOMIZE
+                        when the real hat art lands */}
+                    {SHOW_CUSTOMIZE && (
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setCtxMenu("customize")}
+                        className={ctxItemCls}
+                      >
+                        <Paintbrush size={14} className="text-[var(--color-icon-muted)]" />
+                        Customize
+                      </button>
+                    )}
                     <button
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
