@@ -579,14 +579,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   const widgetRef = useRef(null);
   const contentRef = useRef(null);
-  // Card chrome (bg, border, clip, shadow) lags the close by ~300ms so the
-  // box visibly shrinks INTO Buddy instead of dissolving mid-air
-  const [cardChrome, setCardChrome] = useState(false);
-  useEffect(() => {
-    if (isOpen) { setCardChrome(true); return; }
-    const t = setTimeout(() => setCardChrome(false), 300);
-    return () => clearTimeout(t);
-  }, [isOpen]);
   const [contentH, setContentH] = useState(null);
 
   // Measure the open card's natural height so every state change is a real
@@ -717,7 +709,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           height: isOpen ? (contentH ? contentH + 2 : "auto") : restingWidth,
         }}
         transition={{
-          type: "spring", visualDuration: 0.42, bounce: 0.26,
+          type: "spring", stiffness: 350, damping: 25, mass: 0.5,
         }}
         className={`fixed z-[100] print:hidden ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
         style={{
@@ -733,15 +725,15 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         <div
           className="w-full h-full"
           style={{
-            filter: cardChrome ? 'drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))' : 'none',
+            filter: isOpen ? 'drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))' : 'none',
             transition: 'filter 0.35s ease',
           }}
         >
         <div
           className={`w-full h-full border-shape-squircle transition-colors duration-200 ${
-            cardChrome ? 'bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden flex flex-col justify-end' : 'bg-transparent overflow-visible'
+            isOpen ? 'bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] overflow-hidden flex flex-col justify-end' : 'bg-transparent overflow-visible'
           }`}
-          style={{ '--r': cardChrome ? '14px' : '24px' }}
+          style={{ '--r': isOpen ? '14px' : '24px' }}
         >
         <AnimatePresence mode="popLayout" initial={false} custom={suppressed ? "flight" : "normal"}>
           {suppressed ? null : !isOpen && !isDumpActive ? (
@@ -822,15 +814,17 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                 src={getUrl(activeExpression)}
                 alt="Buddy"
                 animate={{
-                  scale: isClicked ? 0.893 : (micError ? 0.857 : isHovered ? 1 : 0.714),
+                  width: isClicked ? 60 : (micError ? 58 : isHovered ? 68 : 48),
+                  height: isClicked ? 60 : (micError ? 58 : isHovered ? 68 : 48),
                   opacity: isOpen ? 1 : (micError || isHovered ? 1 : 0.45)
                 }}
                 transition={{
-                  scale: { type: "spring", stiffness: 400, damping: 20 },
+                  width: { type: "spring", stiffness: 400, damping: 20 },
+                  height: { type: "spring", stiffness: 400, damping: 20 },
                   opacity: { type: "spring", stiffness: 400, damping: 20 },
                   layout: { type: "tween", duration: 0.55, ease: [0.22, 1, 0.36, 1] },
                 }}
-                style={{ width: 68, height: 68, maxWidth: "none", bottom: 0, left: -10, originY: 1 }}
+                style={{ width: 48, height: 48, maxWidth: "none", bottom: 0, left: "50%", x: "-50%" }}
                 className="absolute object-contain select-none"
                 draggable="false"
               />
@@ -840,7 +834,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               key="active-ui"
               initial={{ opacity: 0, filter: "blur(8px)", y: 10 }}
               animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-              exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.12 } }}
+              exit={{ opacity: 0, filter: "blur(4px)" }}
               transition={{ duration: 0.2, delay: 0.05 }}
               ref={contentRef}
               className="flex flex-col h-auto flex-shrink-0 overflow-hidden"
@@ -854,7 +848,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
                     animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                     exit={{ opacity: 0, filter: "blur(3px)", transition: { duration: 0.12 } }}
-                    transition={{ y: { type: "spring", visualDuration: 0.4, bounce: 0.22 }, opacity: { duration: 0.2 }, filter: { duration: 0.22 } }}
+                    transition={{ y: { type: "spring", stiffness: 440, damping: 32, mass: 0.85 }, opacity: { duration: 0.2 }, filter: { duration: 0.22 } }}
                     className="flex flex-col w-full"
                   >
                     {(!isChangesApplied || isViewingChanges) && (
@@ -1030,7 +1024,10 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.16 } }}
-            onAnimationComplete={() => { pillsShownRef.current = true; }}
+            onAnimationComplete={(definition) => {
+              // exits complete too — only the entrance (opacity: 1) counts
+              if (definition && definition.opacity === 1) pillsShownRef.current = true;
+            }}
             className="fixed z-[99] flex items-center justify-start gap-1.5 print:hidden"
             style={{ right: 20, bottom: 75, width: activeWidth }}
           >
