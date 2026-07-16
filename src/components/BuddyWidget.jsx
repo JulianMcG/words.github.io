@@ -28,7 +28,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [mentionIndex, setMentionIndex] = useState(0);
   const [mentionedDocs, setMentionedDocs] = useState([]);
 
-  const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
   const inputRef = useRef(null);
   const longPressTimerRef = useRef(null);
   const isLongPressRef = useRef(false);
@@ -149,12 +148,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       img.src = `/buddy expressions/buddy${isDark ? 'dark' : 'light'}${key}.png`;
     });
   }, [isDark]);
-
-  useEffect(() => {
-    const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   useEffect(() => {
     let t;
@@ -572,10 +565,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   // The bar wears Buddy's original face — the full expression + blink engine
   const barFace = micError ? "error" : activeExpression;
 
-  const safeX = Math.min(Math.max(position?.x || windowSize.width / 2, 8), windowSize.width - activeWidth - 8);
-  const safeY = Math.min(position?.y || 100, windowSize.height - 220); 
-
-  const isGlobal = selectedText === "GLOBAL_CHAT";
 
   const widgetRef = useRef(null);
   const contentRef = useRef(null);
@@ -702,11 +691,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       {/* Visually animated physics layer */}
       <motion.div
         ref={widgetRef}
-        initial={{ y: 150, width: restingWidth, height: restingWidth }}
+        initial={{ y: 150, width: restingWidth, height: restingWidth, bottom: -20, right: 30 }}
         animate={{
           y: 0,
           width: isOpen ? activeWidth : restingWidth,
           height: isOpen ? (contentH ? contentH + 2 : "auto") : restingWidth,
+          bottom: isOpen ? 20 : (isHovered ? 15 : -20),
+          right: isOpen ? 20 : 30,
         }}
         transition={{
           type: "spring", stiffness: 350, damping: 25, mass: 0.5,
@@ -716,9 +707,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           maxHeight: isOpen ? "600px" : "auto",
           x: magnetX,
           y: magnetY,
-          ...((!isOpen || isGlobal)
-             ? { bottom: isOpen ? 20 : (isHovered ? 15 : -20), right: isOpen ? 20 : 30 }
-             : { top: safeY, left: safeX })
         }}
       >
         {/* drop-shadow follows the lisse clip-path, unlike box-shadow which it would crop */}
@@ -764,7 +752,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     ? { repeat: Infinity, duration: 2.2, ease: "easeInOut" }
                     : { type: "spring", stiffness: 300, damping: 20 }),
               }}
-              className="w-[48px] h-[48px] flex m-auto items-center justify-center origin-bottom relative"
+              className="w-[48px] h-[48px] flex m-auto items-end justify-center origin-bottom relative"
               style={{ rotateX: tiltX, rotateY: tiltY, transformPerspective: 320 }}
             >
               {/* Mic error popover */}
@@ -824,8 +812,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   opacity: { type: "spring", stiffness: 400, damping: 20 },
                   layout: { type: "tween", duration: 0.55, ease: [0.22, 1, 0.36, 1] },
                 }}
-                style={{ width: 48, height: 48, maxWidth: "none", bottom: 0, left: "50%", x: "-50%" }}
-                className="absolute object-contain select-none"
+                style={{ width: 48, height: 48, maxWidth: "none" }}
+                className="object-contain select-none flex-shrink-0"
                 draggable="false"
               />
             </motion.div>
@@ -986,30 +974,45 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         </div>
         </div>
 
-        {/* Mention Dropdown UI */}
+        {/* Mention Dropdown UI — same dress code as the slash & context menus */}
         <AnimatePresence>
           {mentionQuery !== null && filteredDocs.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 10, transition: { duration: 0.1 } }}
-              className="absolute bottom-[calc(100%+8px)] left-3 w-64 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg overflow-hidden z-[110]"
-              style={{ filter: "drop-shadow(0 8px 20px rgba(0,0,0,0.13)) drop-shadow(0 2px 6px rgba(0,0,0,0.08))" }}
+              className="absolute bottom-[calc(100%+10px)] left-3 z-[110]"
             >
-              <div className="max-h-[200px] overflow-y-auto py-1 no-scrollbar">
-                {filteredDocs.map((doc, idx) => (
-                  <button
-                    key={doc.id}
-                    type="button"
-                    onClick={() => insertMention(doc)}
-                    className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${idx === mentionIndex ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]'}`}
-                  >
-                    <div className="truncate font-medium text-[var(--color-text-primary)] flex items-center gap-1.5">
-                      <span className="opacity-90 flex items-center justify-center w-4 text-[13px]">{doc.emoji || <File size={13} className="text-[var(--color-icon-muted)]" />}</span>
-                      {doc.title}
-                    </div>
-                  </button>
-                ))}
+              <div className="relative">
+                <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-56 max-h-72 overflow-y-auto no-scrollbar">
+                  {filteredDocs.map((doc, idx) => (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      onClick={() => insertMention(doc)}
+                      onMouseEnter={() => setMentionIndex(idx)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] transition-colors ${idx === mentionIndex ? "bg-[var(--color-bg-hover)]" : "hover:bg-[var(--color-bg-hover)]"}`}
+                    >
+                      <span className="flex items-center justify-center w-4 text-[13px] opacity-90 flex-shrink-0">
+                        {doc.emoji || <File size={14} className="text-[var(--color-icon-muted)]" />}
+                      </span>
+                      <span className="font-medium leading-tight truncate">{doc.title}</span>
+                    </button>
+                  ))}
+                </div>
+                {/* Tail — rounded diamond pointing down at the input, same as the mic bubble */}
+                <div style={{
+                  position: 'absolute',
+                  bottom: -5,
+                  left: 18,
+                  width: 10,
+                  height: 10,
+                  background: 'var(--color-bg-primary)',
+                  borderRight: '1px solid var(--color-border-primary)',
+                  borderBottom: '1px solid var(--color-border-primary)',
+                  borderRadius: 2,
+                  transform: 'rotate(45deg)',
+                }} />
               </div>
             </motion.div>
           )}
