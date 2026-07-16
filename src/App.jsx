@@ -4746,14 +4746,25 @@ export default function App() {
       document.execCommand("insertHTML", false, `<div class="divider-block" contenteditable="false"><button class="divider-delete-btn" contenteditable="false" title="Delete divider">${DIVIDER_TRASH}</button><div class="divider-line"></div></div><p><br></p>`);
     } else if (command.type === "checklist") {
       document.execCommand("insertUnorderedList", false, null);
-      // Add class synchronously — selection is still inside the newly created UL
+      // Add class synchronously — selection is still inside the newly created UL.
+      // On a collapsed selection, Chrome lands focusNode on the EDITOR
+      // CONTAINER itself (with focusOffset indexing into its children) rather
+      // than inside the new <ul> — closest("ul") only walks ancestors, so it
+      // misses the list entirely in that case. Check the child at the
+      // selection offset first, falling back to the ancestor walk for when
+      // focusNode really is inside the list (e.g. converting a text selection).
       const sel = window.getSelection();
       if (sel && sel.focusNode) {
-        const ul = (
-          sel.focusNode.nodeType === 3
-            ? sel.focusNode.parentElement
-            : sel.focusNode
-        ).closest("ul");
+        const container = sel.focusNode;
+        let ul = null;
+        if (container.nodeType === Node.ELEMENT_NODE) {
+          const candidate = container.childNodes[sel.focusOffset] || container.childNodes[sel.focusOffset - 1];
+          ul = candidate instanceof Element ? candidate.closest("ul") : null;
+        }
+        if (!ul) {
+          const el = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+          ul = el && el.closest("ul");
+        }
         if (ul) ul.classList.add("checklist");
       }
     }
@@ -8683,6 +8694,7 @@ export default function App() {
                   <button
                     key={cmd.id}
                     className={`w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] transition-colors ${isActive ? "bg-[var(--color-bg-hover)]" : "hover:bg-[var(--color-bg-hover)]"}`}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => executeCommand(cmd)}
                     onMouseEnter={() => setSlashState((prev) => ({ ...prev, activeIndex: index }))}
                   >

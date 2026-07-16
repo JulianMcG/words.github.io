@@ -984,7 +984,24 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               className="absolute bottom-[calc(100%+10px)] left-3 z-[110]"
             >
               <div className="relative">
-                <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-56 max-h-72 overflow-y-auto no-scrollbar">
+                {/* Tail — rendered BEHIND the card (earlier in the DOM, no z-index)
+                    so the card's opaque background paints over the half of the
+                    diamond that overlaps it; only the protruding tip peeks out
+                    below. Rendering it after the card (old order) let that
+                    overlapping half draw on TOP of the last menu row instead. */}
+                <div style={{
+                  position: 'absolute',
+                  bottom: -5,
+                  left: 18,
+                  width: 10,
+                  height: 10,
+                  background: 'var(--color-bg-primary)',
+                  borderRight: '1px solid var(--color-border-primary)',
+                  borderBottom: '1px solid var(--color-border-primary)',
+                  borderRadius: 2,
+                  transform: 'rotate(45deg)',
+                }} />
+                <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-56 max-h-72 overflow-y-auto no-scrollbar">
                   {filteredDocs.map((doc, idx) => (
                     <button
                       key={doc.id}
@@ -1000,19 +1017,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     </button>
                   ))}
                 </div>
-                {/* Tail — rounded diamond pointing down at the input, same as the mic bubble */}
-                <div style={{
-                  position: 'absolute',
-                  bottom: -5,
-                  left: 18,
-                  width: 10,
-                  height: 10,
-                  background: 'var(--color-bg-primary)',
-                  borderRight: '1px solid var(--color-border-primary)',
-                  borderBottom: '1px solid var(--color-border-primary)',
-                  borderRadius: 2,
-                  transform: 'rotate(45deg)',
-                }} />
               </div>
             </motion.div>
           )}
