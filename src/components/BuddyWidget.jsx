@@ -1,23 +1,37 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
-import { Loader2, ArrowRight, File, Check, MicOff, Mic, BrushCleaning, Lightbulb, Plus, Paintbrush, EyeOff, Eye, Trash2, Sparkles, Wand2, PenLine, ListChecks, Languages, Scissors, Smile, BookOpen, Zap, Quote } from "lucide-react";
+import { Loader2, ArrowRight, File, Check, MicOff, Mic, BrushCleaning, Lightbulb, Plus, Paintbrush, EyeOff, Eye, Trash2 } from "lucide-react";
 import { generateAIResponse } from "../utils/gemini";
 import { buddyPresetPrompt, buddyPresetLabel } from "../utils/buddyPresets";
+import { getEmojiForTitle } from "../utils/emojiMap";
+import EmojiPickerPanel from "./EmojiPicker";
 
-// Icons a custom skill can wear — stored by id so prefs stay serializable
-const SKILL_ICONS = {
-  sparkles: Sparkles,
-  wand: Wand2,
-  pen: PenLine,
-  list: ListChecks,
-  languages: Languages,
-  scissors: Scissors,
-  smile: Smile,
-  book: BookOpen,
-  zap: Zap,
-  quote: Quote,
-};
-const SKILL_ICON_IDS = Object.keys(SKILL_ICONS);
+// Skill chips wear emoji, same as pages — auto-picked from the name unless
+// the user chooses one from the native picker
+const FALLBACK_SKILL_EMOJI = "✨";
+
+// The house menu tail — the same curved swoosh the ... options menu wears.
+// Drawn AFTER the card at z-10 so its fill covers the card's border where
+// they meet: tail and menu read as one shape.
+function MenuTail({ direction = "up", side = "right", offset = 14 }) {
+  const flip = direction === "down";
+  return (
+    <svg
+      className="absolute z-10 pointer-events-none"
+      style={{ [flip ? "bottom" : "top"]: -9, [side]: offset }}
+      width="20" height="10" viewBox="0 0 20 10" fill="none"
+    >
+      <path
+        d={flip ? "M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0 Z" : "M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10 Z"}
+        fill="var(--color-bg-primary)"
+      />
+      <path
+        d={flip ? "M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0" : "M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10"}
+        fill="none" stroke="var(--color-border-primary)" strokeWidth="1"
+      />
+    </svg>
+  );
+}
 
 // Placeholder hat shapes — stand-ins until Julian's PNGs arrive
 const BUDDY_HATS = [
@@ -106,9 +120,18 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   const [isCreatingSkill, setIsCreatingSkill] = useState(false);
   const [skillName, setSkillName] = useState("");
   const [skillPrompt, setSkillPrompt] = useState("");
-  const [skillIcon, setSkillIcon] = useState("sparkles");
+  // null = auto-picked from the name; set = user chose one in the picker
+  const [skillCustomEmoji, setSkillCustomEmoji] = useState(null);
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
+  const skillPickerWrapRef = useRef(null);
   const skillNameRef = useRef(null);
   const pendingCreateSkillRef = useRef(false);
+  // Hide Buddy: hovering the red row makes him sad and trembly; clicking it
+  // dissolves him (blur + shrink + fade) before the pref flips
+  const [hideHovered, setHideHovered] = useState(false);
+  const [isHiding, setIsHiding] = useState(false);
+
+  const skillEmoji = skillCustomEmoji || getEmojiForTitle(skillName) || FALLBACK_SKILL_EMOJI;
   
   const [hasError, setHasError] = useState(false);
   const [isChangesApplied, setIsChangesApplied] = useState(false);
@@ -219,7 +242,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
 
   useEffect(() => {
     // Preload image assets to prevent "single-blink" network cache glitch on first hover
-    const expressions = ["", "blink", "smile", "smilebetween", "smileblink", "click", "error"];
+    const expressions = ["", "blink", "smile", "smilebetween", "smileblink", "click", "error", "sad"];
     expressions.forEach(key => {
       const img = new Image();
       img.src = `/buddy expressions/buddy${isDark ? 'dark' : 'light'}${key}.png`;
@@ -329,6 +352,12 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
   // Hovering above his right-click menu, Buddy smiles
   if (!hasError && !micError && !isOpen && (ctxMenu === "menu" || ctxMenu === "customize")) {
      activeExpression = blinkState === "blink" ? "smileblink" : "smile";
+  }
+
+  // ...unless the cursor is on Hide Buddy — then he's sad (and stays sad
+  // while he dissolves)
+  if (!hasError && !micError && !isOpen && ((ctxMenu === "menu" && hideHovered) || isHiding)) {
+     activeExpression = "sad";
   }
 
   // Handle @ Mentions
@@ -441,7 +470,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     ...(customSkills || []).map((s) => ({
       id: `skill:${s.id}`,
       skillId: s.id,
-      icon: SKILL_ICONS[s.icon] || Sparkles,
+      emoji: s.icon || FALLBACK_SKILL_EMOJI,
       label: s.name,
       prompt: s.prompt,
       enabled: docHasWords,
@@ -479,12 +508,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     const prompt = skillPrompt.trim();
     if (!name || !prompt || !onUpdateBuddyPrefs) return;
     onUpdateBuddyPrefs({
-      skills: [...(customSkills || []), { id: Math.random().toString(36).slice(2, 9), name, prompt, icon: skillIcon }],
+      skills: [...(customSkills || []), { id: Math.random().toString(36).slice(2, 9), name, prompt, icon: skillEmoji }],
     });
     setIsCreatingSkill(false);
     setSkillName("");
     setSkillPrompt("");
-    setSkillIcon("sparkles");
+    setSkillCustomEmoji(null);
+    setSkillPickerOpen(false);
     setTimeout(() => inputRef.current?.focus(), 250);
   };
 
@@ -492,8 +522,19 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     setIsCreatingSkill(false);
     setSkillName("");
     setSkillPrompt("");
-    setSkillIcon("sparkles");
+    setSkillCustomEmoji(null);
+    setSkillPickerOpen(false);
     setTimeout(() => inputRef.current?.focus(), 250);
+  };
+
+  const hideBuddy = () => {
+    setCtxMenu(null);
+    setHideHovered(false);
+    setIsHiding(true);
+    setTimeout(() => {
+      setIsHiding(false);
+      onUpdateBuddyPrefs?.({ hidden: true });
+    }, 480);
   };
 
   const deleteSkill = (skillId) => {
@@ -541,7 +582,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
       if (mentionQuery !== null) return; // the input's own handler owns the mention list
       if (e.key === "Escape") {
         e.preventDefault(); e.stopPropagation();
-        if (isCreatingSkill) { cancelSkill(); } else { onClose(); }
+        if (skillPickerOpen) { setSkillPickerOpen(false); }
+        else if (isCreatingSkill) { cancelSkill(); }
+        else { onClose(); }
         return;
       }
       if (isCreatingSkill) return; // the form's inputs own the rest of the keys
@@ -566,7 +609,20 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, autoLabel, isLoading, isReviewing, isCreatingSkill, input, menuIndex, mentionQuery, menuOptions.length, docHasWords]);
+  }, [isOpen, autoLabel, isLoading, isReviewing, isCreatingSkill, skillPickerOpen, input, menuIndex, mentionQuery, menuOptions.length, docHasWords]);
+
+  // The skill emoji picker closes on any click outside it
+  useEffect(() => {
+    if (!skillPickerOpen) return;
+    const onDown = (e) => {
+      if (e.target.closest?.("[data-skill-icon-btn]")) return; // the button toggles itself
+      if (skillPickerWrapRef.current && !skillPickerWrapRef.current.contains(e.target)) {
+        setSkillPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [skillPickerOpen]);
 
   const handleGenerate = async (e, preset = null) => {
     e?.preventDefault();
@@ -806,19 +862,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             onContextMenu={(e) => e.preventDefault()}
           >
             <div className="relative">
-              {/* Tail — pointing down at Buddy's old resting spot */}
-              <div style={{
-                position: 'absolute',
-                bottom: -5,
-                right: 18,
-                width: 10,
-                height: 10,
-                background: 'var(--color-bg-primary)',
-                borderRight: '1px solid var(--color-border-primary)',
-                borderBottom: '1px solid var(--color-border-primary)',
-                borderRadius: 2,
-                transform: 'rotate(45deg)',
-              }} />
               <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-44">
                 <button
                   type="button"
@@ -833,6 +876,8 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   Show Buddy
                 </button>
               </div>
+              {/* Tail — pointing down at Buddy's old resting spot */}
+              <MenuTail direction="down" side="right" offset={14} />
             </div>
           </motion.div>
         )}
@@ -844,7 +889,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
     <>
 
       {/* Invisible fixed hitbox block */}
-      {!isOpen && !suppressed && (
+      {!isOpen && !suppressed && !isHiding && (
         <div
           className="fixed z-[99] cursor-pointer print:hidden"
           style={{
@@ -953,8 +998,9 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
           y: 0,
           width: isOpen ? activeWidth : restingWidth,
           height: isOpen ? (contentH ? contentH + 2 : "auto") : restingWidth,
-          // While his right-click menu is up, Buddy rises and hovers above it
-          bottom: isOpen ? 20 : (ctxMenu === "customize" ? 156 : ctxMenu === "menu" ? 128 : (isHovered ? 15 : -20)),
+          // While his right-click menu is up, Buddy rises and hovers above it;
+          // he dissolves in place if Hide Buddy is chosen
+          bottom: isOpen ? 20 : (ctxMenu === "customize" ? 156 : (ctxMenu === "menu" || isHiding) ? 128 : (isHovered ? 15 : -20)),
           right: isOpen ? 20 : 30,
         }}
         transition={{
@@ -992,18 +1038,26 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               }}
               initial={{ opacity: 0 }}
               animate={{
-                opacity: 1,
-                x: isShaking ? [-9, 9, -7, 7, -4, 4, 0] : 0,
+                opacity: isHiding ? 0 : 1,
+                scale: isHiding ? 0.3 : 1,
+                filter: isHiding ? "blur(10px)" : "blur(0px)",
+                x: isShaking
+                  ? [-9, 9, -7, 7, -4, 4, 0]
+                  : (hideHovered && ctxMenu === "menu" ? [0, -1.2, 1.2, -1.2, 1.2, 0] : 0),
                 y: micError
                   ? -40
                   : (!isShaking && isHovered && !isClicked ? [0, -4, 0] : 0),
               }}
               exit="out"
               transition={{
-                opacity: { duration: 0.15, delay: 0.15 },
+                opacity: isHiding ? { duration: 0.4, ease: "easeIn" } : { duration: 0.15, delay: 0.15 },
+                scale: isHiding ? { duration: 0.45, ease: [0.4, 0, 1, 1] } : { type: "spring", stiffness: 300, damping: 20 },
+                filter: { duration: 0.4, ease: "easeIn" },
                 x: isShaking
                   ? { duration: 0.5, ease: "easeInOut" }
-                  : { type: "spring", stiffness: 300, damping: 20 },
+                  : (hideHovered && ctxMenu === "menu"
+                    ? { repeat: Infinity, duration: 0.5, ease: "easeInOut" }
+                    : { type: "spring", stiffness: 300, damping: 20 }),
                 y: micError
                   ? { type: "spring", stiffness: 260, damping: 22 }
                   : (!isShaking && isHovered && !isClicked
@@ -1033,21 +1087,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                          'Microphone unavailable'}
                       </span>
                     </div>
-                    {/* Tail — rounded diamond pointing down at Buddy. Lives OUTSIDE
-                        the rounded-lg bubble: the lisse squircle clip-path on that
-                        element cuts off anything protruding past its border. */}
-                    <div style={{
-                      position: 'absolute',
-                      bottom: -5,
-                      right: 15,
-                      width: 10,
-                      height: 10,
-                      background: 'var(--color-bg-primary)',
-                      borderRight: '1px solid var(--color-border-primary)',
-                      borderBottom: '1px solid var(--color-border-primary)',
-                      borderRadius: 2,
-                      transform: 'rotate(45deg)',
-                    }} />
+                    <MenuTail direction="down" side="right" offset={12} />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1120,40 +1160,34 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     transition={{ y: { type: "spring", stiffness: 440, damping: 32, mass: 0.85 }, opacity: { duration: 0.2 }, filter: { duration: 0.22 } }}
                     className="flex flex-col gap-2 px-3.5 pt-3 pb-3 w-full"
                   >
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-[13px] font-semibold text-[var(--color-text-primary)] select-none">New Skill</span>
-                      <span className="text-[11px] text-[var(--color-text-faint)] select-none">a chip that runs your prompt</span>
+                    {/* Icon + name, like a page: the emoji auto-picks from the
+                        name; clicking it opens the native picker to override */}
+                    <div className="flex items-center gap-1.5">
+                      <motion.button
+                        key={skillEmoji}
+                        type="button"
+                        initial={{ scale: 0.7, opacity: 0.5 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 24 }}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setSkillPickerOpen((v) => !v)}
+                        data-skill-icon-btn
+                        title="Change icon"
+                        className={`w-9 h-9 rounded-md flex items-center justify-center text-[20px] leading-none flex-shrink-0 transition-colors select-none ${skillPickerOpen ? "bg-[var(--color-bg-hover)]" : "hover:bg-[var(--color-bg-hover)]"}`}
+                      >
+                        {skillEmoji}
+                      </motion.button>
+                      <input
+                        ref={skillNameRef}
+                        type="text"
+                        value={skillName}
+                        onChange={(e) => setSkillName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.target.closest(".flex-col").querySelector("textarea")?.focus(); } }}
+                        placeholder="Skill name"
+                        maxLength={24}
+                        className="flex-1 min-w-0 bg-transparent outline-none text-[15px] font-semibold text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] placeholder:font-medium"
+                      />
                     </div>
-
-                    {/* Icon picker */}
-                    <div className="flex items-center gap-1">
-                      {SKILL_ICON_IDS.map((id) => {
-                        const IconOpt = SKILL_ICONS[id];
-                        const active = id === skillIcon;
-                        return (
-                          <button
-                            key={id}
-                            type="button"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => setSkillIcon(id)}
-                            className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${active ? "bg-[var(--color-bg-hover)] text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)] hover:bg-[var(--color-bg-hover)]"}`}
-                          >
-                            <IconOpt size={14} strokeWidth={2} />
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <input
-                      ref={skillNameRef}
-                      type="text"
-                      value={skillName}
-                      onChange={(e) => setSkillName(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.target.parentElement.querySelector("textarea")?.focus(); } }}
-                      placeholder="Name your skill…"
-                      maxLength={24}
-                      className="w-full bg-[var(--color-bg-hover)] rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] outline-none border border-transparent focus:border-[var(--color-border-primary)] transition-colors"
-                    />
                     <textarea
                       value={skillPrompt}
                       onChange={(e) => setSkillPrompt(e.target.value)}
@@ -1337,6 +1371,35 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
         </div>
         </div>
 
+        {/* Skill icon picker — the app's native emoji picker, floated above
+            the widget card (the card clips its own overflow) */}
+        <AnimatePresence>
+          {isCreatingSkill && skillPickerOpen && (
+            <motion.div
+              key="skill-emoji-picker"
+              ref={skillPickerWrapRef}
+              initial={{ opacity: 0, scale: 0.95, y: 6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 6 }}
+              transition={{ duration: 0.12, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute bottom-[calc(100%+10px)] left-3 z-[140]"
+              style={{ transformOrigin: "bottom left" }}
+            >
+              <EmojiPickerPanel
+                hasEmoji={!!skillCustomEmoji}
+                onSelect={(emoji) => {
+                  setSkillCustomEmoji(emoji);
+                  setSkillPickerOpen(false);
+                }}
+                onRemove={() => {
+                  setSkillCustomEmoji(null);
+                  setSkillPickerOpen(false);
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Mention Dropdown UI — same dress code as the slash & context menus */}
         <AnimatePresence>
           {mentionQuery !== null && filteredDocs.length > 0 && (
@@ -1347,23 +1410,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               className="absolute bottom-[calc(100%+10px)] left-3 z-[110]"
             >
               <div className="relative">
-                {/* Tail — rendered BEHIND the card (earlier in the DOM, no z-index)
-                    so the card's opaque background paints over the half of the
-                    diamond that overlaps it; only the protruding tip peeks out
-                    below. Rendering it after the card (old order) let that
-                    overlapping half draw on TOP of the last menu row instead. */}
-                <div style={{
-                  position: 'absolute',
-                  bottom: -5,
-                  left: 18,
-                  width: 10,
-                  height: 10,
-                  background: 'var(--color-bg-primary)',
-                  borderRight: '1px solid var(--color-border-primary)',
-                  borderBottom: '1px solid var(--color-border-primary)',
-                  borderRadius: 2,
-                  transform: 'rotate(45deg)',
-                }} />
                 <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-56 max-h-72 overflow-y-auto no-scrollbar">
                   {filteredDocs.map((doc, idx) => (
                     <button
@@ -1380,6 +1426,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     </button>
                   ))}
                 </div>
+                <MenuTail direction="down" side="left" offset={14} />
               </div>
             </motion.div>
           )}
@@ -1402,7 +1449,13 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
               if (definition && definition.opacity === 1) pillsShownRef.current = true;
             }}
             className="fixed z-[99] flex flex-wrap items-center justify-start gap-1.5 print:hidden no-scrollbar"
-            style={{ right: 20, bottom: 75, width: activeWidth, maxHeight: 112, overflowY: "auto" }}
+            style={{
+              // 10px of inner padding keeps the chips' drop-shadows inside the
+              // scroll box instead of being cut off at its edges; the position
+              // compensates so the chips sit exactly where they used to
+              right: 10, bottom: 65, width: activeWidth + 20,
+              maxHeight: 132, overflowY: "auto", padding: 10,
+            }}
           >
             {menuOptions.map((opt, i) => {
               const Icon = opt.icon;
@@ -1449,7 +1502,11 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                     } ${opt.enabled ? "" : "cursor-default"}`}
                     style={{ "--r": "9999px", "--lisse-capsule": "1" }}
                   >
-                    <Icon size={13} strokeWidth={2} className={`transition-colors duration-150 ${isActive ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"}`} />
+                    {opt.emoji ? (
+                      <span className="text-[13px] leading-none select-none">{opt.emoji}</span>
+                    ) : (
+                      <Icon size={13} strokeWidth={2} className={`transition-colors duration-150 ${isActive ? "text-[var(--color-text-primary)]" : "text-[var(--color-icon-muted)]"}`} />
+                    )}
                     {opt.label}
                   </button>
                 </div>
@@ -1475,20 +1532,6 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
             onContextMenu={(e) => e.preventDefault()}
           >
             <div className="relative">
-              {/* Tail — rendered behind the card so its overlapping half hides
-                  under the opaque background; only the tip pokes up at Buddy */}
-              <div style={{
-                position: 'absolute',
-                top: -5,
-                right: 18,
-                width: 10,
-                height: 10,
-                background: 'var(--color-bg-primary)',
-                borderLeft: '1px solid var(--color-border-primary)',
-                borderTop: '1px solid var(--color-border-primary)',
-                borderRadius: 2,
-                transform: 'rotate(45deg)',
-              }} />
               <div className="relative bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-44">
                 {ctxMenu === "menu" ? (
                   <>
@@ -1514,16 +1557,16 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                       <Plus size={14} className="text-[var(--color-icon-muted)]" />
                       New Skill
                     </button>
+                    <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
                     <button
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setCtxMenu(null);
-                        onUpdateBuddyPrefs?.({ hidden: true });
-                      }}
-                      className={ctxItemCls}
+                      onMouseEnter={() => setHideHovered(true)}
+                      onMouseLeave={() => setHideHovered(false)}
+                      onClick={hideBuddy}
+                      className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-red-500 transition-colors hover:bg-[var(--color-bg-hover)] select-none"
                     >
-                      <EyeOff size={14} className="text-[var(--color-icon-muted)]" />
+                      <EyeOff size={14} />
                       Hide Buddy
                     </button>
                   </>
@@ -1569,6 +1612,7 @@ export default function BuddyWidget({ isOpen, position, onClose, onApplyText, se
                   </div>
                 )}
               </div>
+              <MenuTail direction="up" side="right" offset={14} />
             </div>
           </motion.div>
         )}
