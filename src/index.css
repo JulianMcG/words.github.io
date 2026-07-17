@@ -328,6 +328,45 @@ html[data-theme="light"] {
   --color-highlight: #fef08a; --color-shadow-primary: rgba(0,0,0,0.1);
   --landing-ink: #252525;
 }
+/* ── Desk tint ─────────────────────────────────────────────────────────────
+ * While a desk with a color is active, the whole UI takes a subtle wash of it.
+ * App.jsx sets --desk-tint + the data-desk-tint attribute on <html>. Order
+ * matters: these live after the forced-theme overrides so the tint wins. */
+html[data-desk-tint] {
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) 3.5%, #ffffff);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) 7%, #f7f7f5);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) 5%, #f9fafb);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) 10%, #f1f1ef);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) 14%, #ebebea);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) 9%, #e8e4dd);
+}
+@media (prefers-color-scheme: dark) {
+  html[data-desk-tint] {
+    --color-bg-primary: color-mix(in srgb, var(--desk-tint) 6%, #191919);
+    --color-bg-secondary: color-mix(in srgb, var(--desk-tint) 9%, #202020);
+    --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) 8%, #2a2a2a);
+    --color-bg-hover: color-mix(in srgb, var(--desk-tint) 12%, #2e2e2e);
+    --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) 16%, #383838);
+    --color-border-primary: color-mix(in srgb, var(--desk-tint) 12%, #3d3a35);
+  }
+}
+html[data-desk-tint][data-theme="dark"] {
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) 6%, #191919);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) 9%, #202020);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) 8%, #2a2a2a);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) 12%, #2e2e2e);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) 16%, #383838);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) 12%, #3d3a35);
+}
+html[data-desk-tint][data-theme="light"] {
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) 3.5%, #ffffff);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) 7%, #f7f7f5);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) 5%, #f9fafb);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) 10%, #f1f1ef);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) 14%, #ebebea);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) 9%, #e8e4dd);
+}
+
 html[data-high-contrast="true"] {
   --color-text-muted: var(--color-text-primary);
   --color-text-faint: var(--color-text-primary);

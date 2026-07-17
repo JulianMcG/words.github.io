@@ -59,7 +59,9 @@ import {
   Clock,
   RotateCcw,
   Minus,
-  Search
+  Search,
+  LampDesk,
+  Shapes
 } from "lucide-react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, writeBatch } from "./firebase";
@@ -74,7 +76,7 @@ import EmojiPickerPanel from "./components/EmojiPicker";
 import { generateFolderName, generateDocTitle } from "./utils/gemini";
 import { exportToGoogleDocs } from "./utils/googleDocs";
 import FolderIconPicker from "./components/FolderIconPicker";
-import { FolderIcon } from "./utils/folderIcons";
+import { FolderIcon, ICON_COMPONENTS, FOLDER_ICONS } from "./utils/folderIcons";
 import SpotlightSearch from "./components/SpotlightSearch";
 import TooltipLayer from "./components/TooltipLayer";
 import { getIconForFolderName } from "./utils/folderIconMap";
@@ -1603,6 +1605,15 @@ const applyImageContrast = (img) => {
   }
 };
 
+// ── Desks (Arc-style spaces) ─────────────────────────────────────────────────
+// Each desk is an independent workspace: its own pins, folders and pages.
+// The desk's color becomes the app-wide accent + tint while it's active.
+// Rainbow order; a desk with color null uses the default accent, untinted.
+const DESK_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#a855f7', '#ec4899'];
+const DEFAULT_ACCENT = '#E8572A';
+const DEFAULT_DESK_ID = 'desk-home';
+const makeDefaultDesk = () => ({ id: DEFAULT_DESK_ID, name: 'Home', emoji: null, color: null });
+
 export default function App() {
   const { docId: urlDocId } = useParams();
   const navigate = useNavigate();
@@ -1721,6 +1732,33 @@ export default function App() {
     }
     return [];
   });
+  const [desks, setDesks] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("words_desks") || "null");
+      if (Array.isArray(saved) && saved.length > 0) return saved;
+    } catch (e) {
+      console.error("Failed to parse local storage desks:", e);
+    }
+    return [makeDefaultDesk()];
+  });
+  const [activeDeskId, setActiveDeskId] = useState(() => localStorage.getItem("words_active_desk") || DEFAULT_DESK_ID);
+  // -1 | 1 — which side the sidebar content slides in from on the next desk switch
+  const deskSlideDirRef = useRef(1);
+  // Per-desk memory of the last open page, so switching back feels like returning
+  const deskLastDocRef = useRef((() => {
+    try { return JSON.parse(localStorage.getItem("words_desk_last_doc") || "{}"); } catch { return {}; }
+  })());
+  const [deskCustomizeOpen, setDeskCustomizeOpen] = useState(false);
+  const [deskIconPicker, setDeskIconPicker] = useState(null); // null | 'emoji' | 'icon'
+  const [deskDeleteArmed, setDeskDeleteArmed] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  // 0 → 1 fill of the "swipe past the last desk to create one" indicator
+  const [newDeskProgress, setNewDeskProgress] = useState(0);
+  const deskNameInputRef = useRef(null);
+  // The desk an item (doc or group) belongs to. Items whose deskId is missing or
+  // refers to a deleted desk fall back to the first desk, so nothing is ever lost.
+  const activeDesk = desks.find(k => k.id === activeDeskId) || desks[0];
+  const deskOf = (item) => (item?.deskId && desks.some(k => k.id === item.deskId)) ? item.deskId : (desks[0]?.id || DEFAULT_DESK_ID);
   const [activeDocId, setActiveDocId] = useState(() => {
     return urlDocId || localStorage.getItem("words_active_doc") || "1";
   });
@@ -1825,6 +1863,8 @@ export default function App() {
   const ownLastUpdatedRef = useRef(null);
   const userRef = useRef(null);
   const groupsRef = useRef([]);
+  const desksRef = useRef(desks);
+  const activeDeskIdRef = useRef(activeDeskId);
   const lockPasscodeRef = useRef(null);
   const pointerDragRef = useRef(null); // { docId, idsToMove, clone, offsetY }
   const lastReorderRef = useRef(null); // prevents duplicate reorder state updates
@@ -1893,6 +1933,8 @@ export default function App() {
 
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { groupsRef.current = groups; }, [groups]);
+  useEffect(() => { desksRef.current = desks; }, [desks]);
+  useEffect(() => { activeDeskIdRef.current = activeDeskId; }, [activeDeskId]);
   useEffect(() => { lockPasscodeRef.current = lockPasscode; }, [lockPasscode]);
   useEffect(() => { activeDocIdRef.current = activeDocId; }, [activeDocId]);
   useEffect(() => {
@@ -2151,8 +2193,12 @@ export default function App() {
 
   // Option+ArrowUp/Down: navigate to the prev/next document in visual sidebar order
   const switchToAdjacentDoc = useCallback((direction) => {
-    const allDocs = docsRef.current;
-    const currentGroups = groupsRef.current;
+    // Navigation stays inside the active desk — each desk is its own workspace
+    const ks = desksRef.current;
+    const deskIdNow = ks.some(k => k.id === activeDeskIdRef.current) ? activeDeskIdRef.current : ks[0]?.id;
+    const inDesk = (item) => ((item?.deskId && ks.some(k => k.id === item.deskId)) ? item.deskId : ks[0]?.id) === deskIdNow;
+    const allDocs = docsRef.current.filter(inDesk);
+    const currentGroups = groupsRef.current.filter(inDesk);
 
     const pinned = allDocs.filter(d => d.isPinned).sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
     const regular = allDocs.filter(d => !d.isPinned);
@@ -2350,6 +2396,27 @@ export default function App() {
 
   useEffect(() => {
     try {
+      localStorage.setItem("words_desks", JSON.stringify(desks));
+    } catch (error) {
+      console.warn("Failed to save desks to local storage.", error);
+    }
+  }, [desks]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("words_active_desk", activeDeskId);
+    } catch (error) { /* private mode */ }
+  }, [activeDeskId]);
+
+  // If the active desk vanished (cloud merge, deletion race), fall back to the first
+  useEffect(() => {
+    if (desks.length > 0 && !desks.some(k => k.id === activeDeskId)) {
+      setActiveDeskId(desks[0].id);
+    }
+  }, [desks, activeDeskId]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem("words_active_doc", activeDocId);
     } catch (error) {
       console.warn("Failed to save active doc state to local storage.", error);
@@ -2363,12 +2430,46 @@ export default function App() {
     }
   }, [activeDocId]);
 
-  // If the active doc no longer exists (stale bookmark), fall back to first available doc
+  // If the active doc no longer exists (stale bookmark), fall back to the first
+  // doc of the active desk, then to any doc at all
   useEffect(() => {
     if (docs.length > 0 && !docs.find(d => d.id === activeDocId)) {
-      setActiveDocId(docs[0].id);
+      const inDesk = docs.find(d => deskOf(d) === (activeDesk?.id || DEFAULT_DESK_ID));
+      setActiveDocId((inDesk || docs[0]).id);
     }
   }, [docs]);
+
+  // The active desk always follows the active doc — opening a page from search,
+  // a shared link, or trash restore lands you on the desk it lives in.
+  useEffect(() => {
+    const d = docs.find(x => x.id === activeDocId);
+    if (!d) return;
+    const home = deskOf(d);
+    if (home !== (activeDesk?.id || DEFAULT_DESK_ID)) setActiveDeskId(home);
+  }, [activeDocId, docs, desks]);
+
+  // Remember the last open page per desk, so switching back feels like returning
+  useEffect(() => {
+    const d = docs.find(x => x.id === activeDocId);
+    if (!d) return;
+    deskLastDocRef.current[deskOf(d)] = activeDocId;
+    try { localStorage.setItem("words_desk_last_doc", JSON.stringify(deskLastDocRef.current)); } catch { /* private mode */ }
+  }, [activeDocId]);
+
+  // The desk's color drives the app-wide accent AND a subtle tint of the
+  // whole UI (see the data-desk-tint rules in index.css)
+  useEffect(() => {
+    const root = document.documentElement;
+    if (activeDesk?.color) {
+      root.style.setProperty('--color-accent', activeDesk.color);
+      root.style.setProperty('--desk-tint', activeDesk.color);
+      root.setAttribute('data-desk-tint', '');
+    } else {
+      root.style.removeProperty('--color-accent');
+      root.style.removeProperty('--desk-tint');
+      root.removeAttribute('data-desk-tint');
+    }
+  }, [activeDesk?.color]);
 
   // Handle Shared Document Links
   useEffect(() => {
@@ -2397,6 +2498,7 @@ export default function App() {
             emoji: data.emoji || null,
             hasCustomEmoji: data.hasCustomEmoji || false,
             groupId: null,
+            deskId: activeDeskIdRef.current,
             isLocked: false,
             editHistory: data.editHistory || [],
             sharedFrom: data.sharedByName || null,
@@ -2441,6 +2543,7 @@ export default function App() {
 
         localStorage.setItem("words_local_backup_docs", JSON.stringify(docs));
         localStorage.setItem("words_local_backup_groups", JSON.stringify(groups));
+        localStorage.setItem("words_local_backup_desks", JSON.stringify(desks));
         localStorage.setItem("words_local_backup_trash", JSON.stringify(trashedDocsRef.current));
         if (lockPasscode) {
           localStorage.setItem("words_local_backup_passcode", lockPasscode);
@@ -2465,6 +2568,13 @@ export default function App() {
         ];
 
         const parsedGroups = savedGroups ? JSON.parse(savedGroups) : [];
+        const savedDesks = localStorage.getItem("words_local_backup_desks");
+        const parsedDesks = (() => {
+          try {
+            const p = savedDesks ? JSON.parse(savedDesks) : null;
+            return Array.isArray(p) && p.length > 0 ? p : [makeDefaultDesk()];
+          } catch { return [makeDefaultDesk()]; }
+        })();
         const nextId = finalDocs[0]?.id || "1";
         const restoredTrash = savedTrash ? JSON.parse(savedTrash) : [];
 
@@ -2472,9 +2582,12 @@ export default function App() {
         docsRef.current = finalDocs;
         prevActiveDocIdRef.current = nextId;
         trashedDocsRef.current = restoredTrash;
+        desksRef.current = parsedDesks;
 
         setDocs(finalDocs);
         setGroups(parsedGroups);
+        setDesks(parsedDesks);
+        setActiveDeskId(parsedDesks[0].id);
         setLockPasscode(savedPasscode || null);
         setActiveDocId(nextId);
         setTrashedDocs(restoredTrash);
@@ -2613,6 +2726,10 @@ export default function App() {
         lastKnownCloudDocCountRef.current = docs.length;
       }
       if (data.groups) setGroups(data.groups);
+      if (Array.isArray(data.desks) && data.desks.length > 0) {
+        desksRef.current = data.desks;
+        setDesks(data.desks);
+      }
       if (data.buddyPrefs) setBuddyPrefs((prev) => ({ ...prev, ...data.buddyPrefs }));
       setLockPasscode(data.lockPasscode || null);
       if (data.trashedDocs) {
@@ -2660,6 +2777,7 @@ export default function App() {
               applyingSnapshotRef.current = true;
               const stashMeta = {
                 groups: Array.isArray(stash.groups) ? stash.groups : [],
+                desks: Array.isArray(stash.desks) && stash.desks.length > 0 ? stash.desks : desksRef.current,
                 activeDocId: null,
                 lockPasscode: stash.lockPasscode || null,
                 trashedDocs: stash.trashedDocs || [],
@@ -2714,6 +2832,7 @@ export default function App() {
           const writeTime = new Date().toISOString();
           const migrationMeta = {
             groups: data.groups || [],
+            desks: Array.isArray(data.desks) && data.desks.length > 0 ? data.desks : desksRef.current,
             activeDocId: data.activeDocId || data.docs[0]?.id || null,
             lockPasscode: data.lockPasscode || null,
             trashedDocs: data.trashedDocs || [],
@@ -2769,8 +2888,10 @@ export default function App() {
         const candidateDocs = localDocs.length > 0 ? localDocs : docsRef.current;
         const docsForCloud = candidateDocs.length > 0 ? candidateDocs : [{ id: "1", title: "", content: "<p><br></p>" }];
         const writeTime = new Date().toISOString();
+        const localDesks = (() => { try { return JSON.parse(localStorage.getItem("words_desks") || "[]"); } catch { return []; } })();
         const meta = {
           groups: localGroups,
+          desks: localDesks.length > 0 ? localDesks : desksRef.current,
           activeDocId: actId || activeDocId,
           lockPasscode: lp || lockPasscode,
           trashedDocs: trashedDocsRef.current,
@@ -2844,7 +2965,7 @@ export default function App() {
           {
             type: 'set',
             ref: doc(db, "users", user.uid),
-            data: { groups, activeDocId, lockPasscode, trashedDocs: trashedDocsRef.current, buddyPrefs: buddyPrefsRef.current, lastUpdated: writeTime, schemaVersion: 2 },
+            data: { groups, desks, activeDocId, lockPasscode, trashedDocs: trashedDocsRef.current, buddyPrefs: buddyPrefsRef.current, lastUpdated: writeTime, schemaVersion: 2 },
           },
           ...changedDocs.map(d => ({ type: 'set', ref: doc(db, "users", user.uid, "docs", d.id), data: d })),
           ...deletedIds.map(id => ({ type: 'delete', ref: doc(db, "users", user.uid, "docs", id) })),
@@ -2865,7 +2986,7 @@ export default function App() {
 
     const timeout = setTimeout(syncData, 500);
     return () => clearTimeout(timeout);
-  }, [docs, groups, activeDocId, lockPasscode, trashedDocs, buddyPrefs, user, syncVersion]);
+  }, [docs, groups, desks, activeDocId, lockPasscode, trashedDocs, buddyPrefs, user, syncVersion]);
 
   // Auto-name "New Folder" groups once they accumulate 2+ docs
   useEffect(() => {
@@ -3029,6 +3150,7 @@ export default function App() {
             localStorage.setItem(`words_pending_${userRef.current.uid}`, JSON.stringify({
               docs: currentDocs,
               groups: groupsRef.current,
+              desks: desksRef.current,
               activeDocId,
               lockPasscode: lockPasscodeRef.current,
               trashedDocs: trashedDocsRef.current,
@@ -4015,6 +4137,7 @@ export default function App() {
       emoji: null,
       hasCustomEmoji: false,
       groupId: targetGroupId,
+      deskId: activeDesk?.id || DEFAULT_DESK_ID,
       textAlign: "left",
       hideTitle: false,
       fullWidth: false,
@@ -4082,7 +4205,7 @@ export default function App() {
     // Only AI-name immediately if 2+ docs are being added; otherwise stay "New Folder"
     const initialName = has2PlusDocs ? "" : "New Folder";
     const initialIsNaming = has2PlusDocs;
-    setGroups(prev => [{ id: newGroupId, name: initialName, isNaming: initialIsNaming, color: randomColor, isCollapsed: false }, ...prev]);
+    setGroups(prev => [{ id: newGroupId, name: initialName, isNaming: initialIsNaming, color: randomColor, isCollapsed: false, deskId: activeDesk?.id || DEFAULT_DESK_ID }, ...prev]);
 
     if (has2PlusDocs) nameGroupWithAI(newGroupId, selectedTitles);
 
@@ -4106,6 +4229,281 @@ export default function App() {
     setGroups(prev => prev.filter(g => g.id !== id));
   };
 
+  // ── Desk actions ───────────────────────────────────────────────────────────
+  const createBlankDocInDesk = (deskId) => {
+    const newId = Math.random().toString(36).substring(2, 9);
+    const newDoc = {
+      id: newId,
+      title: "",
+      content: "<p><br></p>",
+      isPinned: false,
+      emoji: null,
+      hasCustomEmoji: false,
+      groupId: null,
+      deskId,
+      textAlign: "left",
+      hideTitle: false,
+      fullWidth: false,
+      lineSpacing: "1.5",
+      createdAt: new Date().toISOString(),
+    };
+    const newDocs = [newDoc, ...docsRef.current];
+    docsRef.current = newDocs;
+    setDocs(newDocs);
+    return newId;
+  };
+
+  const closeDeskPopovers = () => {
+    setDeskCustomizeOpen(false);
+    setDeskIconPicker(null);
+    setDeskDeleteArmed(false);
+    setPlusMenuOpen(false);
+  };
+
+  // Anchor the desk options popover off the right edge of the desk title row.
+  // The row is queried by desk id — during a desk-switch slide two rows exist
+  // (the exiting clone and the entering one), and only the id disambiguates.
+  const openDeskOptionsAt = (deskId) => {
+    const row = document.querySelector(`[data-desk-header-id="${deskId}"]`);
+    const rect = row?.getBoundingClientRect();
+    setDeskIconPicker(null);
+    setDeskDeleteArmed(false);
+    setPlusMenuOpen(false);
+    setDeskCustomizeOpen({
+      x: Math.min((rect?.right ?? 250) + 12, window.innerWidth - 288),
+      y: Math.max(8, (rect?.top ?? 88) - 6),
+    });
+  };
+
+  const openDeskCustomize = () => {
+    if (deskCustomizeOpen) { closeDeskPopovers(); return; }
+    openDeskOptionsAt(activeDesk?.id || DEFAULT_DESK_ID);
+  };
+
+  const switchDesk = (deskId, dir = null) => {
+    const currentId = activeDesk?.id || DEFAULT_DESK_ID;
+    if (deskId === currentId || !desks.some(k => k.id === deskId)) return;
+    if (dir === null) {
+      const from = desks.findIndex(k => k.id === currentId);
+      const to = desks.findIndex(k => k.id === deskId);
+      dir = to >= from ? 1 : -1;
+    }
+    deskSlideDirRef.current = dir;
+    closeDeskPopovers();
+    flushCurrentDoc();
+    sidebarScrollRef.current?.scrollTo({ top: 0 });
+    // Return to the page that was last open on that desk
+    const deskItems = docsRef.current.filter(d => deskOf(d) === deskId);
+    const remembered = deskItems.find(d => d.id === deskLastDocRef.current[deskId] && !d.isLocked);
+    const target = remembered || deskItems.find(d => !d.isLocked);
+    const targetId = target ? target.id : createBlankDocInDesk(deskId);
+    setActiveDeskId(deskId);
+    setActiveDocId(targetId);
+    setSelectedDocIds([targetId]);
+  };
+
+  const createDesk = () => {
+    flushCurrentDoc();
+    const id = Math.random().toString(36).substring(2, 9);
+    // Colorless desks use the default accent, so they don't consume a rainbow color
+    const used = new Set(desks.map(k => k.color || DEFAULT_ACCENT));
+    const color = DESK_COLORS.find(c => !used.has(c)) || DESK_COLORS[desks.length % DESK_COLORS.length];
+    const nextDesks = [...desks, { id, name: "New Desk", emoji: null, color, createdAt: new Date().toISOString() }];
+    desksRef.current = nextDesks;
+    setDesks(nextDesks);
+    const docId = createBlankDocInDesk(id);
+    deskSlideDirRef.current = 1;
+    closeDeskPopovers();
+    sidebarScrollRef.current?.scrollTo({ top: 0 });
+    setSidebarContextMenu({ isOpen: false, x: 0, y: 0 });
+    setActiveDeskId(id);
+    setActiveDocId(docId);
+    setSelectedDocIds([docId]);
+    setNewDeskProgress(0);
+    // Launch straight into the desk options with the name ready to type over
+    setTimeout(() => {
+      openDeskOptionsAt(id);
+      setTimeout(() => deskNameInputRef.current?.select(), 80);
+    }, 380); // after the slide-in settles
+  };
+
+  const updateDesk = (id, updates) => {
+    const next = desksRef.current.map(k => k.id === id ? { ...k, ...updates } : k);
+    desksRef.current = next;
+    setDesks(next);
+  };
+
+  const deleteDesk = (id) => {
+    if (desks.length <= 1) return;
+    const idx = desks.findIndex(k => k.id === id);
+    if (idx === -1) return;
+    const nextDesks = desks.filter(k => k.id !== id);
+    // Non-empty pages of a deleted desk stay recoverable from the trash for 30 days
+    const orphans = docsRef.current.filter(d => deskOf(d) === id);
+    const keptDocs = docsRef.current.filter(d => deskOf(d) !== id);
+    const trashable = orphans.filter(d => d.title?.trim() || getTextPreview(d.content || ''));
+    if (trashable.length > 0) {
+      const now = Date.now();
+      const nextTrash = [...trashable.map(d => ({ ...d, deletedAt: now })), ...trashedDocsRef.current];
+      trashedDocsRef.current = nextTrash;
+      setTrashedDocs(nextTrash);
+    }
+    docsRef.current = keptDocs;
+    setDocs(keptDocs);
+    setGroups(prev => prev.filter(g => deskOf(g) !== id));
+    desksRef.current = nextDesks;
+    setDesks(nextDesks);
+    delete deskLastDocRef.current[id];
+    closeDeskPopovers();
+    sidebarScrollRef.current?.scrollTo({ top: 0 });
+    // Land on the neighbor desk
+    const neighbor = nextDesks[Math.max(0, idx - 1)];
+    deskSlideDirRef.current = idx === 0 ? 1 : -1;
+    const inNeighbor = (d) => ((d.deskId && nextDesks.some(x => x.id === d.deskId)) ? d.deskId : nextDesks[0].id) === neighbor.id;
+    const neighborDocs = keptDocs.filter(inNeighbor);
+    const remembered = neighborDocs.find(d => d.id === deskLastDocRef.current[neighbor.id] && !d.isLocked);
+    const target = remembered || neighborDocs.find(d => !d.isLocked);
+    const targetId = target ? target.id : createBlankDocInDesk(neighbor.id);
+    setActiveDeskId(neighbor.id);
+    setActiveDocId(targetId);
+    setSelectedDocIds([targetId]);
+  };
+
+  // Latest desk actions for the native swipe listeners (bound once on mount)
+  const deskActionsRef = useRef({});
+  deskActionsRef.current = { switchDesk, createDesk };
+
+  // ── Desk swipe: two-finger trackpad swipe or touch-drag anywhere on the
+  // sidebar. Crossing the threshold switches desks; swiping past the last desk
+  // fills the new-desk indicator — when it fills, a new desk is created.
+  // After a switch, momentum-tail wheel events are swallowed, but a fresh
+  // acceleration spike re-arms immediately so quick chained swipes register.
+  const deskSwipeRef = useRef({ amount: 0, blocked: false, lastAbs: 0, idleTimer: null, touchX: null, touchY: null, touchIntent: null, touchConsumed: false });
+  useEffect(() => {
+    const el = sidebarInnerRef.current;
+    if (!el) return;
+    const SWITCH_AT = 70;        // px of horizontal travel to switch desks
+    const NEW_DESK_TRAVEL = 220; // extra px past the last desk to fill the indicator
+
+    const endGesture = () => {
+      const s = deskSwipeRef.current;
+      s.amount = 0;
+      s.blocked = false;
+      s.lastAbs = 0;
+      setNewDeskProgress(0);
+    };
+    const scheduleIdleReset = () => {
+      const s = deskSwipeRef.current;
+      clearTimeout(s.idleTimer);
+      s.idleTimer = setTimeout(endGesture, 160);
+    };
+
+    // amount > 0 → toward the next desk (fingers moving left), < 0 → previous.
+    // Returns true when the swipe did something (switch/create).
+    const applyAmount = (s) => {
+      const ks = desksRef.current;
+      let idx = ks.findIndex(k => k.id === activeDeskIdRef.current);
+      if (idx === -1) idx = 0;
+      if (s.amount <= -SWITCH_AT) {
+        if (idx > 0) {
+          setNewDeskProgress(0);
+          deskActionsRef.current.switchDesk(ks[idx - 1].id, -1);
+          return true;
+        }
+        s.amount = -SWITCH_AT; // wall before the first desk
+      } else if (s.amount >= SWITCH_AT && idx < ks.length - 1) {
+        setNewDeskProgress(0);
+        deskActionsRef.current.switchDesk(ks[idx + 1].id, 1);
+        return true;
+      } else if (s.amount > SWITCH_AT * 0.4 && idx === ks.length - 1) {
+        // Past the last desk — the further the swipe, the fuller the indicator
+        const p = Math.min(1, Math.max(0, (s.amount - SWITCH_AT * 0.4) / NEW_DESK_TRAVEL));
+        setNewDeskProgress(p);
+        if (p >= 1) {
+          setNewDeskProgress(0);
+          deskActionsRef.current.createDesk();
+          return true;
+        }
+      } else {
+        setNewDeskProgress(0);
+      }
+      return false;
+    };
+
+    const onWheel = (e) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return; // it's a vertical scroll
+      e.preventDefault();
+      const s = deskSwipeRef.current;
+      scheduleIdleReset();
+      const abs = Math.abs(e.deltaX);
+      if (s.blocked) {
+        // Swallow the momentum tail of the swipe that just switched. A fresh
+        // gesture shows up as an acceleration spike (or the tail decays away).
+        const spike = abs > 18 && abs > s.lastAbs * 2.2;
+        const decayed = abs <= 2;
+        if (!spike && !decayed) {
+          s.lastAbs = abs;
+          return;
+        }
+        s.blocked = false;
+        s.amount = 0;
+      }
+      s.lastAbs = abs;
+      s.amount += e.deltaX;
+      if (applyAmount(s)) {
+        s.blocked = true;
+        s.amount = 0;
+      }
+    };
+
+    const onTouchStart = (e) => {
+      const s = deskSwipeRef.current;
+      const t = e.touches[0];
+      s.touchX = t.clientX;
+      s.touchY = t.clientY;
+      s.touchIntent = null;
+      s.touchConsumed = false;
+      s.amount = 0;
+    };
+    const onTouchMove = (e) => {
+      const s = deskSwipeRef.current;
+      if (s.touchX == null || s.touchConsumed) return;
+      const t = e.touches[0];
+      const dx = t.clientX - s.touchX;
+      const dy = t.clientY - s.touchY;
+      if (s.touchIntent === null) {
+        if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+        s.touchIntent = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+      }
+      if (s.touchIntent !== 'h') return;
+      e.preventDefault();
+      s.amount = -dx; // finger left = next desk (content follows the finger)
+      if (applyAmount(s)) s.touchConsumed = true;
+    };
+    const onTouchEnd = () => {
+      const s = deskSwipeRef.current;
+      s.touchX = null;
+      s.touchIntent = null;
+      s.touchConsumed = false;
+      s.amount = 0;
+      setNewDeskProgress(0);
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd);
+    el.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      clearTimeout(deskSwipeRef.current.idleTimer);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, []);
+
   const deleteDoc = (e, id) => {
     e.stopPropagation();
     const docToDelete = docsRef.current.find(d => d.id === id);
@@ -4122,26 +4520,34 @@ export default function App() {
     deletedDocInfoRef.current = snapshot;
     setDeletedDocInfo(snapshot);
     setDocs((prev) => {
-      if (prev.length === 1) {
-        const freshDoc = {
-          id: "1",
+      const victim = prev.find((d) => d.id === id);
+      const victimDesk = victim ? deskOf(victim) : (activeDesk?.id || DEFAULT_DESK_ID);
+      let newDocs = prev.filter((d) => d.id !== id);
+      let freshId = null;
+      if (!newDocs.some((d) => deskOf(d) === victimDesk)) {
+        // A desk never goes empty — deleting its last page leaves a fresh one behind
+        freshId = newDocs.length === 0 ? "1" : Math.random().toString(36).substring(2, 9);
+        newDocs = [{
+          id: freshId,
           title: "",
           content: "<p><br></p>",
           isPinned: false,
           emoji: null,
           hasCustomEmoji: false,
           groupId: null,
+          deskId: victimDesk,
           createdAt: new Date().toISOString(),
-        };
-        setActiveDocId("1");
-        if (titleRef.current) titleRef.current.textContent = "";
-        if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
-        docsRef.current = [freshDoc];
-        return [freshDoc];
+        }, ...newDocs];
       }
-      const newDocs = prev.filter((d) => d.id !== id);
       if (activeDocId === id) {
-        setActiveDocId(newDocs[0].id);
+        const nextDoc = freshId ? newDocs.find((d) => d.id === freshId)
+          : (newDocs.find((d) => deskOf(d) === victimDesk) || newDocs[0]);
+        setActiveDocId(nextDoc.id);
+        if (freshId) {
+          // Same-id replacement can't retrigger the load effect — set the DOM directly
+          if (titleRef.current) titleRef.current.textContent = "";
+          if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
+        }
       }
       docsRef.current = newDocs;
       return newDocs;
@@ -4456,7 +4862,10 @@ export default function App() {
       if (lastSelectedIdx !== -1 && currentIdx !== -1) {
         const start = Math.min(lastSelectedIdx, currentIdx);
         const end = Math.max(lastSelectedIdx, currentIdx);
-        const rangeIds = docs.slice(start, end + 1).map(d => d.id);
+        // Only sweep up docs on the active desk — the others aren't visible
+        const rangeIds = docs.slice(start, end + 1)
+          .filter(d => deskOf(d) === (activeDesk?.id || DEFAULT_DESK_ID))
+          .map(d => d.id);
 
         // Add rangeIds to existing selection, making sure not to duplicate
         setSelectedDocIds(prev => [...new Set([...prev, ...rangeIds])]);
@@ -6009,16 +6418,24 @@ export default function App() {
         setUserMenuOpen(false);
         setCloudSubmenu(null);
         setTrashHoverDocId(null);
+        setDeskCustomizeOpen(false);
+        setDeskIconPicker(null);
+        setDeskDeleteArmed(false);
+        setPlusMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const pinnedDocs = docs.filter((d) => d.isPinned).sort((a, b) => (a.pinnedAt || 0) - (b.pinnedAt || 0));
-  const regularDocs = docs.filter((d) => !d.isPinned);
+  // Everything the sidebar shows lives on the active desk — desks are fully
+  // independent workspaces (own pins, folders and pages).
+  const deskDocs = docs.filter((d) => deskOf(d) === (activeDesk?.id || DEFAULT_DESK_ID));
+  const deskGroups = groups.filter((g) => deskOf(g) === (activeDesk?.id || DEFAULT_DESK_ID));
+  const pinnedDocs = deskDocs.filter((d) => d.isPinned).sort((a, b) => (a.pinnedAt || 0) - (b.pinnedAt || 0));
+  const regularDocs = deskDocs.filter((d) => !d.isPinned);
   // A document is considered "ungrouped" if it has no groupId, OR if its groupId doesn't exist in the current groups array.
-  const ungroupedDocs = regularDocs.filter((d) => !d.groupId || !groups.some(g => g.id === d.groupId));
+  const ungroupedDocs = regularDocs.filter((d) => !d.groupId || !deskGroups.some(g => g.id === d.groupId));
   const activeDoc = docs.find((d) => d.id === activeDocId) || docs[0];
   const docFont = activeDoc?.docFont || 'sans';
 
@@ -7114,7 +7531,22 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              <>
+              /* Desk switches slide the whole workspace sideways, Arc-style */
+              <AnimatePresence mode="popLayout" initial={false} custom={deskSlideDirRef.current}>
+              <motion.div
+                key={`desk-${activeDesk?.id || DEFAULT_DESK_ID}`}
+                className="flex-1 flex flex-col min-h-0"
+                custom={deskSlideDirRef.current}
+                variants={{
+                  enter: (dir) => ({ x: `${dir * 100}%` }),
+                  center: { x: 0 },
+                  exit: (dir) => ({ x: `${dir * -100}%` }),
+                }}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ x: { duration: 0.32, ease: [0.22, 1, 0.36, 1] } }}
+              >
                 {/* Sticky Header Zone */}
                 <div className="sticky top-0 z-20 bg-[var(--color-bg-secondary)] pb-1 pt-0 -mt-2">
                   <div className={`absolute top-full left-0 right-0 h-8 pointer-events-none transition-opacity duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isSidebarScrolled ? 'opacity-100' : 'opacity-0'}`}>
@@ -7215,13 +7647,57 @@ export default function App() {
                   )}
                   </AnimatePresence>
 
+                  {/* Desk title — Arc-style space name under the pinned pages.
+                      Hidden while there's only the untouched default desk so the
+                      sidebar stays clean until desks are actually in use. */}
+                  <AnimatePresence initial={false}>
+                  {desks.length > 1 && (
+                    <motion.div
+                      key="desk-title-row"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ type: "spring", stiffness: 450, damping: 40, mass: 1 }}
+                      style={{ overflow: "hidden" }}
+                    >
+                      <div
+                        data-desk-header-id={activeDesk?.id || DEFAULT_DESK_ID}
+                        data-sidebar-item
+                        className="words-context-menu group/desk mt-1 mb-0.5 px-3 py-[6px] rounded-md flex items-center gap-2.5 cursor-pointer select-none hover:bg-[var(--color-bg-hover)] transition-colors"
+                        onClick={openDeskCustomize}
+                        title="Desk options"
+                      >
+                        <div className="w-5 h-5 flex-shrink-0 flex items-center justify-center">
+                          {activeDesk?.emoji ? (
+                            <span className="text-[14px] leading-none">{activeDesk.emoji}</span>
+                          ) : activeDesk?.icon ? (
+                            <FolderIcon name={activeDesk.icon} size={14} color={activeDesk?.color || 'var(--color-icon-muted)'} />
+                          ) : (
+                            <span
+                              className="w-[9px] h-[9px] rounded-full"
+                              style={{ background: activeDesk?.color || DEFAULT_ACCENT }}
+                            />
+                          )}
+                        </div>
+                        <span
+                          className="text-[12px] font-bold truncate"
+                          style={{ color: activeDesk?.color || 'var(--color-text-primary)' }}
+                        >
+                          {activeDesk?.name || 'Desk'}
+                        </span>
+                        <ChevronRight size={11} className="flex-shrink-0 opacity-0 group-hover/desk:opacity-100 transition-opacity text-[var(--color-text-muted)]" />
+                      </div>
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
+
                 </div>
 
                 <div className="flex-1 flex flex-col relative z-0 mt-2">
                   {/* Document Groups */}
                   <div className="space-y-[2px]">
                     <AnimatePresence initial={false}>
-                    {groups.map((group) => {
+                    {deskGroups.map((group) => {
                       const groupDocs = regularDocs.filter((d) => d.groupId === group.id);
                       return (
                         <motion.div
@@ -7428,7 +7904,7 @@ export default function App() {
 
                   {/* Divider between folders and New Page — only when folders exist */}
                   <AnimatePresence initial={false}>
-                    {groups.length > 0 && (
+                    {deskGroups.length > 0 && (
                       <motion.div
                         key="folder-divider"
                         initial={{ opacity: 0 }}
@@ -7486,7 +7962,8 @@ export default function App() {
 
                   <div className="h-24 w-full flex-shrink-0" data-sidebar-empty-zone onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
                 </div>
-              </>
+              </motion.div>
+              </AnimatePresence>
             )}
           </div>
 
@@ -7495,6 +7972,144 @@ export default function App() {
             <GradualBlur position="bottom" height="100%" strength={0.4} divCount={5} zIndex={0} />
             <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-secondary)] to-transparent z-10" />
           </div>
+
+          {/* Desk switcher — Arc-style dots, bottom middle of the sidebar */}
+          <AnimatePresence>
+          {desks.length > 1 && (
+            <motion.div
+              key="desk-dots"
+              className="absolute bottom-4 left-1/2 z-40 flex items-center gap-1.5"
+              style={{ x: '-50%' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              {desks.map((k) => {
+                const isActiveDot = k.id === (activeDesk?.id || DEFAULT_DESK_ID);
+                return (
+                  <button
+                    key={k.id}
+                    onClick={() => switchDesk(k.id)}
+                    className="relative flex items-center justify-center w-[30px] h-[30px] rounded-md hover:bg-[var(--color-bg-hover-strong)] transition-colors"
+                    title={k.name || 'Desk'}
+                  >
+                    {k.emoji ? (
+                      <span
+                        className="leading-none select-none"
+                        style={{ fontSize: 12, opacity: isActiveDot ? 1 : 0.4, filter: isActiveDot ? 'none' : 'grayscale(1)', transition: 'opacity 200ms ease, filter 200ms ease' }}
+                      >
+                        {k.emoji}
+                      </span>
+                    ) : k.icon ? (
+                      <span style={{ opacity: isActiveDot ? 1 : 0.4, transition: 'opacity 200ms ease', display: 'flex' }}>
+                        <FolderIcon name={k.icon} size={13} color={isActiveDot ? (k.color || DEFAULT_ACCENT) : 'var(--color-icon-muted)'} />
+                      </span>
+                    ) : (
+                      <span
+                        className="rounded-full"
+                        style={{
+                          width: isActiveDot ? 8 : 6,
+                          height: isActiveDot ? 8 : 6,
+                          background: k.color || DEFAULT_ACCENT,
+                          opacity: isActiveDot ? 1 : 0.35,
+                          transition: 'width 200ms ease, height 200ms ease, opacity 200ms ease',
+                        }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </motion.div>
+          )}
+          </AnimatePresence>
+
+          {/* New page / folder / desk — bottom right of the sidebar */}
+          <div className="absolute bottom-4 right-4 z-40 words-context-menu">
+            <button
+              onClick={() => {
+                setDeskCustomizeOpen(false);
+                setDeskIconPicker(null);
+                setDeskDeleteArmed(false);
+                setPlusMenuOpen(v => !v);
+              }}
+              className="p-1.5 rounded-md transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover-strong)]"
+              title="New page, folder or desk"
+            >
+              <Plus size={18} />
+            </button>
+            <AnimatePresence>
+              {plusMenuOpen && (
+                <motion.div
+                  key="plus-menu"
+                  className="absolute bottom-[42px] right-0 w-40 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1"
+                  initial={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(2px)' }}
+                  animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
+                  exit={{ opacity: 0, scale: 0.95, y: 4, filter: 'blur(2px)' }}
+                  transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
+                  style={{ transformOrigin: 'bottom right' }}
+                >
+                  <svg className="absolute -bottom-[9px] right-2 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0 Z" fill="var(--color-bg-primary)"/><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
+                  <button
+                    className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                    onClick={(e) => { e.stopPropagation(); setPlusMenuOpen(false); createNewDoc(e); }}
+                  >
+                    <File size={14} /> New Page
+                  </button>
+                  <button
+                    className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                    onClick={(e) => { e.stopPropagation(); setPlusMenuOpen(false); createGroup(); }}
+                  >
+                    <Folder size={14} /> New Folder
+                  </button>
+                  <div className="mx-2 my-1 h-px bg-[var(--color-border-primary)]/50" />
+                  <button
+                    className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                    onClick={(e) => { e.stopPropagation(); createDesk(); }}
+                  >
+                    <LampDesk size={14} /> New Desk
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Swipe-past-the-last-desk → new-desk fill indicator */}
+          <AnimatePresence>
+            {newDeskProgress > 0 && (
+              <motion.div
+                key="new-desk-indicator"
+                className="absolute inset-0 z-[60] flex items-center justify-center pointer-events-none"
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.15 }}
+                transition={{ duration: 0.18, ease: 'easeOut' }}
+              >
+                <div className="relative flex items-center justify-center">
+                  <svg width="60" height="60" viewBox="0 0 60 60">
+                    <circle cx="30" cy="30" r="25" fill="var(--color-bg-primary)" stroke="var(--color-border-primary)" strokeWidth="1.5" />
+                    <circle
+                      cx="30" cy="30" r="25" fill="none"
+                      stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round"
+                      strokeDasharray={2 * Math.PI * 25}
+                      strokeDashoffset={(1 - newDeskProgress) * 2 * Math.PI * 25}
+                      transform="rotate(-90 30 30)"
+                      style={{ transition: 'stroke-dashoffset 60ms linear' }}
+                    />
+                  </svg>
+                  <Plus
+                    size={24}
+                    className="absolute"
+                    style={{
+                      color: 'var(--color-accent)',
+                      transform: `scale(${0.75 + newDeskProgress * 0.4})`,
+                      opacity: 0.45 + newDeskProgress * 0.55,
+                    }}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Cloud Sync Toggle */}
           <div ref={cloudButtonRef} className="absolute bottom-4 left-4 z-40">
@@ -8501,9 +9116,208 @@ export default function App() {
           >
             <Folder size={14} /> New Folder
           </button>
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => { e.stopPropagation(); createDesk(); }}
+          >
+            <LampDesk size={14} /> New Desk
+          </button>
         </motion.div>
       )}
       </AnimatePresence>
+
+      {/* Desk options — anchored off the right edge of the desk title row */}
+      {createPortal(
+      <AnimatePresence>
+      {deskCustomizeOpen && activeDesk && (
+        <motion.div
+          key="desk-customize"
+          className="words-context-menu fixed z-[150] w-[264px] bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl shadow-xl"
+          style={{ top: deskCustomizeOpen.y, left: deskCustomizeOpen.x, transformOrigin: '-9px 24px' }}
+          initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
+          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
+          transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 } }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Tail pointing left at the desk title row */}
+          <svg className="absolute pointer-events-none z-10" style={{ top: '16px', left: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
+            <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)"/>
+            <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/>
+          </svg>
+
+          {/* Name */}
+          <div className="px-3 pt-3 pb-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">Name</p>
+            <div className="flex items-center gap-1.5">
+              <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-md bg-[var(--color-bg-hover)]">
+                {activeDesk.emoji ? (
+                  <span className="text-[14px] leading-none">{activeDesk.emoji}</span>
+                ) : activeDesk.icon ? (
+                  <FolderIcon name={activeDesk.icon} size={14} color={activeDesk.color || 'var(--color-text-muted)'} />
+                ) : (
+                  <span className="w-[9px] h-[9px] rounded-full" style={{ background: activeDesk.color || DEFAULT_ACCENT }} />
+                )}
+              </div>
+              <input
+                ref={deskNameInputRef}
+                type="text"
+                value={activeDesk.name}
+                placeholder="Desk name"
+                onChange={(e) => updateDesk(activeDesk.id, { name: e.target.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') closeDeskPopovers(); }}
+                className="flex-1 min-w-0 h-7 px-2 rounded-md bg-[var(--color-bg-hover)] border border-transparent outline-none text-[13px] font-medium text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:bg-transparent transition-colors"
+              />
+            </div>
+          </div>
+
+          <div className="h-px bg-[var(--color-border-primary)] mx-3" />
+
+          {/* Icon — emoji or a folder-style glyph */}
+          <div className="px-3 pt-2.5 pb-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">Icon</p>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setDeskIconPicker(v => v === 'emoji' ? null : 'emoji')}
+                className={`h-6 px-2 rounded-md flex items-center gap-1.5 text-[11px] font-medium border transition-colors ${deskIconPicker === 'emoji' ? 'border-[var(--color-accent)] text-[var(--color-text-primary)] bg-[var(--color-bg-hover)]' : 'border-[var(--color-border-primary)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}`}
+              >
+                <Smile size={12} /> Emoji
+              </button>
+              <button
+                onClick={() => setDeskIconPicker(v => v === 'icon' ? null : 'icon')}
+                className={`h-6 px-2 rounded-md flex items-center gap-1.5 text-[11px] font-medium border transition-colors ${deskIconPicker === 'icon' ? 'border-[var(--color-accent)] text-[var(--color-text-primary)] bg-[var(--color-bg-hover)]' : 'border-[var(--color-border-primary)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}`}
+              >
+                <Shapes size={12} /> Icon
+              </button>
+              {(activeDesk.emoji || activeDesk.icon) && (
+                <button
+                  onClick={() => { updateDesk(activeDesk.id, { emoji: null, icon: null }); setDeskIconPicker(null); }}
+                  className="h-6 w-6 rounded-md flex items-center justify-center border border-[var(--color-border-primary)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] transition-colors"
+                  title="Remove icon"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="h-px bg-[var(--color-border-primary)] mx-3" />
+
+          {/* Color — the app accent + tint while this desk is active */}
+          <div className="px-3 pt-2.5 pb-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">Color</p>
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => updateDesk(activeDesk.id, { color: null })}
+                className="relative w-[20px] h-[20px] rounded-full flex-shrink-0 border border-[var(--color-border-hover)] bg-[var(--color-bg-primary)] overflow-hidden"
+                style={{
+                  boxShadow: !activeDesk.color ? '0 0 0 2px var(--color-bg-primary), 0 0 0 3.5px var(--color-text-faint)' : 'none',
+                  transform: !activeDesk.color ? 'scale(1.18)' : 'scale(1)',
+                  transition: 'transform 150ms ease, box-shadow 150ms ease',
+                }}
+                title="Default — no accent color"
+              >
+                <span className="absolute left-1/2 top-1/2 w-[24px] h-[1.5px] bg-[var(--color-text-faint)]" style={{ transform: 'translate(-50%, -50%) rotate(-45deg)' }} />
+              </button>
+              {DESK_COLORS.map((c) => {
+                const isCurrent = activeDesk.color === c;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => updateDesk(activeDesk.id, { color: c })}
+                    className="w-[20px] h-[20px] rounded-full flex-shrink-0"
+                    style={{
+                      background: c,
+                      boxShadow: isCurrent ? `0 0 0 2px var(--color-bg-primary), 0 0 0 3.5px ${c}` : 'none',
+                      transform: isCurrent ? 'scale(1.18)' : 'scale(1)',
+                      transition: 'transform 150ms ease, box-shadow 150ms ease',
+                    }}
+                    onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.transform = 'scale(1.1)'; }}
+                    onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.transform = 'scale(1)'; }}
+                    title="Desk color"
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Delete — two-step, never available on the last desk */}
+          {desks.length > 1 && (
+            <>
+              <div className="h-px bg-[var(--color-border-primary)] mx-3" />
+              <div className="p-1.5">
+                <button
+                  onClick={() => {
+                    if (deskDeleteArmed) deleteDesk(activeDesk.id);
+                    else setDeskDeleteArmed(true);
+                  }}
+                  className={`w-full text-left px-2 py-1.5 rounded-md flex items-center gap-2 text-[13px] transition-colors ${deskDeleteArmed ? 'bg-red-500/10 text-red-600' : 'text-red-500 hover:bg-red-500/10'}`}
+                >
+                  <Trash2 size={13} /> {deskDeleteArmed ? 'Click again to delete desk' : 'Delete Desk'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Pickers pop out to the right */}
+          <AnimatePresence>
+            {deskIconPicker === 'emoji' && (
+              <motion.div
+                key="desk-emoji"
+                className="absolute top-0 left-full ml-2 z-10"
+                initial={{ opacity: 0, scale: 0.95, x: -4 }}
+                animate={{ opacity: 1, scale: 1, x: 0 }}
+                exit={{ opacity: 0, scale: 0.95, x: -4 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                style={{ transformOrigin: 'top left' }}
+              >
+                <EmojiPickerPanel
+                  onSelect={(emoji) => { updateDesk(activeDesk.id, { emoji, icon: null }); setDeskIconPicker(null); }}
+                  onRemove={() => { updateDesk(activeDesk.id, { emoji: null }); setDeskIconPicker(null); }}
+                  hasEmoji={!!activeDesk.emoji}
+                />
+              </motion.div>
+            )}
+            {deskIconPicker === 'icon' && (
+              <motion.div
+                key="desk-icon"
+                className="absolute top-0 left-full ml-2 z-10"
+                initial={{ opacity: 0, scale: 0.95, x: -4 }}
+                animate={{ opacity: 1, scale: 1, x: 0 }}
+                exit={{ opacity: 0, scale: 0.95, x: -4 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                style={{ transformOrigin: 'top left' }}
+              >
+                <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-2xl overflow-hidden" style={{ width: 272 }}>
+                  <div className="p-2 grid grid-cols-7 gap-0.5 overflow-y-auto no-scrollbar" style={{ maxHeight: 302 }}>
+                    {FOLDER_ICONS.map((name) => {
+                      const IconComp = ICON_COMPONENTS[name];
+                      if (!IconComp) return null;
+                      const isSel = activeDesk.icon === name;
+                      const ac = activeDesk.color || DEFAULT_ACCENT;
+                      return (
+                        <button
+                          key={name}
+                          title={name}
+                          className="w-full aspect-square flex items-center justify-center rounded-lg transition-colors"
+                          style={{ background: isSel ? ac + '22' : 'transparent', color: isSel ? ac : 'var(--color-text-muted)' }}
+                          onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
+                          onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
+                          onClick={() => { updateDesk(activeDesk.id, { icon: name, emoji: null }); setDeskIconPicker(null); }}
+                        >
+                          <IconComp size={15} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      )}
+      </AnimatePresence>,
+      document.body)}
 
       {/* Document Hover Preview Popover */}
       <AnimatePresence>
@@ -9473,6 +10287,7 @@ export default function App() {
             emoji: getEmojiForTitle(title) || null,
             hasCustomEmoji: false,
             groupId: null,
+            deskId: activeDeskIdRef.current,
             textAlign: 'left',
             hideTitle: false,
             fullWidth: false,
