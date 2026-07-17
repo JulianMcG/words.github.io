@@ -338,41 +338,49 @@ html[data-theme="light"] {
 }
 /* ── Desk tint ─────────────────────────────────────────────────────────────
  * While a desk with a color is active, the whole UI takes a subtle wash of it.
- * App.jsx sets --desk-tint + the data-desk-tint attribute on <html>. Order
- * matters: these live after the forced-theme overrides so the tint wins. */
+ * App.jsx sets --desk-tint + the data-desk-tint attribute on <html>; during a
+ * desk swipe it also sets --desk-tint-amt (0..1) so the wash cross-fades as
+ * the strip moves. Order matters: these live after the forced-theme
+ * overrides so the tint wins. */
 html[data-desk-tint] {
-  --color-bg-primary: color-mix(in srgb, var(--desk-tint) 3.5%, #ffffff);
-  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) 7%, #f7f7f5);
-  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) 5%, #f9fafb);
-  --color-bg-hover: color-mix(in srgb, var(--desk-tint) 10%, #f1f1ef);
-  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) 14%, #ebebea);
-  --color-border-primary: color-mix(in srgb, var(--desk-tint) 9%, #e8e4dd);
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(3.5% * var(--desk-tint-amt, 1)), #ffffff);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt, 1)), #f7f7f5);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt, 1)), #f9fafb);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(10% * var(--desk-tint-amt, 1)), #f1f1ef);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(14% * var(--desk-tint-amt, 1)), #ebebea);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt, 1)), #e8e4dd);
 }
 @media (prefers-color-scheme: dark) {
   html[data-desk-tint] {
-    --color-bg-primary: color-mix(in srgb, var(--desk-tint) 6%, #191919);
-    --color-bg-secondary: color-mix(in srgb, var(--desk-tint) 9%, #202020);
-    --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) 8%, #2a2a2a);
-    --color-bg-hover: color-mix(in srgb, var(--desk-tint) 12%, #2e2e2e);
-    --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) 16%, #383838);
-    --color-border-primary: color-mix(in srgb, var(--desk-tint) 12%, #3d3a35);
+    --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(6% * var(--desk-tint-amt, 1)), #191919);
+    --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt, 1)), #202020);
+    --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt, 1)), #2a2a2a);
+    --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt, 1)), #2e2e2e);
+    --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(16% * var(--desk-tint-amt, 1)), #383838);
+    --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt, 1)), #3d3a35);
   }
 }
 html[data-desk-tint][data-theme="dark"] {
-  --color-bg-primary: color-mix(in srgb, var(--desk-tint) 6%, #191919);
-  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) 9%, #202020);
-  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) 8%, #2a2a2a);
-  --color-bg-hover: color-mix(in srgb, var(--desk-tint) 12%, #2e2e2e);
-  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) 16%, #383838);
-  --color-border-primary: color-mix(in srgb, var(--desk-tint) 12%, #3d3a35);
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(6% * var(--desk-tint-amt, 1)), #191919);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt, 1)), #202020);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt, 1)), #2a2a2a);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt, 1)), #2e2e2e);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(16% * var(--desk-tint-amt, 1)), #383838);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt, 1)), #3d3a35);
 }
 html[data-desk-tint][data-theme="light"] {
-  --color-bg-primary: color-mix(in srgb, var(--desk-tint) 3.5%, #ffffff);
-  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) 7%, #f7f7f5);
-  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) 5%, #f9fafb);
-  --color-bg-hover: color-mix(in srgb, var(--desk-tint) 10%, #f1f1ef);
-  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) 14%, #ebebea);
-  --color-border-primary: color-mix(in srgb, var(--desk-tint) 9%, #e8e4dd);
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(3.5% * var(--desk-tint-amt, 1)), #ffffff);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt, 1)), #f7f7f5);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt, 1)), #f9fafb);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(10% * var(--desk-tint-amt, 1)), #f1f1ef);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(14% * var(--desk-tint-amt, 1)), #ebebea);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt, 1)), #e8e4dd);
+}
+
+/* Hold-to-delete fill for desks — the bar fills while the pointer is held */
+@keyframes desk-delete-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
 }
 
 html[data-high-contrast="true"] {

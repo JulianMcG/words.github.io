@@ -1615,6 +1615,73 @@ const DEFAULT_ACCENT = '#E8572A';
 const DEFAULT_DESK_ID = 'desk-home';
 const makeDefaultDesk = () => ({ id: DEFAULT_DESK_ID, name: 'Home', emoji: null, color: null });
 
+const hexToRgb = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+const lerpHex = (a, b, t) => {
+  const [ar, ag, ab] = hexToRgb(a);
+  const [br, bg, bb] = hexToRgb(b);
+  const c = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, '0');
+  return `#${c(ar, br)}${c(ag, bg)}${c(ab, bb)}`;
+};
+const hexToHsl = (hex) => {
+  const [r8, g8, b8] = hexToRgb(hex);
+  const r = r8 / 255, g = g8 / 255, b = b8 / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+  else if (max === g) h = ((b - r) / d + 2) * 60;
+  else h = ((r - g) / d + 4) * 60;
+  return { h, s, l };
+};
+
+// Apply a desk's color as the app accent + UI tint (index.css desk-tint rules)
+const applyDeskTheme = (desk) => {
+  const root = document.documentElement;
+  if (desk?.color) {
+    root.style.setProperty('--color-accent', desk.color);
+    root.style.setProperty('--desk-tint', desk.color);
+    root.style.removeProperty('--desk-tint-amt');
+    root.setAttribute('data-desk-tint', '');
+  } else {
+    root.style.removeProperty('--color-accent');
+    root.style.removeProperty('--desk-tint');
+    root.style.removeProperty('--desk-tint-amt');
+    root.removeAttribute('data-desk-tint');
+  }
+};
+
+// Delete button where holding fills a bar; releasing early cancels.
+// (Reduce-motion collapses the fill to a frame — press acts immediately.)
+const HoldToDelete = ({ onConfirm, className = '' }) => {
+  const [holding, setHolding] = useState(false);
+  return (
+    <button
+      className={`relative overflow-hidden text-left px-2 py-1.5 rounded-md flex items-center gap-2 text-[13px] transition-colors text-red-500 hover:bg-red-500/10 ${className}`}
+      onPointerDown={(e) => { e.preventDefault(); setHolding(true); }}
+      onPointerUp={() => setHolding(false)}
+      onPointerLeave={() => setHolding(false)}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {holding && (
+        <span
+          className="absolute inset-0 bg-red-500/25"
+          style={{ transformOrigin: 'left', animation: 'desk-delete-fill 850ms linear forwards' }}
+          onAnimationEnd={() => { setHolding(false); onConfirm(); }}
+        />
+      )}
+      <span className="relative z-10 flex items-center gap-2">
+        <Trash2 size={13} /> {holding ? 'Keep holding…' : 'Delete Desk'}
+      </span>
+    </button>
+  );
+};
+
 export default function App() {
   const { docId: urlDocId } = useParams();
   const navigate = useNavigate();
@@ -1749,7 +1816,7 @@ export default function App() {
   })());
   const [deskCustomizeOpen, setDeskCustomizeOpen] = useState(false);
   const [deskIconPicker, setDeskIconPicker] = useState(null); // null | 'emoji' | 'icon'
-  const [deskDeleteArmed, setDeskDeleteArmed] = useState(false);
+  const [deskMenuOpen, setDeskMenuOpen] = useState(false); // false | { x, y } — the "…" menu on the desk title row
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   // Horizontal offset of the desk pager strip — dragged live during a swipe,
   // spring-snapped to the active desk's panel on release
@@ -2463,17 +2530,40 @@ export default function App() {
   // The desk's color drives the app-wide accent AND a subtle tint of the
   // whole UI (see the data-desk-tint rules in index.css)
   useEffect(() => {
-    const root = document.documentElement;
-    if (activeDesk?.color) {
-      root.style.setProperty('--color-accent', activeDesk.color);
-      root.style.setProperty('--desk-tint', activeDesk.color);
-      root.setAttribute('data-desk-tint', '');
-    } else {
-      root.style.removeProperty('--color-accent');
-      root.style.removeProperty('--desk-tint');
-      root.removeAttribute('data-desk-tint');
-    }
+    applyDeskTheme(activeDesk);
   }, [activeDesk?.color]);
+
+  // While the pager strip is between desks (drag or snap animation), the
+  // accent and tint cross-fade with the swipe — the further you swipe, the
+  // more the color turns.
+  useEffect(() => {
+    return deskStripX.on('change', (x) => {
+      const vw = sidebarScrollRef.current?.clientWidth;
+      const ks = desksRef.current;
+      if (!vw || ks.length < 2) return;
+      const f = Math.max(0, Math.min(ks.length - 1, -x / vw));
+      const i = Math.floor(f);
+      const j = Math.min(i + 1, ks.length - 1);
+      const t = f - i;
+      if (t < 0.005 || i === j) { applyDeskTheme(ks[i]); return; }
+      const a = ks[i], b = ks[j];
+      const accent = lerpHex(a.color || DEFAULT_ACCENT, b.color || DEFAULT_ACCENT, t);
+      // Colorless desks keep the neighbor's hue but fade the wash strength out
+      const tintColor = lerpHex(a.color || b.color || DEFAULT_ACCENT, b.color || a.color || DEFAULT_ACCENT, t);
+      const amt = (a.color ? 1 - t : 0) + (b.color ? t : 0);
+      const root = document.documentElement;
+      root.style.setProperty('--color-accent', accent);
+      if (amt > 0.02) {
+        root.style.setProperty('--desk-tint', tintColor);
+        root.style.setProperty('--desk-tint-amt', amt.toFixed(3));
+        root.setAttribute('data-desk-tint', '');
+      } else {
+        root.style.removeProperty('--desk-tint');
+        root.style.removeProperty('--desk-tint-amt');
+        root.removeAttribute('data-desk-tint');
+      }
+    });
+  }, []);
 
   // Handle Shared Document Links
   useEffect(() => {
@@ -4291,7 +4381,7 @@ export default function App() {
   const closeDeskPopovers = () => {
     setDeskCustomizeOpen(false);
     setDeskIconPicker(null);
-    setDeskDeleteArmed(false);
+    setDeskMenuOpen(false);
     setPlusMenuOpen(false);
   };
 
@@ -4302,7 +4392,7 @@ export default function App() {
     const row = document.querySelector(`[data-desk-header-id="${deskId}"]`);
     const rect = row?.getBoundingClientRect();
     setDeskIconPicker(null);
-    setDeskDeleteArmed(false);
+    setDeskMenuOpen(false);
     setPlusMenuOpen(false);
     setDeskCustomizeOpen({
       x: Math.min((rect?.right ?? 250) + 12, window.innerWidth - 288),
@@ -4412,15 +4502,17 @@ export default function App() {
     if (deskStripSyncedIdxRef.current === activeDeskIndex) {
       deskStripX.set(target);
     } else {
-      deskSnapControlRef.current = animateMV(deskStripX, target, { type: 'spring', stiffness: 400, damping: 42, mass: 0.9 });
+      // Velocity handoff keeps a swipe → snap transition seamless
+      deskSnapControlRef.current = animateMV(deskStripX, target, { type: 'spring', stiffness: 500, damping: 45, mass: 0.8, velocity: deskStripX.getVelocity() });
     }
     deskStripSyncedIdxRef.current = activeDeskIndex;
   }, [activeDeskIndex, desks.length, sidebarWidth, isNarrowViewport, isAuthLoading]);
 
-  // ── Desk swipe: the pager strip tracks the fingers 1:1 — swipe as far as you
-  // like — and on release (wheel idle / touch end) it snaps to the nearest
-  // desk, nudged by the flick direction. Rubber-bands at both ends.
-  const deskDragRef = useRef({ wheelActive: false, idleTimer: null, vel: 0, touchStartX: null, touchStartY: null, touchLastX: 0, touchBase: 0, touchIntent: null });
+  // ── Desk swipe: the pager strip tracks the fingers 1:1 — swipe as far as
+  // you like (multiple desks in one throw) — and snaps the moment the flick
+  // crests, projecting the remaining momentum instead of waiting it out.
+  // A fresh acceleration spike mid-tail re-grabs the strip instantly.
+  const deskDragRef = useRef({ mode: 'idle', vel: 0, peak: 0, lastAbs: 0, idleTimer: null, tailTimer: null, touchStartX: null, touchStartY: null, touchLastX: 0, touchBase: 0, touchIntent: null });
   useEffect(() => {
     const el = sidebarInnerRef.current;
     if (!el) return;
@@ -4434,13 +4526,13 @@ export default function App() {
       return x;
     };
 
-    // vel is a decayed per-event delta: a real flick keeps it high, a slow
-    // drag (or one that ends with a correction) leaves it near zero — so
-    // flicks commit to the next desk while gentle drags just snap to nearest.
+    // vel is a decayed per-event delta; the bias projects remaining momentum
+    // so a hard flick can carry past several desks while a slow drag just
+    // settles to the nearest panel.
     const settle = (vel) => {
       const w = vw();
       const raw = -deskStripX.get() / w;
-      const bias = Math.max(-0.32, Math.min(0.32, vel * 0.008));
+      const bias = Math.max(-1.6, Math.min(1.6, vel * 0.006));
       const idx = Math.max(0, Math.min(maxIdx(), Math.round(raw + bias)));
       const ks = desksRef.current;
       const currentIdx = Math.max(0, ks.findIndex(k => k.id === activeDeskIdRef.current));
@@ -4448,26 +4540,55 @@ export default function App() {
         deskActionsRef.current.switchDesk(ks[idx].id);
       } else {
         deskSnapControlRef.current?.stop();
-        deskSnapControlRef.current = animateMV(deskStripX, -idx * w, { type: 'spring', stiffness: 400, damping: 42, mass: 0.9 });
+        deskSnapControlRef.current = animateMV(deskStripX, -idx * w, { type: 'spring', stiffness: 500, damping: 45, mass: 0.8, velocity: deskStripX.getVelocity() });
       }
     };
 
     const onWheel = (e) => {
       const s = deskDragRef.current;
-      if (!s.wheelActive && Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return; // vertical scroll
+      if (s.mode === 'idle' && Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return; // vertical scroll
       e.preventDefault();
-      if (!s.wheelActive) {
-        s.wheelActive = true;
+      const abs = Math.abs(e.deltaX);
+
+      if (s.mode === 'tail') {
+        // Momentum tail of a settled flick — swallow it, unless a fresh
+        // deliberate swipe (acceleration spike) takes over.
+        const spike = abs > 16 && abs > s.lastAbs * 2 + 4;
+        s.lastAbs = abs;
+        clearTimeout(s.tailTimer);
+        s.tailTimer = setTimeout(() => { s.mode = 'idle'; }, 160);
+        if (!spike) return;
+        s.mode = 'idle';
+      }
+
+      if (s.mode === 'idle') {
+        s.mode = 'drag';
         s.vel = 0;
+        s.peak = 0;
         deskSnapControlRef.current?.stop();
       }
-      s.vel = s.vel * 0.75 + e.deltaX * 0.25;
+      s.lastAbs = abs;
+      s.vel = s.vel * 0.7 + e.deltaX * 0.3;
+      s.peak = Math.max(s.peak, Math.abs(s.vel));
       deskStripX.set(rubber(deskStripX.get() - e.deltaX));
+
+      // Early settle: once a real flick has clearly crested and is decaying,
+      // snap right away with the momentum projected — no dead wait.
+      if (s.peak > 30 && Math.abs(s.vel) < s.peak * 0.55 && abs < s.peak * 0.5) {
+        s.mode = 'tail';
+        clearTimeout(s.idleTimer);
+        clearTimeout(s.tailTimer);
+        s.tailTimer = setTimeout(() => { s.mode = 'idle'; }, 160);
+        settle(s.vel + Math.sign(s.vel || 1) * s.peak * 0.6);
+        return;
+      }
+
       clearTimeout(s.idleTimer);
       s.idleTimer = setTimeout(() => {
-        s.wheelActive = false;
+        if (s.mode !== 'drag') return;
+        s.mode = 'idle';
         settle(s.vel);
-      }, 90);
+      }, 80);
     };
 
     const onTouchStart = (e) => {
@@ -4511,6 +4632,7 @@ export default function App() {
     el.addEventListener('touchcancel', onTouchEnd);
     return () => {
       clearTimeout(deskDragRef.current.idleTimer);
+      clearTimeout(deskDragRef.current.tailTimer);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
@@ -6435,7 +6557,7 @@ export default function App() {
         setTrashHoverDocId(null);
         setDeskCustomizeOpen(false);
         setDeskIconPicker(null);
-        setDeskDeleteArmed(false);
+        setDeskMenuOpen(false);
         setPlusMenuOpen(false);
       }
     };
@@ -6446,6 +6568,14 @@ export default function App() {
   // Desks are fully independent workspaces (own pins, folders and pages);
   // the desk-scoped lists are computed per panel inside the sidebar pager.
   const activeDoc = docs.find((d) => d.id === activeDocId) || docs[0];
+  // The new-doc reveal sprites are orange (hue ≈ 14°); rotate them onto the
+  // desk's hue — and soften toward the desk's own saturation — so the sweep
+  // matches the active color theme.
+  const deskFxFilter = (() => {
+    if (!activeDesk?.color) return 'none';
+    const { h, s } = hexToHsl(activeDesk.color);
+    return `hue-rotate(${Math.round(h - 14)}deg) saturate(${(0.55 + s * 0.45).toFixed(2)})`;
+  })();
   const docFont = activeDoc?.docFont || 'sans';
 
   // Alignment FLIP: text-align isn't interpolable, so blocks slide from their
@@ -7698,12 +7828,25 @@ export default function App() {
                           )}
                         </div>
                         <span
-                          className="text-[12px] font-bold truncate"
+                          className="text-[12px] font-bold truncate flex-1"
                           style={{ color: activeDesk?.color || 'var(--color-text-muted)' }}
                         >
                           {activeDesk?.name || 'Desk'}
                         </span>
-                        <ChevronRight size={11} className="flex-shrink-0 opacity-0 group-hover/desk:opacity-100 transition-opacity text-[var(--color-text-muted)]" />
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (deskMenuOpen) { setDeskMenuOpen(false); return; }
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setDeskCustomizeOpen(false);
+                            setDeskIconPicker(null);
+                            setDeskMenuOpen({ x: Math.min(rect.left - 4, window.innerWidth - 190), y: rect.bottom + 6 });
+                          }}
+                          className="flex-shrink-0 p-0.5 -mr-1 rounded opacity-0 group-hover/desk:opacity-100 transition-opacity text-[var(--color-text-muted)] hover:opacity-100 hover:text-[var(--color-text-primary)]"
+                          title="Desk menu"
+                        >
+                          <MoreHorizontal size={13} />
+                        </button>
                       </div>
                     </motion.div>
                   )}
@@ -8053,7 +8196,7 @@ export default function App() {
               onClick={() => {
                 setDeskCustomizeOpen(false);
                 setDeskIconPicker(null);
-                setDeskDeleteArmed(false);
+                setDeskMenuOpen(false);
                 setPlusMenuOpen(v => !v);
               }}
               className="p-1.5 rounded-md transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover-strong)]"
@@ -8708,6 +8851,7 @@ export default function App() {
                       objectFit: 'fill',
                       display: 'block',
                       userSelect: 'none',
+                      filter: deskFxFilter,
                     }}
                     alt=""
                     draggable={false}
@@ -9112,6 +9256,64 @@ export default function App() {
       )}
       </AnimatePresence>
 
+      {/* Desk "…" menu — quick actions for the active desk */}
+      {createPortal(
+      <AnimatePresence>
+      {deskMenuOpen && activeDesk && (
+        <motion.div
+          key="desk-menu"
+          className="words-context-menu fixed z-[150] w-44 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1"
+          style={{ top: deskMenuOpen.y, left: deskMenuOpen.x, transformOrigin: 'top right' }}
+          initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
+          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
+          transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 } }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={() => {
+              const deskId = activeDesk.id;
+              const wantsIconTab = !!activeDesk.icon;
+              setDeskMenuOpen(false);
+              openDeskOptionsAt(deskId);
+              setDeskIconPicker(wantsIconTab ? 'icon' : 'emoji');
+            }}
+          >
+            <Smile size={14} /> Change Icon
+          </button>
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={() => {
+              const deskId = activeDesk.id;
+              setDeskMenuOpen(false);
+              openDeskOptionsAt(deskId);
+              setTimeout(() => deskNameInputRef.current?.select(), 80);
+            }}
+          >
+            <Pencil size={14} /> Rename
+          </button>
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={() => {
+              const deskId = activeDesk.id;
+              setDeskMenuOpen(false);
+              openDeskOptionsAt(deskId);
+            }}
+          >
+            <Paintbrush size={14} /> Change Color
+          </button>
+          {desks.length > 1 && (
+            <>
+              <div className="h-px bg-[var(--color-border-primary)] my-1 mx-1" />
+              <HoldToDelete className="w-full text-[13px]" onConfirm={() => { setDeskMenuOpen(false); deleteDesk(activeDesk.id); }} />
+            </>
+          )}
+        </motion.div>
+      )}
+      </AnimatePresence>,
+      document.body)}
+
       {/* Desk options — anchored off the right edge of the desk title row */}
       {createPortal(
       <AnimatePresence>
@@ -9202,20 +9404,12 @@ export default function App() {
             </div>
           </div>
 
-          {/* Delete — two-step, never available on the last desk */}
+          {/* Delete — hold to fill, never available on the last desk */}
           {desks.length > 1 && (
             <>
               <div className="h-px bg-[var(--color-border-primary)] mx-3" />
               <div className="p-1.5">
-                <button
-                  onClick={() => {
-                    if (deskDeleteArmed) deleteDesk(activeDesk.id);
-                    else setDeskDeleteArmed(true);
-                  }}
-                  className={`w-full text-left px-2 py-1.5 rounded-md flex items-center gap-2 text-[13px] transition-colors ${deskDeleteArmed ? 'bg-red-500/10 text-red-600' : 'text-red-500 hover:bg-red-500/10'}`}
-                >
-                  <Trash2 size={13} /> {deskDeleteArmed ? 'Click again to delete desk' : 'Delete Desk'}
-                </button>
+                <HoldToDelete className="w-full" onConfirm={() => deleteDesk(activeDesk.id)} />
               </div>
             </>
           )}
