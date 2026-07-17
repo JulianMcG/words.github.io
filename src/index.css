@@ -182,8 +182,12 @@ body {
   }
 
   .pin-active {
-    background: linear-gradient(to bottom, #E8E8E5, #FAFAF8);
-    border-color: #DCDBD8;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--desk-tint, #E8E8E5) 8%, #E8E8E5),
+      color-mix(in srgb, var(--desk-tint, #FAFAF8) 5%, #FAFAF8)
+    );
+    border-color: color-mix(in srgb, var(--desk-tint, #DCDBD8) 8%, #DCDBD8);
     box-shadow:
       inset 0 1px 1px rgba(255, 255, 255, 1),
       0 1px 4px rgba(0, 0, 0, 0.06),
@@ -198,14 +202,18 @@ body {
   }
 
   .pin-inactive {
-    background: #EBEBE9;
+    background: color-mix(in srgb, var(--desk-tint, #EBEBE9) 9%, #EBEBE9);
     border-color: transparent;
   }
 
   @media (prefers-color-scheme: dark) {
     .pin-active {
-      background: linear-gradient(to bottom, #191919, #262626);
-      border-color: #191919;
+      background: linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--desk-tint, #191919) 9%, #191919),
+        color-mix(in srgb, var(--desk-tint, #262626) 7%, #262626)
+      );
+      border-color: color-mix(in srgb, var(--desk-tint, #191919) 9%, #191919);
       box-shadow:
         inset 0 1px 1px rgba(255, 255, 255, 0.15),
         0 1px 5px rgba(0, 0, 0, 0.20),
@@ -219,7 +227,7 @@ body {
     }
 
     .pin-inactive {
-      background: #2E2E2E;
+      background: color-mix(in srgb, var(--desk-tint, #2E2E2E) 11%, #2E2E2E);
       border-color: transparent;
     }
   }

@@ -26,6 +26,7 @@ import {
   FaLeaf, FaTree, FaSeedling, FaMountain, FaSun, FaMoon, FaCloud,
   FaSnowflake, FaDroplet, FaFire, FaWind, FaFeather, FaDove, FaPaw, FaSpa,
 } from 'react-icons/fa6';
+import { LuLampDesk } from 'react-icons/lu';
 
 export const ICON_COMPONENTS = {
   // Documents
@@ -34,6 +35,7 @@ export const ICON_COMPONENTS = {
   ClipboardList: FaClipboardList, Clipboard: FaClipboard,
   Note: FaNoteSticky, Archive: FaBoxArchive, Scroll: FaScroll, Bookmark: FaBookmark,
   // Work
+  Desk: LuLampDesk,
   Briefcase: FaBriefcase, Calendar: FaCalendar, Clock: FaClock,
   Bell: FaBell, CheckSquare: FaSquareCheck, Flag: FaFlag,
   Inbox: FaInbox, Send: FaPaperPlane, Target: FaBullseye,
@@ -71,7 +73,7 @@ export const FOLDER_ICONS = [
   // Documents
   'FileText', 'File', 'Files', 'BookOpen', 'Book', 'ClipboardList', 'Note', 'Archive', 'Scroll', 'Bookmark',
   // Work
-  'Briefcase', 'Calendar', 'Clock', 'Bell', 'CheckSquare', 'Flag', 'Inbox', 'Send', 'Target',
+  'Desk', 'Briefcase', 'Calendar', 'Clock', 'Bell', 'CheckSquare', 'Flag', 'Inbox', 'Send', 'Target',
   // Projects
   'Layers', 'Kanban', 'GitBranch', 'Rocket', 'Package', 'Lightning', 'MapPin', 'Route',
   // Creative

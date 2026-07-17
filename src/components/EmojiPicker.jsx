@@ -35,7 +35,7 @@ const SEARCH_INDEX = DEDUPED_CATEGORIES.flatMap(cat =>
   }))
 );
 
-export default function EmojiPicker({ onSelect, onRemove, hasEmoji }) {
+export default function EmojiPicker({ onSelect, onRemove, hasEmoji, frameless = false }) {
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState(DEDUPED_CATEGORIES[0].id);
   const scrollRef = useRef(null);
@@ -107,8 +107,10 @@ export default function EmojiPicker({ onSelect, onRemove, hasEmoji }) {
 
   return (
     <div
-      className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-      style={{ width: 320, maxHeight: 420 }}
+      className={frameless
+        ? "flex flex-col overflow-hidden"
+        : "bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-2xl flex flex-col overflow-hidden"}
+      style={frameless ? { width: '100%', maxHeight: 380 } : { width: 320, maxHeight: 420 }}
     >
       {/* Search */}
       <div className="p-2 pb-1.5">

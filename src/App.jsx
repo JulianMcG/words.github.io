@@ -1608,8 +1608,9 @@ const applyImageContrast = (img) => {
 // ── Desks (Arc-style spaces) ─────────────────────────────────────────────────
 // Each desk is an independent workspace: its own pins, folders and pages.
 // The desk's color becomes the app-wide accent + tint while it's active.
-// Rainbow order; a desk with color null uses the default accent, untinted.
-const DESK_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#a855f7', '#ec4899'];
+// Rainbow order, kept muted and dusty (Notion-ish) so the app-wide tint stays
+// calm; a desk with color null uses the default accent, untinted.
+const DESK_COLORS = ['#C4554D', '#CC772E', '#C29343', '#548164', '#487D8C', '#477DA5', '#8A67AB', '#B35488'];
 const DEFAULT_ACCENT = '#E8572A';
 const DEFAULT_DESK_ID = 'desk-home';
 const makeDefaultDesk = () => ({ id: DEFAULT_DESK_ID, name: 'Home', emoji: null, color: null });
@@ -1742,8 +1743,6 @@ export default function App() {
     return [makeDefaultDesk()];
   });
   const [activeDeskId, setActiveDeskId] = useState(() => localStorage.getItem("words_active_desk") || DEFAULT_DESK_ID);
-  // -1 | 1 — which side the sidebar content slides in from on the next desk switch
-  const deskSlideDirRef = useRef(1);
   // Per-desk memory of the last open page, so switching back feels like returning
   const deskLastDocRef = useRef((() => {
     try { return JSON.parse(localStorage.getItem("words_desk_last_doc") || "{}"); } catch { return {}; }
@@ -1752,8 +1751,13 @@ export default function App() {
   const [deskIconPicker, setDeskIconPicker] = useState(null); // null | 'emoji' | 'icon'
   const [deskDeleteArmed, setDeskDeleteArmed] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
-  // 0 → 1 fill of the "swipe past the last desk to create one" indicator
-  const [newDeskProgress, setNewDeskProgress] = useState(0);
+  // Horizontal offset of the desk pager strip — dragged live during a swipe,
+  // spring-snapped to the active desk's panel on release
+  const deskStripX = useMotionValue(0);
+  const deskSnapControlRef = useRef(null);
+  const deskStripSyncedIdxRef = useRef(null);
+  // Desk dot currently hovered while dragging a page — drop moves it there
+  const [deskDropTargetId, setDeskDropTargetId] = useState(null);
   const deskNameInputRef = useRef(null);
   // The desk an item (doc or group) belongs to. Items whose deskId is missing or
   // refers to a deleted desk fall back to the first desk, so nothing is ever lost.
@@ -3516,10 +3520,21 @@ export default function App() {
         return;
       }
 
-      const docEl = elBelow.closest('[data-doc-id]');
-      const groupHeaderEl = !docEl && elBelow.closest('[data-group-id]');
+      const deskDotEl = elBelow.closest('[data-desk-dot]');
+      const docEl = !deskDotEl && elBelow.closest('[data-doc-id]');
+      const groupHeaderEl = !deskDotEl && !docEl && elBelow.closest('[data-group-id]');
+      setDeskDropTargetId(deskDotEl ? deskDotEl.getAttribute('data-desk-dot') : null);
 
-      if (docEl) {
+      if (deskDotEl) {
+        // Hovering a desk dot — dropping moves the page(s) to that desk
+        clearTimeout(pointerDragRef.current.folderHoverTimer);
+        pointerDragRef.current.folderHoverTimer = null;
+        pointerDragRef.current.folderHoverTarget = null;
+        setFolderPendingId(null);
+        const t = { id: deskDotEl.getAttribute('data-desk-dot'), position: 'inset', type: 'desk' };
+        pointerDragRef.current.currentTarget = t;
+        setDragTarget(null);
+      } else if (docEl) {
         const targetId = docEl.getAttribute('data-doc-id');
         if (pointerDragRef.current.idsToMove.includes(targetId)) {
           clearTimeout(pointerDragRef.current.folderHoverTimer);
@@ -3604,6 +3619,25 @@ export default function App() {
           docsRef.current = newDocs;
           return newDocs;
         });
+      } else if (currentTarget?.type === 'desk') {
+        // Dropped on a desk dot — move the page(s) to that desk, ungrouped
+        const targetDeskId = currentTarget.id;
+        const moved = new Set(idsToMove);
+        const newDocs = docsRef.current.map(dd =>
+          moved.has(dd.id) && deskOf(dd) !== targetDeskId ? { ...dd, deskId: targetDeskId, groupId: null } : dd
+        );
+        docsRef.current = newDocs;
+        setDocs(newDocs);
+        // Stay on the current desk: if the open page just moved away, open
+        // another page here — a desk never goes empty.
+        const hereId = activeDesk?.id || DEFAULT_DESK_ID;
+        if (targetDeskId !== hereId && moved.has(activeDocIdRef.current)) {
+          const remaining = newDocs.filter(dd => !moved.has(dd.id) && deskOf(dd) === hereId);
+          const next = remaining.find(dd => !dd.isLocked) || remaining[0];
+          const nextId = next ? next.id : createBlankDocInDesk(hereId);
+          setActiveDocId(nextId);
+          setSelectedDocIds([nextId]);
+        }
       } else if (!currentTarget) {
         // Dropped over empty sidebar space → remove from any group
         const sidebarEl = document.getElementById('sidebar-scroll-root');
@@ -3624,6 +3658,7 @@ export default function App() {
       setFolderPendingId(null);
       setDragTarget(null);
       setDraggedItem(null);
+      setDeskDropTargetId(null);
       document.removeEventListener('pointermove', handleMove);
       document.removeEventListener('pointerup', handleUp);
     };
@@ -4166,9 +4201,9 @@ export default function App() {
     if (titleRef.current) titleRef.current.textContent = "";
     if (editorRef.current) editorRef.current.innerHTML = "<p><br></p>";
 
-    if (sidebarScrollRef.current && !targetGroupId) {
+    if (!targetGroupId) {
       setTimeout(() => {
-        sidebarScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        document.querySelector(`[data-desk-panel="${activeDeskIdRef.current}"]`)?.scrollTo({ top: 0, behavior: 'smooth' });
       }, 10);
     }
 
@@ -4280,18 +4315,14 @@ export default function App() {
     openDeskOptionsAt(activeDesk?.id || DEFAULT_DESK_ID);
   };
 
-  const switchDesk = (deskId, dir = null) => {
+  const switchDesk = (deskId) => {
     const currentId = activeDesk?.id || DEFAULT_DESK_ID;
     if (deskId === currentId || !desks.some(k => k.id === deskId)) return;
-    if (dir === null) {
-      const from = desks.findIndex(k => k.id === currentId);
-      const to = desks.findIndex(k => k.id === deskId);
-      dir = to >= from ? 1 : -1;
-    }
-    deskSlideDirRef.current = dir;
     closeDeskPopovers();
     flushCurrentDoc();
-    sidebarScrollRef.current?.scrollTo({ top: 0 });
+    // Each desk panel keeps its own scroll position; sync the header shadow to it
+    const panel = document.querySelector(`[data-desk-panel="${deskId}"]`);
+    setIsSidebarScrolled((panel?.scrollTop || 0) > 5);
     // Return to the page that was last open on that desk
     const deskItems = docsRef.current.filter(d => deskOf(d) === deskId);
     const remembered = deskItems.find(d => d.id === deskLastDocRef.current[deskId] && !d.isLocked);
@@ -4312,14 +4343,12 @@ export default function App() {
     desksRef.current = nextDesks;
     setDesks(nextDesks);
     const docId = createBlankDocInDesk(id);
-    deskSlideDirRef.current = 1;
     closeDeskPopovers();
-    sidebarScrollRef.current?.scrollTo({ top: 0 });
     setSidebarContextMenu({ isOpen: false, x: 0, y: 0 });
     setActiveDeskId(id);
     setActiveDocId(docId);
     setSelectedDocIds([docId]);
-    setNewDeskProgress(0);
+    setIsSidebarScrolled(false);
     // Launch straight into the desk options with the name ready to type over
     setTimeout(() => {
       openDeskOptionsAt(id);
@@ -4355,10 +4384,8 @@ export default function App() {
     setDesks(nextDesks);
     delete deskLastDocRef.current[id];
     closeDeskPopovers();
-    sidebarScrollRef.current?.scrollTo({ top: 0 });
     // Land on the neighbor desk
     const neighbor = nextDesks[Math.max(0, idx - 1)];
-    deskSlideDirRef.current = idx === 0 ? 1 : -1;
     const inNeighbor = (d) => ((d.deskId && nextDesks.some(x => x.id === d.deskId)) ? d.deskId : nextDesks[0].id) === neighbor.id;
     const neighborDocs = keptDocs.filter(inNeighbor);
     const remembered = neighborDocs.find(d => d.id === deskLastDocRef.current[neighbor.id] && !d.isLocked);
@@ -4371,122 +4398,110 @@ export default function App() {
 
   // Latest desk actions for the native swipe listeners (bound once on mount)
   const deskActionsRef = useRef({});
-  deskActionsRef.current = { switchDesk, createDesk };
+  deskActionsRef.current = { switchDesk };
 
-  // ── Desk swipe: two-finger trackpad swipe or touch-drag anywhere on the
-  // sidebar. Crossing the threshold switches desks; swiping past the last desk
-  // fills the new-desk indicator — when it fills, a new desk is created.
-  // After a switch, momentum-tail wheel events are swallowed, but a fresh
-  // acceleration spike re-arms immediately so quick chained swipes register.
-  const deskSwipeRef = useRef({ amount: 0, blocked: false, lastAbs: 0, idleTimer: null, touchX: null, touchY: null, touchIntent: null, touchConsumed: false });
+  const activeDeskIndex = Math.max(0, desks.findIndex(k => k.id === (activeDesk?.id || DEFAULT_DESK_ID)));
+
+  // Keep the pager strip aligned with the active desk. Desk changes spring the
+  // strip over from wherever the drag left it; width changes just re-align.
+  useEffect(() => {
+    const vw = sidebarScrollRef.current?.clientWidth;
+    if (!vw) return;
+    const target = -activeDeskIndex * vw;
+    deskSnapControlRef.current?.stop();
+    if (deskStripSyncedIdxRef.current === activeDeskIndex) {
+      deskStripX.set(target);
+    } else {
+      deskSnapControlRef.current = animateMV(deskStripX, target, { type: 'spring', stiffness: 400, damping: 42, mass: 0.9 });
+    }
+    deskStripSyncedIdxRef.current = activeDeskIndex;
+  }, [activeDeskIndex, desks.length, sidebarWidth, isNarrowViewport, isAuthLoading]);
+
+  // ── Desk swipe: the pager strip tracks the fingers 1:1 — swipe as far as you
+  // like — and on release (wheel idle / touch end) it snaps to the nearest
+  // desk, nudged by the flick direction. Rubber-bands at both ends.
+  const deskDragRef = useRef({ wheelActive: false, idleTimer: null, vel: 0, touchStartX: null, touchStartY: null, touchLastX: 0, touchBase: 0, touchIntent: null });
   useEffect(() => {
     const el = sidebarInnerRef.current;
     if (!el) return;
-    const SWITCH_AT = 70;        // px of horizontal travel to switch desks
-    const NEW_DESK_TRAVEL = 220; // extra px past the last desk to fill the indicator
 
-    const endGesture = () => {
-      const s = deskSwipeRef.current;
-      s.amount = 0;
-      s.blocked = false;
-      s.lastAbs = 0;
-      setNewDeskProgress(0);
-    };
-    const scheduleIdleReset = () => {
-      const s = deskSwipeRef.current;
-      clearTimeout(s.idleTimer);
-      s.idleTimer = setTimeout(endGesture, 160);
+    const vw = () => sidebarScrollRef.current?.clientWidth || 1;
+    const maxIdx = () => desksRef.current.length - 1;
+    const rubber = (x) => {
+      const min = -maxIdx() * vw();
+      if (x > 0) return x * 0.28;
+      if (x < min) return min + (x - min) * 0.28;
+      return x;
     };
 
-    // amount > 0 → toward the next desk (fingers moving left), < 0 → previous.
-    // Returns true when the swipe did something (switch/create).
-    const applyAmount = (s) => {
+    // vel is a decayed per-event delta: a real flick keeps it high, a slow
+    // drag (or one that ends with a correction) leaves it near zero — so
+    // flicks commit to the next desk while gentle drags just snap to nearest.
+    const settle = (vel) => {
+      const w = vw();
+      const raw = -deskStripX.get() / w;
+      const bias = Math.max(-0.32, Math.min(0.32, vel * 0.008));
+      const idx = Math.max(0, Math.min(maxIdx(), Math.round(raw + bias)));
       const ks = desksRef.current;
-      let idx = ks.findIndex(k => k.id === activeDeskIdRef.current);
-      if (idx === -1) idx = 0;
-      if (s.amount <= -SWITCH_AT) {
-        if (idx > 0) {
-          setNewDeskProgress(0);
-          deskActionsRef.current.switchDesk(ks[idx - 1].id, -1);
-          return true;
-        }
-        s.amount = -SWITCH_AT; // wall before the first desk
-      } else if (s.amount >= SWITCH_AT && idx < ks.length - 1) {
-        setNewDeskProgress(0);
-        deskActionsRef.current.switchDesk(ks[idx + 1].id, 1);
-        return true;
-      } else if (s.amount > SWITCH_AT * 0.4 && idx === ks.length - 1) {
-        // Past the last desk — the further the swipe, the fuller the indicator
-        const p = Math.min(1, Math.max(0, (s.amount - SWITCH_AT * 0.4) / NEW_DESK_TRAVEL));
-        setNewDeskProgress(p);
-        if (p >= 1) {
-          setNewDeskProgress(0);
-          deskActionsRef.current.createDesk();
-          return true;
-        }
+      const currentIdx = Math.max(0, ks.findIndex(k => k.id === activeDeskIdRef.current));
+      if (idx !== currentIdx) {
+        deskActionsRef.current.switchDesk(ks[idx].id);
       } else {
-        setNewDeskProgress(0);
+        deskSnapControlRef.current?.stop();
+        deskSnapControlRef.current = animateMV(deskStripX, -idx * w, { type: 'spring', stiffness: 400, damping: 42, mass: 0.9 });
       }
-      return false;
     };
 
     const onWheel = (e) => {
-      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return; // it's a vertical scroll
+      const s = deskDragRef.current;
+      if (!s.wheelActive && Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return; // vertical scroll
       e.preventDefault();
-      const s = deskSwipeRef.current;
-      scheduleIdleReset();
-      const abs = Math.abs(e.deltaX);
-      if (s.blocked) {
-        // Swallow the momentum tail of the swipe that just switched. A fresh
-        // gesture shows up as an acceleration spike (or the tail decays away).
-        const spike = abs > 18 && abs > s.lastAbs * 2.2;
-        const decayed = abs <= 2;
-        if (!spike && !decayed) {
-          s.lastAbs = abs;
-          return;
-        }
-        s.blocked = false;
-        s.amount = 0;
+      if (!s.wheelActive) {
+        s.wheelActive = true;
+        s.vel = 0;
+        deskSnapControlRef.current?.stop();
       }
-      s.lastAbs = abs;
-      s.amount += e.deltaX;
-      if (applyAmount(s)) {
-        s.blocked = true;
-        s.amount = 0;
-      }
+      s.vel = s.vel * 0.75 + e.deltaX * 0.25;
+      deskStripX.set(rubber(deskStripX.get() - e.deltaX));
+      clearTimeout(s.idleTimer);
+      s.idleTimer = setTimeout(() => {
+        s.wheelActive = false;
+        settle(s.vel);
+      }, 90);
     };
 
     const onTouchStart = (e) => {
-      const s = deskSwipeRef.current;
+      const s = deskDragRef.current;
       const t = e.touches[0];
-      s.touchX = t.clientX;
-      s.touchY = t.clientY;
+      s.touchStartX = t.clientX;
+      s.touchStartY = t.clientY;
+      s.touchLastX = t.clientX;
       s.touchIntent = null;
-      s.touchConsumed = false;
-      s.amount = 0;
+      s.touchBase = deskStripX.get();
+      s.vel = 0;
     };
     const onTouchMove = (e) => {
-      const s = deskSwipeRef.current;
-      if (s.touchX == null || s.touchConsumed) return;
+      const s = deskDragRef.current;
+      if (s.touchStartX == null) return;
       const t = e.touches[0];
-      const dx = t.clientX - s.touchX;
-      const dy = t.clientY - s.touchY;
+      const dx = t.clientX - s.touchStartX;
+      const dy = t.clientY - s.touchStartY;
       if (s.touchIntent === null) {
-        if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
         s.touchIntent = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+        if (s.touchIntent === 'h') deskSnapControlRef.current?.stop();
       }
       if (s.touchIntent !== 'h') return;
       e.preventDefault();
-      s.amount = -dx; // finger left = next desk (content follows the finger)
-      if (applyAmount(s)) s.touchConsumed = true;
+      s.vel = s.vel * 0.75 + -(t.clientX - s.touchLastX) * 0.25 * 2.5; // touch moves are per-frame, scale up
+      s.touchLastX = t.clientX;
+      deskStripX.set(rubber(s.touchBase + dx));
     };
     const onTouchEnd = () => {
-      const s = deskSwipeRef.current;
-      s.touchX = null;
+      const s = deskDragRef.current;
+      if (s.touchIntent === 'h') settle(s.vel);
+      s.touchStartX = null;
       s.touchIntent = null;
-      s.touchConsumed = false;
-      s.amount = 0;
-      setNewDeskProgress(0);
     };
 
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -4495,7 +4510,7 @@ export default function App() {
     el.addEventListener('touchend', onTouchEnd);
     el.addEventListener('touchcancel', onTouchEnd);
     return () => {
-      clearTimeout(deskSwipeRef.current.idleTimer);
+      clearTimeout(deskDragRef.current.idleTimer);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
@@ -6428,14 +6443,8 @@ export default function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Everything the sidebar shows lives on the active desk — desks are fully
-  // independent workspaces (own pins, folders and pages).
-  const deskDocs = docs.filter((d) => deskOf(d) === (activeDesk?.id || DEFAULT_DESK_ID));
-  const deskGroups = groups.filter((g) => deskOf(g) === (activeDesk?.id || DEFAULT_DESK_ID));
-  const pinnedDocs = deskDocs.filter((d) => d.isPinned).sort((a, b) => (a.pinnedAt || 0) - (b.pinnedAt || 0));
-  const regularDocs = deskDocs.filter((d) => !d.isPinned);
-  // A document is considered "ungrouped" if it has no groupId, OR if its groupId doesn't exist in the current groups array.
-  const ungroupedDocs = regularDocs.filter((d) => !d.groupId || !deskGroups.some(g => g.id === d.groupId));
+  // Desks are fully independent workspaces (own pins, folders and pages);
+  // the desk-scoped lists are computed per panel inside the sidebar pager.
   const activeDoc = docs.find((d) => d.id === activeDocId) || docs[0];
   const docFont = activeDoc?.docFont || 'sans';
 
@@ -7505,8 +7514,7 @@ export default function App() {
           <div
             id="sidebar-scroll-root"
             ref={sidebarScrollRef}
-            className="flex-1 overflow-y-auto no-scrollbar pb-6 flex flex-col h-full px-2"
-            onScroll={(e) => setIsSidebarScrolled(e.currentTarget.scrollTop > 5)}
+            className="flex-1 overflow-hidden relative"
             onDragOver={handleSidebarDragOver}
             onDrop={handleDropOnSidebarRoot}
             onDoubleClick={(e) => {
@@ -7522,7 +7530,7 @@ export default function App() {
             }}
           >
             {isAuthLoading ? (
-              <div className="px-3 py-2 space-y-3">
+              <div className="px-5 py-2 space-y-3">
                 {[1, 2, 3, 4, 5].map(i => (
                   <div key={i} className="flex items-center gap-2">
                     <div className="w-5 h-5 rounded-[calc(4px+var(--radius-bonus))] bg-[var(--color-bg-hover)] animate-pulse" />
@@ -7531,21 +7539,31 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              /* Desk switches slide the whole workspace sideways, Arc-style */
-              <AnimatePresence mode="popLayout" initial={false} custom={deskSlideDirRef.current}>
+              /* Desk pager — one panel per desk on a horizontal strip. The strip
+                 follows swipes 1:1 and snaps to a panel on release, so every
+                 desk (including the outgoing one) stays visible mid-swipe. */
               <motion.div
-                key={`desk-${activeDesk?.id || DEFAULT_DESK_ID}`}
-                className="flex-1 flex flex-col min-h-0"
-                custom={deskSlideDirRef.current}
-                variants={{
-                  enter: (dir) => ({ x: `${dir * 100}%` }),
-                  center: { x: 0 },
-                  exit: (dir) => ({ x: `${dir * -100}%` }),
+                className="flex h-full"
+                style={{ x: deskStripX, width: `${desks.length * 100}%` }}
+              >
+              {desks.map((panelDesk) => {
+                // Shadow the desk-scoped lists so each panel renders its own
+                // workspace with the same markup the active desk used to.
+                const activeDesk = panelDesk;
+                const deskDocs = docs.filter((d) => deskOf(d) === panelDesk.id);
+                const deskGroups = groups.filter((g) => deskOf(g) === panelDesk.id);
+                const pinnedDocs = deskDocs.filter((d) => d.isPinned).sort((a, b) => (a.pinnedAt || 0) - (b.pinnedAt || 0));
+                const regularDocs = deskDocs.filter((d) => !d.isPinned);
+                const ungroupedDocs = regularDocs.filter((d) => !d.groupId || !deskGroups.some(g => g.id === d.groupId));
+                return (
+              <div
+                key={panelDesk.id}
+                data-desk-panel={panelDesk.id}
+                className="h-full overflow-y-auto no-scrollbar pb-6 flex flex-col px-2"
+                style={{ width: `${100 / desks.length}%` }}
+                onScroll={(e) => {
+                  if (panelDesk.id === activeDeskIdRef.current) setIsSidebarScrolled(e.currentTarget.scrollTop > 5);
                 }}
-                initial="enter"
-                animate="center"
-                exit="exit"
-                transition={{ x: { duration: 0.32, ease: [0.22, 1, 0.36, 1] } }}
               >
                 {/* Sticky Header Zone */}
                 <div className="sticky top-0 z-20 bg-[var(--color-bg-secondary)] pb-1 pt-0 -mt-2">
@@ -7681,7 +7699,7 @@ export default function App() {
                         </div>
                         <span
                           className="text-[12px] font-bold truncate"
-                          style={{ color: activeDesk?.color || 'var(--color-text-primary)' }}
+                          style={{ color: activeDesk?.color || 'var(--color-text-muted)' }}
                         >
                           {activeDesk?.name || 'Desk'}
                         </span>
@@ -7962,8 +7980,10 @@ export default function App() {
 
                   <div className="h-24 w-full flex-shrink-0" data-sidebar-empty-zone onDragOver={handleSidebarDragOver} onDrop={handleDropOnSidebarRoot}></div>
                 </div>
+              </div>
+                );
+              })}
               </motion.div>
-              </AnimatePresence>
             )}
           </div>
 
@@ -7987,11 +8007,14 @@ export default function App() {
             >
               {desks.map((k) => {
                 const isActiveDot = k.id === (activeDesk?.id || DEFAULT_DESK_ID);
+                const isDropTarget = deskDropTargetId === k.id;
                 return (
                   <button
                     key={k.id}
+                    data-desk-dot={k.id}
                     onClick={() => switchDesk(k.id)}
-                    className="relative flex items-center justify-center w-[30px] h-[30px] rounded-md hover:bg-[var(--color-bg-hover-strong)] transition-colors"
+                    className={`relative flex items-center justify-center w-[30px] h-[30px] rounded-md transition-all hover:bg-[var(--color-bg-hover-strong)] ${isDropTarget ? 'bg-[var(--color-bg-hover-strong)] scale-125' : ''}`}
+                    style={isDropTarget ? { boxShadow: `0 0 0 1.5px ${k.color || DEFAULT_ACCENT}` } : undefined}
                     title={k.name || 'Desk'}
                   >
                     {k.emoji ? (
@@ -8073,43 +8096,6 @@ export default function App() {
               )}
             </AnimatePresence>
           </div>
-
-          {/* Swipe-past-the-last-desk → new-desk fill indicator */}
-          <AnimatePresence>
-            {newDeskProgress > 0 && (
-              <motion.div
-                key="new-desk-indicator"
-                className="absolute inset-0 z-[60] flex items-center justify-center pointer-events-none"
-                initial={{ opacity: 0, scale: 0.85 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.15 }}
-                transition={{ duration: 0.18, ease: 'easeOut' }}
-              >
-                <div className="relative flex items-center justify-center">
-                  <svg width="60" height="60" viewBox="0 0 60 60">
-                    <circle cx="30" cy="30" r="25" fill="var(--color-bg-primary)" stroke="var(--color-border-primary)" strokeWidth="1.5" />
-                    <circle
-                      cx="30" cy="30" r="25" fill="none"
-                      stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round"
-                      strokeDasharray={2 * Math.PI * 25}
-                      strokeDashoffset={(1 - newDeskProgress) * 2 * Math.PI * 25}
-                      transform="rotate(-90 30 30)"
-                      style={{ transition: 'stroke-dashoffset 60ms linear' }}
-                    />
-                  </svg>
-                  <Plus
-                    size={24}
-                    className="absolute"
-                    style={{
-                      color: 'var(--color-accent)',
-                      transform: `scale(${0.75 + newDeskProgress * 0.4})`,
-                      opacity: 0.45 + newDeskProgress * 0.55,
-                    }}
-                  />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           {/* Cloud Sync Toggle */}
           <div ref={cloudButtonRef} className="absolute bottom-4 left-4 z-40">
@@ -9146,11 +9132,16 @@ export default function App() {
             <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/>
           </svg>
 
-          {/* Name */}
+          {/* Name — the icon well opens the emoji / icon picker */}
           <div className="px-3 pt-3 pb-2.5">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">Name</p>
             <div className="flex items-center gap-1.5">
-              <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-md bg-[var(--color-bg-hover)]">
+              <button
+                onClick={() => setDeskIconPicker(v => v ? null : (activeDesk.icon ? 'icon' : 'emoji'))}
+                className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-md transition-colors ${deskIconPicker ? 'bg-[var(--color-bg-hover-strong)]' : 'bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-hover-strong)]'}`}
+                style={deskIconPicker ? { boxShadow: '0 0 0 1.5px var(--color-accent)' } : undefined}
+                title="Change icon"
+              >
                 {activeDesk.emoji ? (
                   <span className="text-[14px] leading-none">{activeDesk.emoji}</span>
                 ) : activeDesk.icon ? (
@@ -9158,7 +9149,7 @@ export default function App() {
                 ) : (
                   <span className="w-[9px] h-[9px] rounded-full" style={{ background: activeDesk.color || DEFAULT_ACCENT }} />
                 )}
-              </div>
+              </button>
               <input
                 ref={deskNameInputRef}
                 type="text"
@@ -9168,36 +9159,6 @@ export default function App() {
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') closeDeskPopovers(); }}
                 className="flex-1 min-w-0 h-7 px-2 rounded-md bg-[var(--color-bg-hover)] border border-transparent outline-none text-[13px] font-medium text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:bg-transparent transition-colors"
               />
-            </div>
-          </div>
-
-          <div className="h-px bg-[var(--color-border-primary)] mx-3" />
-
-          {/* Icon — emoji or a folder-style glyph */}
-          <div className="px-3 pt-2.5 pb-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">Icon</p>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setDeskIconPicker(v => v === 'emoji' ? null : 'emoji')}
-                className={`h-6 px-2 rounded-md flex items-center gap-1.5 text-[11px] font-medium border transition-colors ${deskIconPicker === 'emoji' ? 'border-[var(--color-accent)] text-[var(--color-text-primary)] bg-[var(--color-bg-hover)]' : 'border-[var(--color-border-primary)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}`}
-              >
-                <Smile size={12} /> Emoji
-              </button>
-              <button
-                onClick={() => setDeskIconPicker(v => v === 'icon' ? null : 'icon')}
-                className={`h-6 px-2 rounded-md flex items-center gap-1.5 text-[11px] font-medium border transition-colors ${deskIconPicker === 'icon' ? 'border-[var(--color-accent)] text-[var(--color-text-primary)] bg-[var(--color-bg-hover)]' : 'border-[var(--color-border-primary)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}`}
-              >
-                <Shapes size={12} /> Icon
-              </button>
-              {(activeDesk.emoji || activeDesk.icon) && (
-                <button
-                  onClick={() => { updateDesk(activeDesk.id, { emoji: null, icon: null }); setDeskIconPicker(null); }}
-                  className="h-6 w-6 rounded-md flex items-center justify-center border border-[var(--color-border-primary)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] transition-colors"
-                  title="Remove icon"
-                >
-                  <X size={12} />
-                </button>
-              )}
             </div>
           </div>
 
@@ -9259,11 +9220,11 @@ export default function App() {
             </>
           )}
 
-          {/* Pickers pop out to the right */}
+          {/* Emoji / icon picker — one panel, tabs on top to switch */}
           <AnimatePresence>
-            {deskIconPicker === 'emoji' && (
+            {deskIconPicker && (
               <motion.div
-                key="desk-emoji"
+                key="desk-icon-picker"
                 className="absolute top-0 left-full ml-2 z-10"
                 initial={{ opacity: 0, scale: 0.95, x: -4 }}
                 animate={{ opacity: 1, scale: 1, x: 0 }}
@@ -9271,45 +9232,70 @@ export default function App() {
                 transition={{ type: 'spring', stiffness: 400, damping: 32 }}
                 style={{ transformOrigin: 'top left' }}
               >
-                <EmojiPickerPanel
-                  onSelect={(emoji) => { updateDesk(activeDesk.id, { emoji, icon: null }); setDeskIconPicker(null); }}
-                  onRemove={() => { updateDesk(activeDesk.id, { emoji: null }); setDeskIconPicker(null); }}
-                  hasEmoji={!!activeDesk.emoji}
-                />
-              </motion.div>
-            )}
-            {deskIconPicker === 'icon' && (
-              <motion.div
-                key="desk-icon"
-                className="absolute top-0 left-full ml-2 z-10"
-                initial={{ opacity: 0, scale: 0.95, x: -4 }}
-                animate={{ opacity: 1, scale: 1, x: 0 }}
-                exit={{ opacity: 0, scale: 0.95, x: -4 }}
-                transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-                style={{ transformOrigin: 'top left' }}
-              >
-                <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-2xl overflow-hidden" style={{ width: 272 }}>
-                  <div className="p-2 grid grid-cols-7 gap-0.5 overflow-y-auto no-scrollbar" style={{ maxHeight: 302 }}>
-                    {FOLDER_ICONS.map((name) => {
-                      const IconComp = ICON_COMPONENTS[name];
-                      if (!IconComp) return null;
-                      const isSel = activeDesk.icon === name;
-                      const ac = activeDesk.color || DEFAULT_ACCENT;
-                      return (
-                        <button
-                          key={name}
-                          title={name}
-                          className="w-full aspect-square flex items-center justify-center rounded-lg transition-colors"
-                          style={{ background: isSel ? ac + '22' : 'transparent', color: isSel ? ac : 'var(--color-text-muted)' }}
-                          onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
-                          onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
-                          onClick={() => { updateDesk(activeDesk.id, { icon: name, emoji: null }); setDeskIconPicker(null); }}
-                        >
-                          <IconComp size={15} />
-                        </button>
-                      );
-                    })}
+                <div
+                  className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+                  style={{ width: 320, maxHeight: 424 }}
+                >
+                  <div className="p-2 pb-0">
+                    <div className="flex gap-0.5 p-0.5 rounded-lg bg-[var(--color-bg-secondary)]">
+                      <button
+                        onClick={() => setDeskIconPicker('emoji')}
+                        className={`flex-1 h-6 rounded-md flex items-center justify-center gap-1.5 text-[11px] font-medium transition-colors ${deskIconPicker === 'emoji' ? 'bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
+                      >
+                        <Smile size={12} /> Emoji
+                      </button>
+                      <button
+                        onClick={() => setDeskIconPicker('icon')}
+                        className={`flex-1 h-6 rounded-md flex items-center justify-center gap-1.5 text-[11px] font-medium transition-colors ${deskIconPicker === 'icon' ? 'bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
+                      >
+                        <Shapes size={12} /> Icon
+                      </button>
+                    </div>
                   </div>
+                  {deskIconPicker === 'emoji' ? (
+                    <EmojiPickerPanel
+                      frameless
+                      onSelect={(emoji) => { updateDesk(activeDesk.id, { emoji, icon: null }); setDeskIconPicker(null); }}
+                      onRemove={() => { updateDesk(activeDesk.id, { emoji: null }); setDeskIconPicker(null); }}
+                      hasEmoji={!!activeDesk.emoji}
+                    />
+                  ) : (
+                    <div className="flex flex-col overflow-hidden">
+                      {activeDesk.icon && (
+                        <div className="px-2 pt-2">
+                          <button
+                            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                            style={{ fontSize: 13 }}
+                            onClick={() => { updateDesk(activeDesk.id, { icon: null }); setDeskIconPicker(null); }}
+                          >
+                            <X size={13} />
+                            Remove icon
+                          </button>
+                        </div>
+                      )}
+                      <div className="p-2 grid grid-cols-8 gap-0.5 overflow-y-auto no-scrollbar" style={{ maxHeight: 340 }}>
+                        {FOLDER_ICONS.map((name) => {
+                          const IconComp = ICON_COMPONENTS[name];
+                          if (!IconComp) return null;
+                          const isSel = activeDesk.icon === name;
+                          const ac = activeDesk.color || DEFAULT_ACCENT;
+                          return (
+                            <button
+                              key={name}
+                              title={name}
+                              className="w-full aspect-square flex items-center justify-center rounded-lg transition-colors"
+                              style={{ background: isSel ? ac + '22' : 'transparent', color: isSel ? ac : 'var(--color-text-muted)' }}
+                              onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
+                              onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
+                              onClick={() => { updateDesk(activeDesk.id, { icon: name, emoji: null }); setDeskIconPicker(null); }}
+                            >
+                              <IconComp size={15} />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
