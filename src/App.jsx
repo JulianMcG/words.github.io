@@ -4505,19 +4505,19 @@ export default function App() {
     if (deskStripSyncedIdxRef.current === activeDeskIndex) {
       deskStripX.set(target);
     } else {
-      // Velocity handoff keeps a swipe → snap transition seamless
-      const v = Math.max(-2200, Math.min(2200, deskStripX.getVelocity()));
-      deskSnapControlRef.current = animateMV(deskStripX, target, { type: 'spring', stiffness: 460, damping: 48, mass: 0.8, velocity: v });
+      // Ease-out tween: starts fast (continues the swipe's motion) and glides
+      // into place with a fixed, predictable duration
+      deskSnapControlRef.current = animateMV(deskStripX, target, { type: 'tween', duration: 0.32, ease: [0.25, 1, 0.4, 1] });
     }
     deskStripSyncedIdxRef.current = activeDeskIndex;
   }, [activeDeskIndex, desks.length, sidebarWidth, isNarrowViewport, isAuthLoading]);
 
-  // ── Desk swipe: the pager strip tracks the fingers 1:1, hard-limited to
-  // the desks adjacent to where the gesture started — one swipe moves at most
-  // one desk, and the ends stop dead instead of rubber-banding. It snaps the
-  // moment a flick crests instead of waiting out the momentum tail, and a
-  // fresh swipe mid-tail re-grabs the strip instantly.
-  const deskDragRef = useRef({ mode: 'idle', baseIdx: 0, vel: 0, peak: 0, lastAbs: 0, idleTimer: null, tailTimer: null, touchStartX: null, touchStartY: null, touchLastX: 0, touchBase: 0, touchIntent: null });
+  // ── Desk swipe: a flick mechanism. The strip never tracks the full scroll —
+  // it only peeks a bounded fraction of a panel while you swipe; crossing a
+  // small input threshold commits the switch, and the ease tween carries the
+  // strip the rest of the way. Reversing mid-momentum re-grabs instantly, so
+  // fast back-and-forth flicking always lands.
+  const deskDragRef = useRef({ mode: 'idle', baseIdx: 0, accum: 0, lastAbs: 0, tailDir: 0, idleTimer: null, tailTimer: null, touchStartX: null, touchStartY: null, touchIntent: null });
   useEffect(() => {
     const el = sidebarInnerRef.current;
     if (!el) return;
@@ -4525,33 +4525,37 @@ export default function App() {
     const vw = () => sidebarScrollRef.current?.clientWidth || 1;
     const maxIdx = () => desksRef.current.length - 1;
     const currentIdx = () => Math.max(0, desksRef.current.findIndex(k => k.id === activeDeskIdRef.current));
-    // One gesture can only reach the desks next to where it started
-    const clampDrag = (x, baseIdx) => {
-      const w = vw();
-      const lo = -Math.min(maxIdx(), baseIdx + 1) * w;
-      const hi = -Math.max(0, baseIdx - 1) * w;
-      return Math.max(lo, Math.min(hi, x));
+    const COMMIT_AT = 80; // raw px of horizontal input that commits a switch
+
+    // Bounded peek: however far you scroll, the strip only shifts up to ~28%
+    // of a panel — the travel itself happens via the commit tween. Dead stop
+    // (no peek at all) at the outer edges.
+    const peekOf = (accum, baseIdx) => {
+      if (baseIdx <= 0 && accum < 0) return 0;
+      if (baseIdx >= maxIdx() && accum > 0) return 0;
+      const max = vw() * 0.28;
+      return max * Math.tanh(accum / (max * 1.5));
+    };
+    const applyPeek = (s) => {
+      deskStripX.set(-s.baseIdx * vw() - peekOf(s.accum, s.baseIdx));
+    };
+    const easeHome = () => {
+      deskSnapControlRef.current?.stop();
+      deskSnapControlRef.current = animateMV(deskStripX, -currentIdx() * vw(), { type: 'tween', duration: 0.26, ease: [0.25, 1, 0.4, 1] });
     };
 
-    // vel is a decayed per-event delta — a flick nudges the pick toward its
-    // direction, a slow drag just settles to the nearest of the two panels.
-    const settle = (vel, baseIdx) => {
-      const w = vw();
-      const raw = -deskStripX.get() / w;
-      const bias = Math.max(-0.45, Math.min(0.45, vel * 0.006));
-      let idx = Math.round(raw + bias);
-      idx = Math.max(baseIdx - 1, Math.min(baseIdx + 1, idx));
-      idx = Math.max(0, Math.min(maxIdx(), idx));
-      const target = -idx * w;
-      if (idx !== currentIdx()) {
-        deskActionsRef.current.switchDesk(desksRef.current[idx].id);
-      } else if (Math.abs(deskStripX.get() - target) < 2) {
-        deskStripX.set(target); // already in place — no wobble
-      } else {
-        deskSnapControlRef.current?.stop();
-        const v = Math.max(-2200, Math.min(2200, deskStripX.getVelocity()));
-        deskSnapControlRef.current = animateMV(deskStripX, target, { type: 'spring', stiffness: 460, damping: 48, mass: 0.8, velocity: v });
-      }
+    // Crossing the threshold mid-gesture switches immediately; the remaining
+    // momentum is swallowed as tail until it dies down, spikes, or reverses.
+    const commit = (s, dir) => {
+      const target = s.baseIdx + dir;
+      if (target < 0 || target > maxIdx()) return false;
+      s.mode = 'tail';
+      s.tailDir = dir;
+      clearTimeout(s.idleTimer);
+      clearTimeout(s.tailTimer);
+      s.tailTimer = setTimeout(() => { s.mode = 'idle'; }, 180);
+      deskActionsRef.current.switchDesk(desksRef.current[target].id);
+      return true;
     };
 
     const onWheel = (e) => {
@@ -4561,45 +4565,38 @@ export default function App() {
       const abs = Math.abs(e.deltaX);
 
       if (s.mode === 'tail') {
-        // Momentum tail of a settled flick — swallow it, unless a fresh
-        // deliberate swipe (acceleration spike) takes over.
+        // Momentum tail of a committed flick — swallow it, unless a fresh
+        // swipe takes over: an acceleration spike, or any motion in the
+        // opposite direction (instant back-and-forth).
         const spike = abs > 16 && abs > s.lastAbs * 2 + 4;
+        const reversed = abs > 4 && Math.sign(e.deltaX) === -(s.tailDir || 0);
         s.lastAbs = abs;
         clearTimeout(s.tailTimer);
-        s.tailTimer = setTimeout(() => { s.mode = 'idle'; }, 160);
-        if (!spike) return;
+        s.tailTimer = setTimeout(() => { s.mode = 'idle'; }, 180);
+        if (!spike && !reversed) return;
         s.mode = 'idle';
       }
 
       if (s.mode === 'idle') {
         s.mode = 'drag';
         s.baseIdx = currentIdx();
-        s.vel = 0;
-        s.peak = 0;
+        s.accum = 0;
         deskSnapControlRef.current?.stop();
       }
       s.lastAbs = abs;
-      s.vel = s.vel * 0.7 + e.deltaX * 0.3;
-      s.peak = Math.max(s.peak, Math.abs(s.vel));
-      deskStripX.set(clampDrag(deskStripX.get() - e.deltaX, s.baseIdx));
-
-      // Early settle: once a real flick has clearly crested and is decaying,
-      // snap right away — no dead wait for the momentum tail.
-      if (s.peak > 30 && Math.abs(s.vel) < s.peak * 0.55 && abs < s.peak * 0.5) {
-        s.mode = 'tail';
-        clearTimeout(s.idleTimer);
-        clearTimeout(s.tailTimer);
-        s.tailTimer = setTimeout(() => { s.mode = 'idle'; }, 160);
-        settle(s.vel, s.baseIdx);
-        return;
+      s.accum += e.deltaX;
+      // Don't bank scroll that has nowhere to go at the strip's edges
+      if ((s.baseIdx <= 0 && s.accum < 0) || (s.baseIdx >= maxIdx() && s.accum > 0)) {
+        s.accum = Math.max(-(COMMIT_AT - 1), Math.min(COMMIT_AT - 1, s.accum));
       }
-
+      if (Math.abs(s.accum) >= COMMIT_AT && commit(s, Math.sign(s.accum))) return;
+      applyPeek(s);
       clearTimeout(s.idleTimer);
       s.idleTimer = setTimeout(() => {
         if (s.mode !== 'drag') return;
         s.mode = 'idle';
-        settle(s.vel, s.baseIdx);
-      }, 80);
+        easeHome();
+      }, 90);
     };
 
     const onTouchStart = (e) => {
@@ -4607,14 +4604,12 @@ export default function App() {
       const t = e.touches[0];
       s.touchStartX = t.clientX;
       s.touchStartY = t.clientY;
-      s.touchLastX = t.clientX;
       s.touchIntent = null;
-      s.touchBase = deskStripX.get();
-      s.vel = 0;
+      if (s.mode === 'tail') s.mode = 'idle';
     };
     const onTouchMove = (e) => {
       const s = deskDragRef.current;
-      if (s.touchStartX == null) return;
+      if (s.touchStartX == null || s.mode === 'tail') return;
       const t = e.touches[0];
       const dx = t.clientX - s.touchStartX;
       const dy = t.clientY - s.touchStartY;
@@ -4622,19 +4617,26 @@ export default function App() {
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
         s.touchIntent = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
         if (s.touchIntent === 'h') {
+          s.mode = 'drag';
           s.baseIdx = currentIdx();
           deskSnapControlRef.current?.stop();
         }
       }
       if (s.touchIntent !== 'h') return;
       e.preventDefault();
-      s.vel = s.vel * 0.75 + -(t.clientX - s.touchLastX) * 0.25 * 2.5; // touch moves are per-frame, scale up
-      s.touchLastX = t.clientX;
-      deskStripX.set(clampDrag(s.touchBase + dx, s.baseIdx));
+      s.accum = -dx; // finger left = next desk (content follows the finger)
+      if ((s.baseIdx <= 0 && s.accum < 0) || (s.baseIdx >= maxIdx() && s.accum > 0)) {
+        s.accum = Math.max(-(COMMIT_AT - 1), Math.min(COMMIT_AT - 1, s.accum));
+      }
+      if (Math.abs(s.accum) >= COMMIT_AT && commit(s, Math.sign(s.accum))) return;
+      applyPeek(s);
     };
     const onTouchEnd = () => {
       const s = deskDragRef.current;
-      if (s.touchIntent === 'h') settle(s.vel, s.baseIdx);
+      if (s.touchIntent === 'h' && s.mode === 'drag') {
+        s.mode = 'idle';
+        easeHome();
+      }
       s.touchStartX = null;
       s.touchIntent = null;
     };
