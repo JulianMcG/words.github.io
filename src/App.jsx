@@ -1625,6 +1625,16 @@ const lerpHex = (a, b, t) => {
   const c = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, '0');
   return `#${c(ar, br)}${c(ag, bg)}${c(ab, bb)}`;
 };
+const hslToHex = (h, s, l) => {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => {
+    const k = (n + h / 30) % 12;
+    const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(255 * c).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+};
+
 const hexToHsl = (hex) => {
   const [r8, g8, b8] = hexToRgb(hex);
   const r = r8 / 255, g = g8 / 255, b = b8 / 255;
@@ -1654,6 +1664,84 @@ const applyDeskTheme = (desk) => {
     root.style.removeProperty('--desk-tint-amt');
     root.removeAttribute('data-desk-tint');
   }
+};
+
+// Interactive spectrum color picker for desks: drag anywhere on the hue strip
+// for a live color, or tap a preset. Spectrum colors are kept muted (fixed
+// saturation/lightness) so any pick stays tasteful as an app-wide tint.
+const DeskColorPicker = ({ color, onChange }) => {
+  const stripRef = useRef(null);
+  const draggingRef = useRef(false);
+  const hue = color ? hexToHsl(color).h : null;
+  const pick = (e) => {
+    const rect = stripRef.current.getBoundingClientRect();
+    const f = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    onChange(hslToHex(f * 360, 0.48, 0.54));
+  };
+  return (
+    <div className="p-3" style={{ width: 232 }}>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">Color</p>
+      <div
+        ref={stripRef}
+        className="relative h-[16px] rounded-full cursor-crosshair select-none"
+        style={{ background: 'linear-gradient(to right, hsl(0,48%,54%), hsl(60,48%,54%), hsl(120,48%,54%), hsl(180,48%,54%), hsl(240,48%,54%), hsl(300,48%,54%), hsl(360,48%,54%))', touchAction: 'none' }}
+        onPointerDown={(e) => {
+          draggingRef.current = true;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          pick(e);
+        }}
+        onPointerMove={(e) => { if (draggingRef.current) pick(e); }}
+        onPointerUp={() => { draggingRef.current = false; }}
+        onPointerCancel={() => { draggingRef.current = false; }}
+      >
+        {hue !== null && (
+          <span
+            className="absolute top-1/2 rounded-full pointer-events-none"
+            style={{
+              left: `${(hue / 360) * 100}%`,
+              transform: 'translate(-50%, -50%)',
+              width: 20,
+              height: 20,
+              background: color,
+              boxShadow: '0 0 0 2.5px var(--color-bg-primary), 0 1px 4px rgba(0,0,0,0.25)',
+            }}
+          />
+        )}
+      </div>
+      {/* Presets + default */}
+      <div className="mt-3 flex items-center justify-between">
+        <button
+          onClick={() => onChange(null)}
+          className="relative w-[18px] h-[18px] rounded-full flex-shrink-0 border border-[var(--color-border-hover)] bg-[var(--color-bg-primary)] overflow-hidden"
+          style={{
+            boxShadow: !color ? '0 0 0 2px var(--color-bg-primary), 0 0 0 3.5px var(--color-text-faint)' : 'none',
+            transform: !color ? 'scale(1.15)' : 'scale(1)',
+            transition: 'transform 150ms ease, box-shadow 150ms ease',
+          }}
+          title="Default — no accent color"
+        >
+          <span className="absolute left-1/2 top-1/2 w-[22px] h-[1.5px] bg-[var(--color-text-faint)]" style={{ transform: 'translate(-50%, -50%) rotate(-45deg)' }} />
+        </button>
+        {DESK_COLORS.map((c) => {
+          const isCurrent = color === c;
+          return (
+            <button
+              key={c}
+              onClick={() => onChange(c)}
+              className="w-[18px] h-[18px] rounded-full flex-shrink-0"
+              style={{
+                background: c,
+                boxShadow: isCurrent ? `0 0 0 2px var(--color-bg-primary), 0 0 0 3.5px ${c}` : 'none',
+                transform: isCurrent ? 'scale(1.15)' : 'scale(1)',
+                transition: 'transform 150ms ease, box-shadow 150ms ease',
+              }}
+              title="Preset color"
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
 };
 
 // Delete button where holding fills a bar; releasing early cancels.
@@ -1814,9 +1902,10 @@ export default function App() {
   const deskLastDocRef = useRef((() => {
     try { return JSON.parse(localStorage.getItem("words_desk_last_doc") || "{}"); } catch { return {}; }
   })());
-  const [deskCustomizeOpen, setDeskCustomizeOpen] = useState(false);
-  const [deskIconPicker, setDeskIconPicker] = useState(null); // null | 'emoji' | 'icon'
+  const [deskIconPicker, setDeskIconPicker] = useState(null); // null | { x, y, tab: 'emoji' | 'icon' }
+  const [deskColorPicker, setDeskColorPicker] = useState(null); // null | { x, y } — spectrum picker
   const [deskMenuOpen, setDeskMenuOpen] = useState(false); // false | { x, y } — the "…" menu on the desk title row
+  const [editingDeskId, setEditingDeskId] = useState(null); // inline rename in the title row, like folders
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   // Horizontal offset of the desk pager strip — dragged live during a swipe,
   // spring-snapped to the active desk's panel on release
@@ -1825,7 +1914,6 @@ export default function App() {
   const deskStripSyncedIdxRef = useRef(null);
   // Desk dot currently hovered while dragging a page — drop moves it there
   const [deskDropTargetId, setDeskDropTargetId] = useState(null);
-  const deskNameInputRef = useRef(null);
   // The desk an item (doc or group) belongs to. Items whose deskId is missing or
   // refers to a deleted desk fall back to the first desk, so nothing is ever lost.
   const activeDesk = desks.find(k => k.id === activeDeskId) || desks[0];
@@ -4379,30 +4467,28 @@ export default function App() {
   };
 
   const closeDeskPopovers = () => {
-    setDeskCustomizeOpen(false);
     setDeskIconPicker(null);
+    setDeskColorPicker(null);
     setDeskMenuOpen(false);
+    setEditingDeskId(null);
     setPlusMenuOpen(false);
   };
 
-  // Anchor the desk options popover off the right edge of the desk title row.
-  // The row is queried by desk id — during a desk-switch slide two rows exist
-  // (the exiting clone and the entering one), and only the id disambiguates.
-  const openDeskOptionsAt = (deskId) => {
-    const row = document.querySelector(`[data-desk-header-id="${deskId}"]`);
+  // Anchor the emoji/icon picker under the desk title row. The row is queried
+  // by desk id — during a desk-switch slide two rows exist (the exiting clone
+  // and the entering one), and only the id disambiguates.
+  const openDeskIconPicker = (tab = null) => {
+    const row = document.querySelector(`[data-desk-header-id="${activeDesk?.id || DEFAULT_DESK_ID}"]`);
     const rect = row?.getBoundingClientRect();
-    setDeskIconPicker(null);
+    setDeskColorPicker(null);
     setDeskMenuOpen(false);
     setPlusMenuOpen(false);
-    setDeskCustomizeOpen({
-      x: Math.min((rect?.right ?? 250) + 12, window.innerWidth - 288),
-      y: Math.max(8, (rect?.top ?? 88) - 6),
+    setEditingDeskId(null);
+    setDeskIconPicker({
+      x: Math.max(8, Math.min((rect?.left ?? 16) + 4, window.innerWidth - 336)),
+      y: (rect?.bottom ?? 96) + 8,
+      tab: tab || (activeDesk?.icon ? 'icon' : 'emoji'),
     });
-  };
-
-  const openDeskCustomize = () => {
-    if (deskCustomizeOpen) { closeDeskPopovers(); return; }
-    openDeskOptionsAt(activeDesk?.id || DEFAULT_DESK_ID);
   };
 
   const switchDesk = (deskId) => {
@@ -4431,8 +4517,12 @@ export default function App() {
     const id = Math.random().toString(36).substring(2, 9);
     // Colorless desks use the default accent, so they don't consume a rainbow color
     const used = new Set(desks.map(k => k.color || DEFAULT_ACCENT));
-    const color = DESK_COLORS.find(c => !used.has(c)) || DESK_COLORS[desks.length % DESK_COLORS.length];
-    const nextDesks = [...desks, { id, name: "New Desk", emoji: null, color, createdAt: new Date().toISOString() }];
+    const pool = DESK_COLORS.filter(c => !used.has(c));
+    const source = pool.length > 0 ? pool : DESK_COLORS;
+    const color = source[Math.floor(Math.random() * source.length)];
+    let n = 1;
+    while (desks.some(k => k.name === `My Desk ${n}`)) n++;
+    const nextDesks = [...desks, { id, name: `My Desk ${n}`, emoji: null, icon: 'Circle', color, createdAt: new Date().toISOString() }];
     desksRef.current = nextDesks;
     setDesks(nextDesks);
     const docId = createBlankDocInDesk(id);
@@ -4442,11 +4532,8 @@ export default function App() {
     setActiveDocId(docId);
     setSelectedDocIds([docId]);
     setIsSidebarScrolled(false);
-    // Launch straight into the desk options with the name ready to type over
-    setTimeout(() => {
-      openDeskOptionsAt(id);
-      setTimeout(() => deskNameInputRef.current?.select(), 80);
-    }, 380); // after the slide-in settles
+    // Land in the new desk with the name ready to type over, folder-style
+    setTimeout(() => setEditingDeskId(id), 380); // after the slide-in settles
   };
 
   const updateDesk = (id, updates) => {
@@ -4547,10 +4634,11 @@ export default function App() {
     // Crossing the threshold mid-gesture switches immediately; the remaining
     // momentum is swallowed as tail until it dies down, spikes, or reverses.
     const commit = (s, dir) => {
-      const target = s.baseIdx + dir;
+      const target = currentIdx() + dir;
       if (target < 0 || target > maxIdx()) return false;
       s.mode = 'tail';
       s.tailDir = dir;
+      s.lastCommitAt = performance.now();
       clearTimeout(s.idleTimer);
       clearTimeout(s.tailTimer);
       s.tailTimer = setTimeout(() => { s.mode = 'idle'; }, 180);
@@ -4565,16 +4653,19 @@ export default function App() {
       const abs = Math.abs(e.deltaX);
 
       if (s.mode === 'tail') {
-        // Momentum tail of a committed flick — swallow it, unless a fresh
-        // swipe takes over: an acceleration spike, or any motion in the
-        // opposite direction (instant back-and-forth).
-        const spike = abs > 16 && abs > s.lastAbs * 2 + 4;
-        const reversed = abs > 4 && Math.sign(e.deltaX) === -(s.tailDir || 0);
+        // Momentum tail of a committed flick. A fresh swipe hops straight to
+        // the next desk (no jumpy re-peek from mid-transition) — rate-limited
+        // so one long fast scroll can't machine-gun through desks. Reversals
+        // get a shorter cooldown so back-and-forth stays instant.
+        const now = performance.now();
+        const since = now - (s.lastCommitAt || 0);
+        const spike = abs > 16 && abs > s.lastAbs * 2 + 4 && since > 300;
+        const reversed = abs > 5 && Math.sign(e.deltaX) === -(s.tailDir || 0) && since > 130;
         s.lastAbs = abs;
         clearTimeout(s.tailTimer);
         s.tailTimer = setTimeout(() => { s.mode = 'idle'; }, 180);
-        if (!spike && !reversed) return;
-        s.mode = 'idle';
+        if (spike || reversed) commit(s, Math.sign(e.deltaX));
+        return;
       }
 
       if (s.mode === 'idle') {
@@ -6571,8 +6662,8 @@ export default function App() {
         setUserMenuOpen(false);
         setCloudSubmenu(null);
         setTrashHoverDocId(null);
-        setDeskCustomizeOpen(false);
         setDeskIconPicker(null);
+        setDeskColorPicker(null);
         setDeskMenuOpen(false);
         setPlusMenuOpen(false);
       }
@@ -7827,11 +7918,18 @@ export default function App() {
                       <div
                         data-desk-header-id={activeDesk?.id || DEFAULT_DESK_ID}
                         data-sidebar-item
-                        className="words-context-menu group/desk mt-1 mb-0.5 px-3 py-[6px] rounded-md flex items-center gap-2.5 cursor-pointer select-none hover:bg-[var(--color-bg-hover)] transition-colors"
-                        onClick={openDeskCustomize}
-                        title="Desk options"
+                        className="words-context-menu group/desk mt-1 mb-0.5 px-3 py-[6px] rounded-md flex items-center gap-2.5 select-none hover:bg-[var(--color-bg-hover)] transition-colors"
                       >
-                        <div className="w-5 h-5 flex-shrink-0 flex items-center justify-center">
+                        {/* Icon — click to change (emoji / icon picker) */}
+                        <button
+                          className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded hover:bg-[var(--color-bg-hover-strong)] transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (deskIconPicker) { setDeskIconPicker(null); return; }
+                            openDeskIconPicker();
+                          }}
+                          title="Change icon"
+                        >
                           {activeDesk?.emoji ? (
                             <span className="text-[14px] leading-none">{activeDesk.emoji}</span>
                           ) : activeDesk?.icon ? (
@@ -7842,20 +7940,50 @@ export default function App() {
                               style={{ background: activeDesk?.color || DEFAULT_ACCENT }}
                             />
                           )}
-                        </div>
-                        <span
-                          className="text-[12px] font-bold truncate flex-1"
-                          style={{ color: activeDesk?.color || 'var(--color-text-muted)' }}
+                        </button>
+                        {/* Name — double-click to rename inline, folder-style */}
+                        {editingDeskId === activeDesk?.id ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={activeDesk.name}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(e) => updateDesk(activeDesk.id, { name: e.target.value })}
+                            onBlur={() => setEditingDeskId(null)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingDeskId(null); }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex-1 min-w-0 bg-transparent border-none outline-none text-[12px] font-bold text-[var(--color-text-primary)]"
+                          />
+                        ) : (
+                          <span
+                            className="text-[12px] font-bold truncate flex-1 text-[var(--color-text-muted)]"
+                            onDoubleClick={(e) => { e.stopPropagation(); setEditingDeskId(activeDesk?.id); }}
+                          >
+                            {activeDesk?.name || 'Desk'}
+                          </span>
+                        )}
+                        {/* Paint brush — spectrum color picker */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (deskColorPicker) { setDeskColorPicker(null); return; }
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setDeskIconPicker(null);
+                            setDeskMenuOpen(false);
+                            setDeskColorPicker({ x: Math.max(8, Math.min(rect.left - 100, window.innerWidth - 248)), y: rect.bottom + 6 });
+                          }}
+                          className="flex-shrink-0 p-0.5 rounded opacity-0 group-hover/desk:opacity-100 transition-opacity text-[var(--color-text-muted)] hover:opacity-100 hover:text-[var(--color-text-primary)]"
+                          title="Desk color"
                         >
-                          {activeDesk?.name || 'Desk'}
-                        </span>
+                          <Paintbrush size={13} />
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             if (deskMenuOpen) { setDeskMenuOpen(false); return; }
                             const rect = e.currentTarget.getBoundingClientRect();
-                            setDeskCustomizeOpen(false);
                             setDeskIconPicker(null);
+                            setDeskColorPicker(null);
                             setDeskMenuOpen({ x: Math.min(rect.left - 4, window.innerWidth - 190), y: rect.bottom + 6 });
                           }}
                           className="flex-shrink-0 p-0.5 -mr-1 rounded opacity-0 group-hover/desk:opacity-100 transition-opacity text-[var(--color-text-muted)] hover:opacity-100 hover:text-[var(--color-text-primary)]"
@@ -8210,8 +8338,8 @@ export default function App() {
           <div className="absolute bottom-4 right-4 z-40 words-context-menu">
             <button
               onClick={() => {
-                setDeskCustomizeOpen(false);
                 setDeskIconPicker(null);
+                setDeskColorPicker(null);
                 setDeskMenuOpen(false);
                 setPlusMenuOpen(v => !v);
               }}
@@ -9289,35 +9417,17 @@ export default function App() {
           <button
             className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={() => {
-              const deskId = activeDesk.id;
-              const wantsIconTab = !!activeDesk.icon;
               setDeskMenuOpen(false);
-              openDeskOptionsAt(deskId);
-              setDeskIconPicker(wantsIconTab ? 'icon' : 'emoji');
-            }}
-          >
-            <Smile size={14} /> Change Icon
-          </button>
-          <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-            onClick={() => {
-              const deskId = activeDesk.id;
-              setDeskMenuOpen(false);
-              openDeskOptionsAt(deskId);
-              setTimeout(() => deskNameInputRef.current?.select(), 80);
+              setEditingDeskId(activeDesk.id);
             }}
           >
             <Pencil size={14} /> Rename
           </button>
           <button
             className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-            onClick={() => {
-              const deskId = activeDesk.id;
-              setDeskMenuOpen(false);
-              openDeskOptionsAt(deskId);
-            }}
+            onClick={() => openDeskIconPicker()}
           >
-            <Paintbrush size={14} /> Change Color
+            <Smile size={14} /> Change Icon
           </button>
           {desks.length > 1 && (
             <>
@@ -9330,186 +9440,108 @@ export default function App() {
       </AnimatePresence>,
       document.body)}
 
-      {/* Desk options — anchored off the right edge of the desk title row */}
+      {/* Desk emoji/icon picker — opened from the title row icon or the … menu */}
       {createPortal(
       <AnimatePresence>
-      {deskCustomizeOpen && activeDesk && (
+      {deskIconPicker && activeDesk && (
         <motion.div
-          key="desk-customize"
-          className="words-context-menu fixed z-[150] w-[264px] bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl shadow-xl"
-          style={{ top: deskCustomizeOpen.y, left: deskCustomizeOpen.x, transformOrigin: '-9px 24px' }}
-          initial={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
-          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-          exit={{ opacity: 0, scale: 0.95, filter: 'blur(2px)' }}
-          transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 } }}
+          key="desk-icon-picker"
+          className="words-context-menu fixed z-[150]"
+          style={{ top: deskIconPicker.y, left: deskIconPicker.x, transformOrigin: 'top left' }}
+          initial={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' }}
+          animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' }}
+          transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Tail pointing left at the desk title row */}
-          <svg className="absolute pointer-events-none z-10" style={{ top: '16px', left: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
-            <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20 Z" fill="var(--color-bg-primary)"/>
-            <path d="M10,0 C10,4 0,7 0,10 C0,13 10,16 10,20" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/>
-          </svg>
-
-          {/* Name — the icon well opens the emoji / icon picker */}
-          <div className="px-3 pt-3 pb-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">Name</p>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setDeskIconPicker(v => v ? null : (activeDesk.icon ? 'icon' : 'emoji'))}
-                className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-md transition-colors ${deskIconPicker ? 'bg-[var(--color-bg-hover-strong)]' : 'bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-hover-strong)]'}`}
-                style={deskIconPicker ? { boxShadow: '0 0 0 1.5px var(--color-accent)' } : undefined}
-                title="Change icon"
-              >
-                {activeDesk.emoji ? (
-                  <span className="text-[14px] leading-none">{activeDesk.emoji}</span>
-                ) : activeDesk.icon ? (
-                  <FolderIcon name={activeDesk.icon} size={14} color={activeDesk.color || 'var(--color-text-muted)'} />
-                ) : (
-                  <span className="w-[9px] h-[9px] rounded-full" style={{ background: activeDesk.color || DEFAULT_ACCENT }} />
-                )}
-              </button>
-              <input
-                ref={deskNameInputRef}
-                type="text"
-                value={activeDesk.name}
-                placeholder="Desk name"
-                onChange={(e) => updateDesk(activeDesk.id, { name: e.target.value })}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') closeDeskPopovers(); }}
-                className="flex-1 min-w-0 h-7 px-2 rounded-md bg-[var(--color-bg-hover)] border border-transparent outline-none text-[13px] font-medium text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:bg-transparent transition-colors"
-              />
-            </div>
-          </div>
-
-          <div className="h-px bg-[var(--color-border-primary)] mx-3" />
-
-          {/* Color — the app accent + tint while this desk is active */}
-          <div className="px-3 pt-2.5 pb-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">Color</p>
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => updateDesk(activeDesk.id, { color: null })}
-                className="relative w-[20px] h-[20px] rounded-full flex-shrink-0 border border-[var(--color-border-hover)] bg-[var(--color-bg-primary)] overflow-hidden"
-                style={{
-                  boxShadow: !activeDesk.color ? '0 0 0 2px var(--color-bg-primary), 0 0 0 3.5px var(--color-text-faint)' : 'none',
-                  transform: !activeDesk.color ? 'scale(1.18)' : 'scale(1)',
-                  transition: 'transform 150ms ease, box-shadow 150ms ease',
-                }}
-                title="Default — no accent color"
-              >
-                <span className="absolute left-1/2 top-1/2 w-[24px] h-[1.5px] bg-[var(--color-text-faint)]" style={{ transform: 'translate(-50%, -50%) rotate(-45deg)' }} />
-              </button>
-              {DESK_COLORS.map((c) => {
-                const isCurrent = activeDesk.color === c;
-                return (
-                  <button
-                    key={c}
-                    onClick={() => updateDesk(activeDesk.id, { color: c })}
-                    className="w-[20px] h-[20px] rounded-full flex-shrink-0"
-                    style={{
-                      background: c,
-                      boxShadow: isCurrent ? `0 0 0 2px var(--color-bg-primary), 0 0 0 3.5px ${c}` : 'none',
-                      transform: isCurrent ? 'scale(1.18)' : 'scale(1)',
-                      transition: 'transform 150ms ease, box-shadow 150ms ease',
-                    }}
-                    onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.transform = 'scale(1.1)'; }}
-                    onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.transform = 'scale(1)'; }}
-                    title="Desk color"
-                  />
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Delete — hold to fill, never available on the last desk */}
-          {desks.length > 1 && (
-            <>
-              <div className="h-px bg-[var(--color-border-primary)] mx-3" />
-              <div className="p-1.5">
-                <HoldToDelete className="w-full" onConfirm={() => deleteDesk(activeDesk.id)} />
-              </div>
-            </>
-          )}
-
-          {/* Emoji / icon picker — one panel, tabs on top to switch */}
-          <AnimatePresence>
-            {deskIconPicker && (
-              <motion.div
-                key="desk-icon-picker"
-                className="absolute top-0 left-full ml-2 z-10"
-                initial={{ opacity: 0, scale: 0.95, x: -4 }}
-                animate={{ opacity: 1, scale: 1, x: 0 }}
-                exit={{ opacity: 0, scale: 0.95, x: -4 }}
-                transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-                style={{ transformOrigin: 'top left' }}
-              >
-                <div
-                  className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
-                  style={{ width: 320, maxHeight: 424 }}
+          <div
+            className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            style={{ width: 320, maxHeight: 424 }}
+          >
+            <div className="p-2 pb-0">
+              <div className="flex gap-0.5 p-0.5 rounded-lg bg-[var(--color-bg-secondary)]">
+                <button
+                  onClick={() => setDeskIconPicker(p => ({ ...p, tab: 'emoji' }))}
+                  className={`flex-1 h-6 rounded-md flex items-center justify-center gap-1.5 text-[11px] font-medium transition-colors ${deskIconPicker.tab === 'emoji' ? 'bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
                 >
-                  <div className="p-2 pb-0">
-                    <div className="flex gap-0.5 p-0.5 rounded-lg bg-[var(--color-bg-secondary)]">
-                      <button
-                        onClick={() => setDeskIconPicker('emoji')}
-                        className={`flex-1 h-6 rounded-md flex items-center justify-center gap-1.5 text-[11px] font-medium transition-colors ${deskIconPicker === 'emoji' ? 'bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
-                      >
-                        <Smile size={12} /> Emoji
-                      </button>
-                      <button
-                        onClick={() => setDeskIconPicker('icon')}
-                        className={`flex-1 h-6 rounded-md flex items-center justify-center gap-1.5 text-[11px] font-medium transition-colors ${deskIconPicker === 'icon' ? 'bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
-                      >
-                        <Shapes size={12} /> Icon
-                      </button>
-                    </div>
+                  <Smile size={12} /> Emoji
+                </button>
+                <button
+                  onClick={() => setDeskIconPicker(p => ({ ...p, tab: 'icon' }))}
+                  className={`flex-1 h-6 rounded-md flex items-center justify-center gap-1.5 text-[11px] font-medium transition-colors ${deskIconPicker.tab === 'icon' ? 'bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
+                >
+                  <Shapes size={12} /> Icon
+                </button>
+              </div>
+            </div>
+            {deskIconPicker.tab === 'emoji' ? (
+              <EmojiPickerPanel
+                frameless
+                onSelect={(emoji) => { updateDesk(activeDesk.id, { emoji, icon: null }); setDeskIconPicker(null); }}
+                onRemove={() => { updateDesk(activeDesk.id, { emoji: null }); setDeskIconPicker(null); }}
+                hasEmoji={!!activeDesk.emoji}
+              />
+            ) : (
+              <div className="flex flex-col overflow-hidden">
+                {activeDesk.icon && (
+                  <div className="px-2 pt-2">
+                    <button
+                      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                      style={{ fontSize: 13 }}
+                      onClick={() => { updateDesk(activeDesk.id, { icon: null }); setDeskIconPicker(null); }}
+                    >
+                      <X size={13} />
+                      Remove icon
+                    </button>
                   </div>
-                  {deskIconPicker === 'emoji' ? (
-                    <EmojiPickerPanel
-                      frameless
-                      onSelect={(emoji) => { updateDesk(activeDesk.id, { emoji, icon: null }); setDeskIconPicker(null); }}
-                      onRemove={() => { updateDesk(activeDesk.id, { emoji: null }); setDeskIconPicker(null); }}
-                      hasEmoji={!!activeDesk.emoji}
-                    />
-                  ) : (
-                    <div className="flex flex-col overflow-hidden">
-                      {activeDesk.icon && (
-                        <div className="px-2 pt-2">
-                          <button
-                            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                            style={{ fontSize: 13 }}
-                            onClick={() => { updateDesk(activeDesk.id, { icon: null }); setDeskIconPicker(null); }}
-                          >
-                            <X size={13} />
-                            Remove icon
-                          </button>
-                        </div>
-                      )}
-                      <div className="p-2 grid grid-cols-8 gap-0.5 overflow-y-auto no-scrollbar" style={{ maxHeight: 340 }}>
-                        {FOLDER_ICONS.map((name) => {
-                          const IconComp = ICON_COMPONENTS[name];
-                          if (!IconComp) return null;
-                          const isSel = activeDesk.icon === name;
-                          const ac = activeDesk.color || DEFAULT_ACCENT;
-                          return (
-                            <button
-                              key={name}
-                              title={name}
-                              className="w-full aspect-square flex items-center justify-center rounded-lg transition-colors"
-                              style={{ background: isSel ? ac + '22' : 'transparent', color: isSel ? ac : 'var(--color-text-muted)' }}
-                              onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
-                              onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
-                              onClick={() => { updateDesk(activeDesk.id, { icon: name, emoji: null }); setDeskIconPicker(null); }}
-                            >
-                              <IconComp size={15} />
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                )}
+                <div className="p-2 grid grid-cols-8 gap-0.5 overflow-y-auto no-scrollbar" style={{ maxHeight: 340 }}>
+                  {FOLDER_ICONS.map((name) => {
+                    const IconComp = ICON_COMPONENTS[name];
+                    if (!IconComp) return null;
+                    const isSel = activeDesk.icon === name;
+                    const ac = activeDesk.color || DEFAULT_ACCENT;
+                    return (
+                      <button
+                        key={name}
+                        title={name}
+                        className="w-full aspect-square flex items-center justify-center rounded-lg transition-colors"
+                        style={{ background: isSel ? ac + '22' : 'transparent', color: isSel ? ac : 'var(--color-text-muted)' }}
+                        onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
+                        onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
+                        onClick={() => { updateDesk(activeDesk.id, { icon: name, emoji: null }); setDeskIconPicker(null); }}
+                      >
+                        <IconComp size={15} />
+                      </button>
+                    );
+                  })}
                 </div>
-              </motion.div>
+              </div>
             )}
-          </AnimatePresence>
+          </div>
+        </motion.div>
+      )}
+      </AnimatePresence>,
+      document.body)}
+
+      {/* Desk color picker — spectrum + presets, opened from the paint brush */}
+      {createPortal(
+      <AnimatePresence>
+      {deskColorPicker && activeDesk && (
+        <motion.div
+          key="desk-color-picker"
+          className="words-context-menu fixed z-[150] bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-xl shadow-xl"
+          style={{ top: deskColorPicker.y, left: deskColorPicker.x, transformOrigin: 'top center' }}
+          initial={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' }}
+          animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' }}
+          transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DeskColorPicker
+            color={activeDesk.color}
+            onChange={(c) => updateDesk(activeDesk.id, { color: c })}
+          />
         </motion.div>
       )}
       </AnimatePresence>,
