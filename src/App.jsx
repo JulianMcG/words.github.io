@@ -1650,6 +1650,17 @@ const hexToHsl = (hex) => {
   return { h, s, l };
 };
 
+// A dark-surface variant of a desk color: same hue/saturation, lightness
+// pinned low (near the app's actual dark-mode surface tones). Mixing MORE of
+// a color this dark into a dark background deepens its hue/chroma without
+// dragging the overall lightness up — "more saturated, not brighter" — which
+// a straight mix of the raw (mid-lightness) desk color can't do, since more
+// of a brighter color is definitionally brighter.
+const darkSurfaceTint = (hex) => {
+  const { h, s } = hexToHsl(hex);
+  return hslToHex(h, Math.min(1, s * 1.15), 0.22);
+};
+
 // Apply a desk's color as the app accent + UI tint (index.css desk-tint rules).
 // --desk-tint-amt is always set to an explicit number, never removed — the
 // registered @property gives it a real value even when "unset" (0, matching
@@ -1662,6 +1673,7 @@ const applyDeskTheme = (desk) => {
   if (desk?.color) {
     root.style.setProperty('--color-accent', desk.color);
     root.style.setProperty('--desk-tint', desk.color);
+    root.style.setProperty('--desk-tint-dark', darkSurfaceTint(desk.color));
     root.style.setProperty('--desk-tint-amt', '1');
   } else {
     root.style.removeProperty('--color-accent');
@@ -2653,6 +2665,7 @@ export default function App() {
       const amt = (a.color ? 1 - t : 0) + (b.color ? t : 0);
       root.style.setProperty('--color-accent', accent);
       root.style.setProperty('--desk-tint', tintColor);
+      root.style.setProperty('--desk-tint-dark', darkSurfaceTint(tintColor));
       root.style.setProperty('--desk-tint-amt', amt.toFixed(3));
     });
   }, []);
