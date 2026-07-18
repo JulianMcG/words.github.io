@@ -158,8 +158,12 @@ body {
   }
 
   .pin-item {
-    transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
-                background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+    /* No background/border-color transition here on purpose: those depend on
+       --desk-tint, which already animates smoothly on <html> (registered
+       @property, see the Desk tint block below). A second transition on this
+       element racing the same recompute every frame would chase a moving
+       target and look janky — the parent's animation alone is what smooths it. */
+    transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 150ms ease;
     /* Keep the item on its own compositing layer at all times. Without this,
        the press animation promotes/demotes the layer mid-transition, and the
        fractional 1fr grid width snaps to device pixels — the right-most item
@@ -177,17 +181,21 @@ body {
 
   .pin-item.pin-pressed {
     transform: scale(0.967);
-    transition: transform 45ms ease-out,
-                background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+    transition: transform 45ms ease-out, box-shadow 150ms ease;
   }
 
+  /* --desk-tint-amt is always an explicit 0–1 (never removed/unset), so these
+     formulas need no var() fallback — at amt 0 (no desk color) color-mix
+     resolves to exactly the plain base color, no matter what --desk-tint
+     itself last held. That's what keeps "no color" mode from ever bleeding
+     the previous desk's hue in. */
   .pin-active {
     background: linear-gradient(
       to bottom,
-      color-mix(in srgb, var(--desk-tint, #E8E8E5) 8%, #E8E8E5),
-      color-mix(in srgb, var(--desk-tint, #FAFAF8) 5%, #FAFAF8)
+      color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #E8E8E5),
+      color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt)), #FAFAF8)
     );
-    border-color: color-mix(in srgb, var(--desk-tint, #DCDBD8) 8%, #DCDBD8);
+    border-color: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #DCDBD8);
     box-shadow:
       inset 0 1px 1px rgba(255, 255, 255, 1),
       0 1px 4px rgba(0, 0, 0, 0.06),
@@ -202,7 +210,7 @@ body {
   }
 
   .pin-inactive {
-    background: color-mix(in srgb, var(--desk-tint, #EBEBE9) 9%, #EBEBE9);
+    background: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #EBEBE9);
     border-color: transparent;
   }
 
@@ -210,10 +218,10 @@ body {
     .pin-active {
       background: linear-gradient(
         to bottom,
-        color-mix(in srgb, var(--desk-tint, #191919) 9%, #191919),
-        color-mix(in srgb, var(--desk-tint, #262626) 7%, #262626)
+        color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #191919),
+        color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt)), #262626)
       );
-      border-color: color-mix(in srgb, var(--desk-tint, #191919) 9%, #191919);
+      border-color: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #191919);
       box-shadow:
         inset 0 1px 1px rgba(255, 255, 255, 0.15),
         0 1px 5px rgba(0, 0, 0, 0.20),
@@ -227,7 +235,7 @@ body {
     }
 
     .pin-inactive {
-      background: color-mix(in srgb, var(--desk-tint, #2E2E2E) 11%, #2E2E2E);
+      background: color-mix(in srgb, var(--desk-tint) calc(11% * var(--desk-tint-amt)), #2E2E2E);
       border-color: transparent;
     }
   }
@@ -338,43 +346,68 @@ html[data-theme="light"] {
 }
 /* ── Desk tint ─────────────────────────────────────────────────────────────
  * While a desk with a color is active, the whole UI takes a subtle wash of it.
- * App.jsx sets --desk-tint + the data-desk-tint attribute on <html>; during a
- * desk swipe it also sets --desk-tint-amt (0..1) so the wash cross-fades as
- * the strip moves. Order matters: these live after the forced-theme
- * overrides so the tint wins. */
-html[data-desk-tint] {
-  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(3.5% * var(--desk-tint-amt, 1)), #ffffff);
-  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt, 1)), #f7f7f5);
-  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt, 1)), #f9fafb);
-  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(10% * var(--desk-tint-amt, 1)), #f1f1ef);
-  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(14% * var(--desk-tint-amt, 1)), #ebebea);
-  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt, 1)), #e8e4dd);
+ * App.jsx always keeps --desk-tint-amt set explicitly to a real number (0 for
+ * "no color" desks, 1 for a colored one, or a blend while swiping) — it is
+ * NEVER removed. That's deliberate: these three custom properties are
+ * registered below so they animate natively, and a REGISTERED property with
+ * a valid initial-value is never "unset" for var()'s fallback purposes — it
+ * just resolves to that initial-value. Gating this block behind an attribute
+ * selector (or leaning on a var() fallback) would have meant a lingering
+ * desk color could bleed through once JS stopped touching the property. Amt
+ * is the single on/off/blend control instead: at 0, every color-mix() below
+ * resolves to exactly its plain base color, whatever --desk-tint still holds.
+ * Order matters: these live after the forced-theme overrides so the tint wins. */
+@property --color-accent {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #E8572A;
+}
+@property --desk-tint {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #E8572A;
+}
+@property --desk-tint-amt {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+html {
+  transition: --color-accent 220ms ease, --desk-tint 220ms ease, --desk-tint-amt 220ms ease;
+}
+html {
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(3.5% * var(--desk-tint-amt)), #ffffff);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt)), #f7f7f5);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt)), #f9fafb);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(10% * var(--desk-tint-amt)), #f1f1ef);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(14% * var(--desk-tint-amt)), #ebebea);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #e8e4dd);
 }
 @media (prefers-color-scheme: dark) {
-  html[data-desk-tint] {
-    --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(6% * var(--desk-tint-amt, 1)), #191919);
-    --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt, 1)), #202020);
-    --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt, 1)), #2a2a2a);
-    --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt, 1)), #2e2e2e);
-    --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(16% * var(--desk-tint-amt, 1)), #383838);
-    --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt, 1)), #3d3a35);
+  html {
+    --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(6% * var(--desk-tint-amt)), #191919);
+    --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #202020);
+    --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #2a2a2a);
+    --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt)), #2e2e2e);
+    --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(16% * var(--desk-tint-amt)), #383838);
+    --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt)), #3d3a35);
   }
 }
-html[data-desk-tint][data-theme="dark"] {
-  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(6% * var(--desk-tint-amt, 1)), #191919);
-  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt, 1)), #202020);
-  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt, 1)), #2a2a2a);
-  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt, 1)), #2e2e2e);
-  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(16% * var(--desk-tint-amt, 1)), #383838);
-  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt, 1)), #3d3a35);
+html[data-theme="dark"] {
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(6% * var(--desk-tint-amt)), #191919);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #202020);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #2a2a2a);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt)), #2e2e2e);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(16% * var(--desk-tint-amt)), #383838);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt)), #3d3a35);
 }
-html[data-desk-tint][data-theme="light"] {
-  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(3.5% * var(--desk-tint-amt, 1)), #ffffff);
-  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt, 1)), #f7f7f5);
-  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt, 1)), #f9fafb);
-  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(10% * var(--desk-tint-amt, 1)), #f1f1ef);
-  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(14% * var(--desk-tint-amt, 1)), #ebebea);
-  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt, 1)), #e8e4dd);
+html[data-theme="light"] {
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(3.5% * var(--desk-tint-amt)), #ffffff);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt)), #f7f7f5);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt)), #f9fafb);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(10% * var(--desk-tint-amt)), #f1f1ef);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(14% * var(--desk-tint-amt)), #ebebea);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #e8e4dd);
 }
 
 /* Hold-to-delete fill for desks — the bar fills while the pointer is held */

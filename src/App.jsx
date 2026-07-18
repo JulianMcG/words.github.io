@@ -1650,19 +1650,22 @@ const hexToHsl = (hex) => {
   return { h, s, l };
 };
 
-// Apply a desk's color as the app accent + UI tint (index.css desk-tint rules)
+// Apply a desk's color as the app accent + UI tint (index.css desk-tint rules).
+// --desk-tint-amt is always set to an explicit number, never removed — the
+// registered @property gives it a real value even when "unset" (0, matching
+// its initial-value), so leaving it out would silently re-arm the tint at
+// full strength using whatever color --desk-tint last held. Colorless desks
+// don't touch --desk-tint at all: amt 0 already zeroes every color-mix() that
+// reads it, so there's nothing to leak.
 const applyDeskTheme = (desk) => {
   const root = document.documentElement;
   if (desk?.color) {
     root.style.setProperty('--color-accent', desk.color);
     root.style.setProperty('--desk-tint', desk.color);
-    root.style.removeProperty('--desk-tint-amt');
-    root.setAttribute('data-desk-tint', '');
+    root.style.setProperty('--desk-tint-amt', '1');
   } else {
     root.style.removeProperty('--color-accent');
-    root.style.removeProperty('--desk-tint');
-    root.style.removeProperty('--desk-tint-amt');
-    root.removeAttribute('data-desk-tint');
+    root.style.setProperty('--desk-tint-amt', '0');
   }
 };
 
@@ -2616,40 +2619,41 @@ export default function App() {
   }, [activeDocId]);
 
   // The desk's color drives the app-wide accent AND a subtle tint of the
-  // whole UI (see the data-desk-tint rules in index.css)
+  // whole UI (see the Desk tint rules in index.css)
   useEffect(() => {
     applyDeskTheme(activeDesk);
   }, [activeDesk?.color]);
 
   // While the pager strip is between desks (drag or snap animation), the
   // accent and tint cross-fade with the swipe — the further you swipe, the
-  // more the color turns.
+  // more the color turns. This already recomputes the exact blend every
+  // frame, so the CSS transition (for discrete jumps — a picked color, a
+  // desk switch that doesn't animate the strip) is suppressed while it's
+  // driving, so the two smoothing paths don't fight and lag behind the strip.
   useEffect(() => {
     return deskStripX.on('change', (x) => {
       const vw = sidebarScrollRef.current?.clientWidth;
       const ks = desksRef.current;
+      const root = document.documentElement;
       if (!vw || ks.length < 2) return;
       const f = Math.max(0, Math.min(ks.length - 1, -x / vw));
       const i = Math.floor(f);
       const j = Math.min(i + 1, ks.length - 1);
       const t = f - i;
-      if (t < 0.005 || i === j) { applyDeskTheme(ks[i]); return; }
+      if (t < 0.005 || i === j) {
+        root.style.removeProperty('transition'); // resting — let the CSS transition apply
+        applyDeskTheme(ks[i]);
+        return;
+      }
+      root.style.transition = 'none'; // actively interpolating — JS already smooths this
       const a = ks[i], b = ks[j];
       const accent = lerpHex(a.color || DEFAULT_ACCENT, b.color || DEFAULT_ACCENT, t);
       // Colorless desks keep the neighbor's hue but fade the wash strength out
       const tintColor = lerpHex(a.color || b.color || DEFAULT_ACCENT, b.color || a.color || DEFAULT_ACCENT, t);
       const amt = (a.color ? 1 - t : 0) + (b.color ? t : 0);
-      const root = document.documentElement;
       root.style.setProperty('--color-accent', accent);
-      if (amt > 0.02) {
-        root.style.setProperty('--desk-tint', tintColor);
-        root.style.setProperty('--desk-tint-amt', amt.toFixed(3));
-        root.setAttribute('data-desk-tint', '');
-      } else {
-        root.style.removeProperty('--desk-tint');
-        root.style.removeProperty('--desk-tint-amt');
-        root.removeAttribute('data-desk-tint');
-      }
+      root.style.setProperty('--desk-tint', tintColor);
+      root.style.setProperty('--desk-tint-amt', amt.toFixed(3));
     });
   }, []);
 
@@ -4474,19 +4478,22 @@ export default function App() {
     setPlusMenuOpen(false);
   };
 
-  // Anchor the emoji/icon picker under the desk title row. The row is queried
-  // by desk id — during a desk-switch slide two rows exist (the exiting clone
-  // and the entering one), and only the id disambiguates.
+  // Anchor the emoji/icon picker under the title row's icon button. The row
+  // is queried by desk id — during a desk-switch slide two rows exist (the
+  // exiting clone and the entering one), and only the id disambiguates.
   const openDeskIconPicker = (tab = null) => {
     const row = document.querySelector(`[data-desk-header-id="${activeDesk?.id || DEFAULT_DESK_ID}"]`);
-    const rect = row?.getBoundingClientRect();
+    const btn = row?.querySelector('button[title="Change icon"]');
+    const rect = (btn || row)?.getBoundingClientRect();
+    const anchor = rect ? rect.left + rect.width / 2 : 24;
     setDeskColorPicker(null);
     setDeskMenuOpen(false);
     setPlusMenuOpen(false);
     setEditingDeskId(null);
     setDeskIconPicker({
-      x: Math.max(8, Math.min((rect?.left ?? 16) + 4, window.innerWidth - 336)),
-      y: (rect?.bottom ?? 96) + 8,
+      x: Math.max(8, Math.min((rect?.left ?? 16) - 12, window.innerWidth - 336)),
+      y: (rect?.bottom ?? 96) + 10,
+      anchor,
       tab: tab || (activeDesk?.icon ? 'icon' : 'emoji'),
     });
   };
@@ -7968,9 +7975,10 @@ export default function App() {
                             e.stopPropagation();
                             if (deskColorPicker) { setDeskColorPicker(null); return; }
                             const rect = e.currentTarget.getBoundingClientRect();
+                            const anchor = rect.left + rect.width / 2;
                             setDeskIconPicker(null);
                             setDeskMenuOpen(false);
-                            setDeskColorPicker({ x: Math.max(8, Math.min(rect.left - 100, window.innerWidth - 248)), y: rect.bottom + 6 });
+                            setDeskColorPicker({ x: Math.max(8, Math.min(rect.left - 100, window.innerWidth - 248)), y: rect.bottom + 10, anchor });
                           }}
                           className="flex-shrink-0 p-0.5 rounded opacity-0 group-hover/desk:opacity-100 transition-opacity text-[var(--color-text-muted)] hover:opacity-100 hover:text-[var(--color-text-primary)]"
                           title="Desk color"
@@ -7982,9 +7990,10 @@ export default function App() {
                             e.stopPropagation();
                             if (deskMenuOpen) { setDeskMenuOpen(false); return; }
                             const rect = e.currentTarget.getBoundingClientRect();
+                            const anchor = rect.left + rect.width / 2;
                             setDeskIconPicker(null);
                             setDeskColorPicker(null);
-                            setDeskMenuOpen({ x: Math.min(rect.left - 4, window.innerWidth - 190), y: rect.bottom + 6 });
+                            setDeskMenuOpen({ x: Math.min(rect.left - 4, window.innerWidth - 190), y: rect.bottom + 10, anchor });
                           }}
                           className="flex-shrink-0 p-0.5 -mr-1 rounded opacity-0 group-hover/desk:opacity-100 transition-opacity text-[var(--color-text-muted)] hover:opacity-100 hover:text-[var(--color-text-primary)]"
                           title="Desk menu"
@@ -9414,6 +9423,14 @@ export default function App() {
           transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 } }}
           onClick={(e) => e.stopPropagation()}
         >
+          <svg
+            className="absolute -top-[9px] z-10 pointer-events-none"
+            style={{ left: Math.max(10, Math.min((deskMenuOpen.anchor ?? deskMenuOpen.x + 88) - deskMenuOpen.x, 176 - 10)) - 10 }}
+            width="20" height="10" viewBox="0 0 20 10" fill="none"
+          >
+            <path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10 Z" fill="var(--color-bg-primary)" />
+            <path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
+          </svg>
           <button
             className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={() => {
@@ -9454,6 +9471,14 @@ export default function App() {
           transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
           onClick={(e) => e.stopPropagation()}
         >
+          <svg
+            className="absolute -top-[9px] z-10 pointer-events-none"
+            style={{ left: Math.max(10, Math.min((deskIconPicker.anchor ?? deskIconPicker.x + 24) - deskIconPicker.x, 320 - 10)) - 10 }}
+            width="20" height="10" viewBox="0 0 20 10" fill="none"
+          >
+            <path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10 Z" fill="var(--color-bg-primary)" />
+            <path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
+          </svg>
           <div
             className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
             style={{ width: 320, maxHeight: 424 }}
@@ -9538,6 +9563,14 @@ export default function App() {
           transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
           onClick={(e) => e.stopPropagation()}
         >
+          <svg
+            className="absolute -top-[9px] z-10 pointer-events-none"
+            style={{ left: Math.max(10, Math.min((deskColorPicker.anchor ?? deskColorPicker.x + 116) - deskColorPicker.x, 232 - 10)) - 10 }}
+            width="20" height="10" viewBox="0 0 20 10" fill="none"
+          >
+            <path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10 Z" fill="var(--color-bg-primary)" />
+            <path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
+          </svg>
           <DeskColorPicker
             color={activeDesk.color}
             onChange={(c) => updateDesk(activeDesk.id, { color: c })}
