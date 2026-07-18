@@ -192,10 +192,10 @@ body {
   .pin-active {
     background: linear-gradient(
       to bottom,
-      color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #E8E8E5),
-      color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt)), #FAFAF8)
+      color-mix(in srgb, var(--desk-tint) calc(13% * var(--desk-tint-amt)), #E8E8E5),
+      color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #FAFAF8)
     );
-    border-color: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #DCDBD8);
+    border-color: color-mix(in srgb, var(--desk-tint) calc(13% * var(--desk-tint-amt)), #DCDBD8);
     box-shadow:
       inset 0 1px 1px rgba(255, 255, 255, 1),
       0 1px 4px rgba(0, 0, 0, 0.06),
@@ -210,7 +210,7 @@ body {
   }
 
   .pin-inactive {
-    background: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #EBEBE9);
+    background: color-mix(in srgb, var(--desk-tint) calc(15% * var(--desk-tint-amt)), #EBEBE9);
     border-color: transparent;
   }
 
@@ -393,12 +393,12 @@ html {
    (only manually forcing data-theme="dark" masked it, since that path uses
    an attribute selector that outranks both). */
 :root {
-  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(3.5% * var(--desk-tint-amt)), #ffffff);
-  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt)), #f7f7f5);
-  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt)), #f9fafb);
-  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(10% * var(--desk-tint-amt)), #f1f1ef);
-  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(14% * var(--desk-tint-amt)), #ebebea);
-  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #e8e4dd);
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(5.5% * var(--desk-tint-amt)), #ffffff);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt)), #f7f7f5);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #f9fafb);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(16% * var(--desk-tint-amt)), #f1f1ef);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(22% * var(--desk-tint-amt)), #ebebea);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(15% * var(--desk-tint-amt)), #e8e4dd);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -419,12 +419,12 @@ html[data-theme="dark"] {
   --color-border-primary: color-mix(in srgb, var(--desk-tint-dark) calc(26% * var(--desk-tint-amt)), #3d3a35);
 }
 html[data-theme="light"] {
-  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(3.5% * var(--desk-tint-amt)), #ffffff);
-  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt)), #f7f7f5);
-  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(5% * var(--desk-tint-amt)), #f9fafb);
-  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(10% * var(--desk-tint-amt)), #f1f1ef);
-  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(14% * var(--desk-tint-amt)), #ebebea);
-  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #e8e4dd);
+  --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(5.5% * var(--desk-tint-amt)), #ffffff);
+  --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt)), #f7f7f5);
+  --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #f9fafb);
+  --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(16% * var(--desk-tint-amt)), #f1f1ef);
+  --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(22% * var(--desk-tint-amt)), #ebebea);
+  --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(15% * var(--desk-tint-amt)), #e8e4dd);
 }
 
 /* Hold-to-delete fill for desks — the bar fills while the pointer is held */
