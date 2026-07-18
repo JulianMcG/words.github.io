@@ -218,10 +218,10 @@ body {
     .pin-active {
       background: linear-gradient(
         to bottom,
-        color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #191919),
-        color-mix(in srgb, var(--desk-tint) calc(7% * var(--desk-tint-amt)), #262626)
+        color-mix(in srgb, var(--desk-tint) calc(26% * var(--desk-tint-amt)), #191919),
+        color-mix(in srgb, var(--desk-tint) calc(20% * var(--desk-tint-amt)), #262626)
       );
-      border-color: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #191919);
+      border-color: color-mix(in srgb, var(--desk-tint) calc(24% * var(--desk-tint-amt)), #191919);
       box-shadow:
         inset 0 1px 1px rgba(255, 255, 255, 0.15),
         0 1px 5px rgba(0, 0, 0, 0.20),
@@ -235,7 +235,7 @@ body {
     }
 
     .pin-inactive {
-      background: color-mix(in srgb, var(--desk-tint) calc(11% * var(--desk-tint-amt)), #2E2E2E);
+      background: color-mix(in srgb, var(--desk-tint) calc(32% * var(--desk-tint-amt)), #2E2E2E);
       border-color: transparent;
     }
   }
@@ -385,12 +385,12 @@ html {
 }
 @media (prefers-color-scheme: dark) {
   html {
-    --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(6% * var(--desk-tint-amt)), #191919);
-    --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(9% * var(--desk-tint-amt)), #202020);
-    --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(8% * var(--desk-tint-amt)), #2a2a2a);
-    --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt)), #2e2e2e);
-    --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(16% * var(--desk-tint-amt)), #383838);
-    --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(12% * var(--desk-tint-amt)), #3d3a35);
+    --color-bg-primary: color-mix(in srgb, var(--desk-tint) calc(18% * var(--desk-tint-amt)), #191919);
+    --color-bg-secondary: color-mix(in srgb, var(--desk-tint) calc(26% * var(--desk-tint-amt)), #202020);
+    --color-bg-tertiary: color-mix(in srgb, var(--desk-tint) calc(24% * var(--desk-tint-amt)), #2a2a2a);
+    --color-bg-hover: color-mix(in srgb, var(--desk-tint) calc(32% * var(--desk-tint-amt)), #2e2e2e);
+    --color-bg-hover-strong: color-mix(in srgb, var(--desk-tint) calc(40% * var(--desk-tint-amt)), #383838);
+    --color-border-primary: color-mix(in srgb, var(--desk-tint) calc(30% * var(--desk-tint-amt)), #3d3a35);
   }
 }
 html[data-theme="dark"] {
