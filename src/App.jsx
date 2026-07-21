@@ -66,7 +66,7 @@ import {
 } from "lucide-react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, writeBatch } from "./firebase";
-import { motion, AnimatePresence, MotionConfig, useMotionValue, useMotionTemplate, useTransform, useSpring, animate as animateMV, LayoutGroup } from "framer-motion";
+import { motion, AnimatePresence, MotionConfig, useMotionValue, useMotionTemplate, useTransform, useSpring, useAnimationControls, animate as animateMV, LayoutGroup } from "framer-motion";
 import GradualBlur from "./components/GradualBlur";
 import { Sparkles } from "lucide-react";
 import BuddyIcon from "./components/BuddyIcon";
@@ -1023,6 +1023,12 @@ const mergeLocalHistory = (incoming, current) => {
 };
 
 const IS_MAC = /Mac|iPhone|iPad/i.test(navigator.platform || "");
+
+// Springs shared by the sidebar/chrome icon micro-interactions below. Kept
+// gently springy — just a touch of overshoot on settle, nothing bouncy.
+const ICON_SPRING = { type: 'spring', stiffness: 420, damping: 26, mass: 0.8 };
+// A hair snappier for the simple press-to-shrink icons.
+const ICON_TAP_SPRING = { type: 'spring', stiffness: 520, damping: 28, mass: 0.7 };
 
 // Compact relative age for trash rows: "3d ago", "2h ago", "just now"
 const timeAgo = (t) => {
@@ -2069,6 +2075,9 @@ export default function App() {
   const [isGrabbing, setIsGrabbing] = useState(false);
   const [deleteGhost, setDeleteGhost] = useState(null);
   const [cloudIconPhase, setCloudIconPhase] = useState('idle'); // 'idle' | 'trash'
+  // Drives the "…" options icon: a one-shot left-to-right dot ripple fired on
+  // press, so it always plays through regardless of how briefly it's held.
+  const optionsDotsControls = useAnimationControls();
   const cloudButtonRef = useRef(null);
   const trashIconRef = useRef(null);
   const lastDeleteAnimationTs = useRef(0);
@@ -7563,13 +7572,38 @@ export default function App() {
         <div className="flex items-center gap-2">
           {/* Options (…) button */}
           <div className="relative">
-            <button
+            <motion.button
+              onPointerDown={() => optionsDotsControls.start('pulse')}
               onClick={() => { setShareMenuOpen(!shareMenuOpen); setShareDocMenuOpen(false); }}
               className={`words-context-menu p-1.5 rounded-md transition-colors ${shareMenuOpen ? 'bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
               title="Options"
             >
-              <MoreHorizontal size={20} />
-            </button>
+              {/* Custom three-dot glyph. On press each dot shrinks then bounces
+                  back to full size, one after another left to right — a one-shot
+                  ripple driven by controls so it never depends on hold length. */}
+              <motion.svg
+                width="20" height="20" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                style={{ display: 'block' }}
+                initial="idle"
+                animate={optionsDotsControls}
+                variants={{ idle: {}, pulse: { transition: { staggerChildren: 0.08 } } }}
+              >
+                {[5, 12, 19].map((cx) => (
+                  <motion.circle
+                    key={cx} cx={cx} cy="12" r="1"
+                    style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+                    variants={{
+                      idle: { scale: 1 },
+                      pulse: {
+                        scale: [1, 0.7, 1.12, 1],
+                        transition: { duration: 0.5, ease: 'easeInOut', times: [0, 0.35, 0.7, 1] },
+                      },
+                    }}
+                  />
+                ))}
+              </motion.svg>
+            </motion.button>
           <AnimatePresence>
           {shareMenuOpen && (
             <motion.div
@@ -7822,7 +7856,7 @@ export default function App() {
             : "opacity-0 pointer-events-none"
             }`}
         >
-          <button
+          <motion.button
             onClick={() => {
               // Narrow viewports get a temporary overlay drawer (peek), never
               // the pinned/push-content state — see isNarrowViewport effect above.
@@ -7831,9 +7865,18 @@ export default function App() {
             }}
             className="p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
             title={`Open sidebar||${IS_MAC ? '⌘' : 'Ctrl'} ⇧ M`}
+            initial="rest"
+            animate="rest"
+            whileTap="tap"
           >
-            <Menu size={20} />
-          </button>
+            <motion.span
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              variants={{ rest: { scale: 1 }, tap: { scale: 0.9 } }}
+              transition={ICON_TAP_SPRING}
+            >
+              <Menu size={20} />
+            </motion.span>
+          </motion.button>
         </div>
       )}{" "}
       {/* Mobile drawer backdrop — darkens the document area while the sidebar
@@ -7885,12 +7928,16 @@ export default function App() {
                     title={`Search||${IS_MAC ? '⌘' : 'Ctrl'} K`}
                     style={{ padding: 4, borderRadius: 6, '--lisse-skip': 1 }}
                     exit={{ transition: { duration: 0.001 } }}
+                    initial="rest"
+                    animate="rest"
+                    whileTap="tap"
                     transition={{ layout: { type: 'spring', stiffness: 480, damping: 42, mass: 0.85 } }}
                   >
                     <motion.span
                       layoutId="spotlight-icon"
                       style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      transition={{ layout: { type: 'spring', stiffness: 480, damping: 42, mass: 0.85 } }}
+                      variants={{ rest: { scale: 1 }, tap: { scale: 0.9 } }}
+                      transition={{ layout: { type: 'spring', stiffness: 480, damping: 42, mass: 0.85 }, scale: ICON_TAP_SPRING }}
                     >
                       <Search size={18} />
                     </motion.span>
@@ -7900,7 +7947,7 @@ export default function App() {
               {/* Pin/collapse toggle — meaningless on the narrow overlay drawer
                   (there's no pinned/push state to switch into), so it's hidden there. */}
               {!isNarrowViewport && (
-                <button
+                <motion.button
                   onClick={() => {
                     if (isSidebarPeeking) {
                       setIsSidebarOpen(true);
@@ -7912,9 +7959,26 @@ export default function App() {
                   }}
                   className="p-1 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] transition-colors"
                   title={isSidebarPeeking ? "Pin sidebar" : `Collapse sidebar||${IS_MAC ? '⌘' : 'Ctrl'} ⇧ M`}
+                  initial="rest"
+                  animate="rest"
+                  whileHover="hover"
+                  whileTap="tap"
                 >
-                  {isSidebarPeeking ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
-                </button>
+                  {/* Hover gives it a faint vertical stretch; pressing nudges it
+                      a hair wider and toward the edge it collapses to. Kept small
+                      and centered so the glyph never drifts in its box. */}
+                  <motion.span
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', transformOrigin: 'center' }}
+                    variants={{
+                      rest: { scaleX: 1, scaleY: 1, x: 0 },
+                      hover: { scaleX: 1, scaleY: 1.09, x: 0 },
+                      tap: { scaleX: 1.1, scaleY: 0.99, x: -1.5 },
+                    }}
+                    transition={ICON_SPRING}
+                  >
+                    {isSidebarPeeking ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+                  </motion.span>
+                </motion.button>
               )}
             </div>
           </div>
@@ -8510,7 +8574,7 @@ export default function App() {
 
           {/* New page / folder / desk — bottom right of the sidebar */}
           <div className="absolute bottom-4 right-4 z-40 words-context-menu">
-            <button
+            <motion.button
               onClick={() => {
                 setDeskIconPicker(null);
                 setDeskColorPicker(null);
@@ -8519,9 +8583,44 @@ export default function App() {
               }}
               className="p-1.5 rounded-md transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover-strong)]"
               title="New page, folder or desk"
+              initial="rest"
+              animate="rest"
+              whileHover="hover"
+              whileTap="tap"
             >
-              <Plus size={18} />
-            </button>
+              {/* Swells a touch on hover. On press the whole glyph shrinks in
+                  while its two arms stretch out and thin — a gentle squash-and-
+                  stretch. Custom SVG so the strokes can move independently. */}
+              <motion.span
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                variants={{ rest: { scale: 1 }, hover: { scale: 1.06 }, tap: { scale: 0.94 } }}
+                transition={ICON_SPRING}
+              >
+                <svg
+                  width="18" height="18" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeLinecap="round" style={{ display: 'block' }}
+                >
+                  <motion.line
+                    x1="12" x2="12"
+                    variants={{
+                      rest: { y1: 5, y2: 19, strokeWidth: 2 },
+                      hover: { y1: 5, y2: 19, strokeWidth: 2 },
+                      tap: { y1: 2.5, y2: 21.5, strokeWidth: 1.7 },
+                    }}
+                    transition={ICON_SPRING}
+                  />
+                  <motion.line
+                    y1="12" y2="12"
+                    variants={{
+                      rest: { x1: 5, x2: 19, strokeWidth: 2 },
+                      hover: { x1: 5, x2: 19, strokeWidth: 2 },
+                      tap: { x1: 2.5, x2: 21.5, strokeWidth: 1.7 },
+                    }}
+                    transition={ICON_SPRING}
+                  />
+                </svg>
+              </motion.span>
+            </motion.button>
             <AnimatePresence>
               {plusMenuOpen && (
                 <motion.div
@@ -8564,13 +8663,20 @@ export default function App() {
 
           {/* Cloud Sync Toggle */}
           <div ref={cloudButtonRef} className="absolute bottom-4 left-4 z-40">
-            <button
+            <motion.button
               onClick={() => { if (user) { setUserMenuOpen(!userMenuOpen); setCloudSubmenu(null); } else setAuthModal('login'); }}
               className={`words-context-menu p-1.5 rounded-md transition-colors hover:bg-[var(--color-bg-hover-strong)] ${user ? "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]" : "flex items-center gap-1.5 text-[var(--color-text-primary)] bg-[var(--color-bg-hover)]"}`}
               title={user ? "Cloud Sync Active" : "Sign up to sync your notes"}
+              initial="rest"
+              animate="rest"
+              whileTap="tap"
             >
               {user ? (
-                <div style={{ width: 16, height: 16, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <motion.div
+                  style={{ width: 16, height: 16, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  variants={{ rest: { scale: 1 }, tap: { scale: 0.9 } }}
+                  transition={ICON_TAP_SPRING}
+                >
                   <AnimatePresence mode="popLayout" initial={false}>
                     {cloudIconPhase === 'idle' ? (
                       <motion.span
@@ -8598,14 +8704,21 @@ export default function App() {
                       </motion.span>
                     )}
                   </AnimatePresence>
-                </div>
+                </motion.div>
               ) : (
                 <>
-                  <CloudOff size={18} className="shrink-0" />
+                  <motion.span
+                    className="shrink-0"
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    variants={{ rest: { scale: 1 }, tap: { scale: 0.9 } }}
+                    transition={ICON_TAP_SPRING}
+                  >
+                    <CloudOff size={18} />
+                  </motion.span>
                   <span className="text-xs font-medium whitespace-nowrap">Sign up to sync</span>
                 </>
               )}
-            </button>
+            </motion.button>
 
             {/* Portaled: the sidebar is overflow-hidden AND transformed, so any
                 in-tree popover (and its right-side pop-outs) gets clipped by it.
