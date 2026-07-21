@@ -30,6 +30,7 @@ import {
   ChevronRight,
   ChevronDown,
   MoreHorizontal,
+  SquareArrowOutUpRight,
   Circle,
   GripVertical,
   Lock,
@@ -1791,6 +1792,10 @@ export default function App() {
   const location = useLocation();
   const pendingNewDocRef = useRef(location.state?.createNew === true);
   const pendingOpenLiveRef = useRef(new URLSearchParams(window.location.search).get('openLive') === '1');
+  // Pop-out mode: a page double-clicked in the sidebar opens in a separate
+  // mini browser window. Same editor UI, but no sidebar — the hamburger slot
+  // becomes a "Return to Tab" button that closes this window.
+  const isPopout = new URLSearchParams(window.location.search).get('popout') === '1';
   const sidebarScrollRef = useRef(null);
   // Below this width the sidebar behaves as a temporary overlay drawer
   // (auto-hidden, no content push) instead of the desktop pinned rail.
@@ -1933,6 +1938,22 @@ export default function App() {
   // refers to a deleted desk fall back to the first desk, so nothing is ever lost.
   const activeDesk = desks.find(k => k.id === activeDeskId) || desks[0];
   const deskOf = (item) => (item?.deskId && desks.some(k => k.id === item.deskId)) ? item.deskId : (desks[0]?.id || DEFAULT_DESK_ID);
+  // A "loose" page sits at the top level of a desk — not pinned, not tucked
+  // inside a folder. These are the pages we auto-land on (after a delete, a
+  // stale bookmark, or a desk switch); pinned/foldered pages are skipped.
+  const isLoosePage = (d) => !!d && !d.isPinned && (!d.groupId || !groups.some(g => g.id === d.groupId));
+  // Pick the default page to open within a desk from `docList`: the first loose,
+  // unlocked page in sidebar order, then progressively looser fallbacks so we
+  // never end up with nothing.
+  const pickLandingDoc = (docList, deskId, excludeId = null) => {
+    const inDesk = docList.filter(d => deskOf(d) === deskId && d.id !== excludeId);
+    return inDesk.find(d => isLoosePage(d) && !d.isLocked)
+      || inDesk.find(d => isLoosePage(d))
+      || inDesk.find(d => !d.isLocked)
+      || inDesk[0]
+      || docList[0]
+      || null;
+  };
   const [activeDocId, setActiveDocId] = useState(() => {
     return urlDocId || localStorage.getItem("words_active_doc") || "1";
   });
@@ -2231,6 +2252,10 @@ export default function App() {
   const folderIconTimeoutRef = useRef(null);
   const prevActiveDocIdRef = useRef(activeDocId);
   const activeDocIdRef = useRef(activeDocId);
+  // The doc that was active right before the latest click selected a new one.
+  // Used to send the main window back to the previous page when a page is
+  // double-clicked to pop out (the click itself selects the popped-out page).
+  const docBeforeClickRef = useRef(activeDocId);
   const docHistoryRef = useRef([activeDocId].filter(Boolean)); // [current, previous] for Option+Tab
   // Only updated in useEffect so it always lags one render behind — reliable doc-switch detector at render time
   // null on first render so first mount also snaps (no spring on page load)
@@ -2597,19 +2622,38 @@ export default function App() {
     }
   }, [activeDocId]);
 
-  // Sync active document to URL
+  // Sync active document to URL. Preserve the ?popout=1 flag so a popped-out
+  // window keeps rendering in pop-out mode after this effect rewrites the path.
   useEffect(() => {
     if (activeDocId) {
-      navigate(`/documents/${activeDocId}`, { replace: true });
+      navigate(`/documents/${activeDocId}${isPopout ? '?popout=1' : ''}`, { replace: true });
     }
   }, [activeDocId]);
 
-  // If the active doc no longer exists (stale bookmark), fall back to the first
-  // doc of the active desk, then to any doc at all
+  // Main window: a popped-out window posts its doc id back here when its
+  // "Return to Tab" button is clicked, so we open that page and refocus.
+  useEffect(() => {
+    if (isPopout) return;
+    const onMessage = (e) => {
+      if (e.origin !== window.location.origin) return;
+      if (e.data?.type !== 'words:return-to-tab') return;
+      const id = e.data.docId;
+      if (id && docsRef.current.some((d) => d.id === id)) {
+        setActiveDocId(id);
+        setSelectedDocIds([id]);
+      }
+      try { window.focus(); } catch { /* focus can be blocked — ignore */ }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [isPopout]);
+
+  // If the active doc no longer exists (stale bookmark), fall back to the top
+  // loose page of the active desk (skipping pinned/foldered pages).
   useEffect(() => {
     if (docs.length > 0 && !docs.find(d => d.id === activeDocId)) {
-      const inDesk = docs.find(d => deskOf(d) === (activeDesk?.id || DEFAULT_DESK_ID));
-      setActiveDocId((inDesk || docs[0]).id);
+      const landing = pickLandingDoc(docs, activeDesk?.id || DEFAULT_DESK_ID);
+      if (landing) setActiveDocId(landing.id);
     }
   }, [docs]);
 
@@ -4525,7 +4569,7 @@ export default function App() {
     // Return to the page that was last open on that desk
     const deskItems = docsRef.current.filter(d => deskOf(d) === deskId);
     const remembered = deskItems.find(d => d.id === deskLastDocRef.current[deskId] && !d.isLocked);
-    const target = remembered || deskItems.find(d => !d.isLocked);
+    const target = remembered || pickLandingDoc(docsRef.current, deskId);
     const targetId = target ? target.id : createBlankDocInDesk(deskId);
     setActiveDeskId(deskId);
     setActiveDocId(targetId);
@@ -4533,6 +4577,8 @@ export default function App() {
   };
 
   const createDesk = () => {
+    // Desks are a signed-in feature. Prompt sign-up instead of creating one.
+    if (!user) { setPlusMenuOpen(false); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); setAuthModal('login'); return; }
     flushCurrentDoc();
     const id = Math.random().toString(36).substring(2, 9);
     // Colorless desks use the default accent, so they don't consume a rainbow color
@@ -4589,7 +4635,10 @@ export default function App() {
     const inNeighbor = (d) => ((d.deskId && nextDesks.some(x => x.id === d.deskId)) ? d.deskId : nextDesks[0].id) === neighbor.id;
     const neighborDocs = keptDocs.filter(inNeighbor);
     const remembered = neighborDocs.find(d => d.id === deskLastDocRef.current[neighbor.id] && !d.isLocked);
-    const target = remembered || neighborDocs.find(d => !d.isLocked);
+    const target = remembered
+      || neighborDocs.find(d => isLoosePage(d) && !d.isLocked)
+      || neighborDocs.find(d => isLoosePage(d))
+      || neighborDocs.find(d => !d.isLocked);
     const targetId = target ? target.id : createBlankDocInDesk(neighbor.id);
     setActiveDeskId(neighbor.id);
     setActiveDocId(targetId);
@@ -4805,7 +4854,7 @@ export default function App() {
       }
       if (activeDocId === id) {
         const nextDoc = freshId ? newDocs.find((d) => d.id === freshId)
-          : (newDocs.find((d) => deskOf(d) === victimDesk) || newDocs[0]);
+          : (pickLandingDoc(newDocs, victimDesk) || newDocs[0]);
         setActiveDocId(nextDoc.id);
         if (freshId) {
           // Same-id replacement can't retrigger the load effect — set the DOM directly
@@ -4943,6 +4992,54 @@ export default function App() {
 
     setActiveDocId(newDocId);
     setContextMenu(null);
+  };
+
+  // Open a page in a separate mini browser window — same editor UI, no sidebar.
+  // Reuses the /documents/:docId route with ?popout=1 so the popped-out window
+  // renders the exact same app in pop-out mode (see `isPopout`).
+  const openDocInPopout = (docId, { returnToPrevious = false } = {}) => {
+    // Persist the latest editor content synchronously before the pop-out window
+    // opens — it reads words_docs from localStorage on load. Without this,
+    // popping out the page you're editing (or a brand-new empty page whose
+    // edits haven't flushed yet) would show stale or empty content.
+    flushCurrentDoc();
+    try {
+      localStorage.setItem("words_docs", JSON.stringify(docsRef.current));
+    } catch { /* quota errors are non-fatal — pop-out still opens */ }
+
+    const url = `${window.location.origin}/documents/${docId}?popout=1`;
+    const width = Math.min(920, Math.max(480, Math.round(window.screen.availWidth * 0.6)));
+    const height = Math.min(900, Math.max(400, Math.round(window.screen.availHeight * 0.8)));
+    const left = Math.round((window.screen.availWidth - width) / 2);
+    const top = Math.round((window.screen.availHeight - height) / 2);
+    window.open(
+      url,
+      `words_popout_${docId}`,
+      `popup=yes,width=${width},height=${height},left=${left},top=${top},noopener=no`
+    );
+    // When popped out via double-click, the click already selected `docId` in
+    // the main window; send it back to whatever page was open before — but
+    // never switch desks to do so.
+    if (returnToPrevious) {
+      const popoutDoc = docsRef.current.find(d => d.id === docId);
+      const popoutDesk = popoutDoc ? deskOf(popoutDoc) : null;
+      const returnToId = docBeforeClickRef.current;
+      const returnDoc = returnToId ? docsRef.current.find(d => d.id === returnToId) : null;
+      let landId = null;
+      if (returnDoc && returnToId !== docId && popoutDesk && deskOf(returnDoc) === popoutDesk) {
+        // Previous page lives in the same desk — return straight to it.
+        landId = returnToId;
+      } else if (popoutDesk) {
+        // Previous page is gone or on another desk. Don't switch desks: land on
+        // the top page of the popped-out page's own desk (the 2nd page if the
+        // top one is the page we just popped out).
+        const landing = pickLandingDoc(docsRef.current, popoutDesk, docId);
+        landId = landing ? landing.id : null;
+      }
+      if (landId && landId !== docId && docsRef.current.some(d => d.id === landId)) {
+        setActiveDocId(landId);
+      }
+    }
   };
 
   const handleRenameSubmit = (docId, newTitle) => {
@@ -5145,7 +5242,11 @@ export default function App() {
         }
       });
     } else {
-      // Normal click
+      // Normal click. Remember the previously-active doc (only on an actual
+      // switch) so a double-click-to-popout can return the main window to it.
+      if (id !== activeDocIdRef.current) {
+        docBeforeClickRef.current = activeDocIdRef.current;
+      }
       setActiveDocId(id);
       setSelectedDocIds([id]);
       setLockModal(null);
@@ -6862,8 +6963,7 @@ export default function App() {
                 onAnimationComplete={() => newlyAutoTitledDocsRef.current.delete(doc.id)}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
-                  setEditingDocId(doc.id);
-                  setEditingDocTitle(doc.title || '');
+                  openDocInPopout(doc.id, { returnToPrevious: true });
                 }}
               >
                 {doc.title || "New Page"}
@@ -7667,26 +7767,75 @@ export default function App() {
           </div>{/* end ... relative */}
         </div>{/* end flex row */}
       </div>
-      {/* Hamburger Menu */}
-      <div
-        className={`absolute top-3 left-4 z-30 transition-opacity duration-300 ${!isSidebarOpen && !isSidebarPeeking && !historyPanelOpen
-          ? "opacity-100"
-          : "opacity-0 pointer-events-none"
-          }`}
-      >
-        <button
-          onClick={() => {
-            // Narrow viewports get a temporary overlay drawer (peek), never
-            // the pinned/push-content state — see isNarrowViewport effect above.
-            if (isNarrowViewport) setIsSidebarPeeking(true);
-            else setIsSidebarOpen(true);
-          }}
-          className="p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
-          title={`Open sidebar||${IS_MAC ? '⌘' : 'Ctrl'} ⇧ M`}
+      {/* Hamburger Menu — in pop-out mode this slot is a "Return to Tab"
+          button that closes the mini window and hands focus back to the
+          original Words window. */}
+      {isPopout ? (
+        <div className="absolute top-3 left-4 z-30">
+          <button
+            onClick={() => {
+              // Hand the page back to the original Words window: open it there,
+              // pull that window to the front, then close this pop-out.
+              try {
+                if (window.opener && !window.opener.closed) {
+                  window.opener.postMessage(
+                    { type: 'words:return-to-tab', docId: activeDocId },
+                    window.location.origin
+                  );
+                  window.opener.focus();
+                }
+              } catch { /* cross-window access can throw — close anyway */ }
+              window.close();
+            }}
+            className="group words-context-menu p-1.5 rounded-md transition-colors text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]"
+            data-tip="Return to Tab"
+          >
+            {/* Custom up-left arrow: on hover the shaft (tail) lengthens toward
+                the bottom-right anchor while the arrowhead slides up-left. */}
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="popout-return-arrow"
+            >
+              <line
+                x1="17"
+                y1="17"
+                x2="7"
+                y2="7"
+                vectorEffect="non-scaling-stroke"
+                className="pra-shaft"
+              />
+              <polyline points="7 17 7 7 17 7" className="pra-head" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        <div
+          className={`absolute top-3 left-4 z-30 transition-opacity duration-300 ${!isSidebarOpen && !isSidebarPeeking && !historyPanelOpen
+            ? "opacity-100"
+            : "opacity-0 pointer-events-none"
+            }`}
         >
-          <Menu size={20} />
-        </button>
-      </div>{" "}
+          <button
+            onClick={() => {
+              // Narrow viewports get a temporary overlay drawer (peek), never
+              // the pinned/push-content state — see isNarrowViewport effect above.
+              if (isNarrowViewport) setIsSidebarPeeking(true);
+              else setIsSidebarOpen(true);
+            }}
+            className="p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)] rounded-md transition-colors"
+            title={`Open sidebar||${IS_MAC ? '⌘' : 'Ctrl'} ⇧ M`}
+          >
+            <Menu size={20} />
+          </button>
+        </div>
+      )}{" "}
       {/* Mobile drawer backdrop — darkens the document area while the sidebar
           overlay is showing on a narrow viewport; tap to dismiss. Desktop's
           hover-peek never darkens anything. */}
@@ -7703,7 +7852,8 @@ export default function App() {
           />
         )}
       </AnimatePresence>
-      {/* Collapsible Sidebar */}
+      {/* Collapsible Sidebar — omitted entirely in pop-out mode */}
+      {!isPopout && (
       <motion.div
         className={`absolute top-0 bottom-0 left-0 bg-[var(--color-bg-secondary)] border-r border-[var(--color-border-primary)] flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.2, 0.8, 0.2, 1)] z-50 overflow-hidden ${(isSidebarOpen || isSidebarPeeking) && !historyPanelOpen
           ? "translate-x-0"
@@ -7924,9 +8074,10 @@ export default function App() {
 
                   {/* Desk title — Arc-style space name under the pinned pages.
                       Hidden while there's only the untouched default desk so the
-                      sidebar stays clean until desks are actually in use. */}
+                      sidebar stays clean until desks are actually in use, and
+                      always hidden when logged out (desks are a signed-in feature). */}
                   <AnimatePresence initial={false}>
-                  {desks.length > 1 && (
+                  {user && desks.length > 1 && (
                     <motion.div
                       key="desk-title-row"
                       initial={{ opacity: 0, height: 0 }}
@@ -8302,9 +8453,10 @@ export default function App() {
             <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-secondary)] to-transparent z-10" />
           </div>
 
-          {/* Desk switcher — Arc-style dots, bottom middle of the sidebar */}
+          {/* Desk switcher — Arc-style dots, bottom middle of the sidebar.
+              Desks are a signed-in feature, so the switcher hides when logged out. */}
           <AnimatePresence>
-          {desks.length > 1 && (
+          {user && desks.length > 1 && (
             <motion.div
               key="desk-dots"
               className="absolute bottom-4 left-1/2 z-40 flex items-center gap-1.5"
@@ -8394,13 +8546,17 @@ export default function App() {
                   >
                     <Folder size={14} /> New Folder
                   </button>
-                  <div className="mx-2 my-1 h-px bg-[var(--color-border-primary)]/50" />
-                  <button
-                    className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                    onClick={(e) => { e.stopPropagation(); createDesk(); }}
-                  >
-                    <LampDesk size={14} /> New Desk
-                  </button>
+                  {user && (
+                    <>
+                      <div className="mx-2 my-1 h-px bg-[var(--color-border-primary)]/50" />
+                      <button
+                        className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        onClick={(e) => { e.stopPropagation(); createDesk(); }}
+                      >
+                        <LampDesk size={14} /> New Desk
+                      </button>
+                    </>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -8697,8 +8853,9 @@ export default function App() {
           }}
         />
       </motion.div>
+      )}
       {/* Sidebar Resize Handle */}
-      {isSidebarOpen && !historyPanelOpen && (
+      {!isPopout && isSidebarOpen && !historyPanelOpen && (
         <motion.div
           className="absolute top-0 bottom-0 z-[60] w-4 flex items-center justify-center"
           style={{ left: displaySidebarWidth, x: -8, cursor: resizeCursorActive ? 'col-resize' : 'default' }}
@@ -8723,7 +8880,7 @@ export default function App() {
       <div
         ref={contentAreaRef}
         className={`flex-1 flex flex-col min-w-0 h-full ${lockModal ? 'overflow-hidden' : 'overflow-y-auto'} relative transition-all duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] ${historyPanelOpen ? "mr-[280px]" : ""} print:!ml-0`}
-        style={{ marginLeft: historyPanelOpen || isNarrowViewport ? 0 : isSidebarOpen ? sidebarWidth : 0 }}
+        style={{ marginLeft: isPopout || historyPanelOpen || isNarrowViewport ? 0 : isSidebarOpen ? sidebarWidth : 0 }}
         onClick={() => {
           if (isSidebarPeeking && !isSidebarOpen) {
             setIsSidebarPeeking(false);
@@ -9412,12 +9569,14 @@ export default function App() {
           >
             <Folder size={14} /> New Folder
           </button>
-          <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-            onClick={(e) => { e.stopPropagation(); createDesk(); }}
-          >
-            <LampDesk size={14} /> New Desk
-          </button>
+          {user && (
+            <button
+              className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+              onClick={(e) => { e.stopPropagation(); createDesk(); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); }}
+            >
+              <LampDesk size={14} /> New Desk
+            </button>
+          )}
         </motion.div>
       )}
       </AnimatePresence>
@@ -9846,6 +10005,12 @@ export default function App() {
             }}
           >
             <Pencil size={14} /> Rename
+          </button>
+          <button
+            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick={(e) => { e.stopPropagation(); openDocInPopout(contextMenu.docId); setContextMenu(null); }}
+          >
+            <SquareArrowOutUpRight size={14} /> Pop out
           </button>
           <button
             className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"

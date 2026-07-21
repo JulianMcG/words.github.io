@@ -15,7 +15,7 @@
   --color-accent: #E8572A;
   --color-highlight: #fef08a;
   --color-shadow-primary: rgba(0, 0, 0, 0.1);
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   /* Landing-only ink — a hair softer than pure black for the hero headline
    * and tactile buttons. Only differs from --color-text-primary in light mode. */
   --landing-ink: #252525;
@@ -1116,4 +1116,25 @@ html[data-reduce-motion="true"] *::after {
 }
 .editor-content.buddy-reply > :last-child {
   margin-bottom: 0 !important;
+}
+
+/* Pop-out "Return to Tab" arrow — on hover the shaft (tail) scales longer from
+ * its bottom-right anchor while the arrowhead slides up-left to follow the
+ * new, longer tip. Geometry uses the 24×24 viewBox coordinate system. */
+.popout-return-arrow .pra-shaft,
+.popout-return-arrow .pra-head {
+  transform-box: view-box;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.popout-return-arrow .pra-shaft {
+  transform-origin: 17px 17px; /* bottom-right tail anchor stays put */
+}
+.popout-return-arrow .pra-head {
+  transform-origin: 7px 7px;
+}
+.group:hover .popout-return-arrow .pra-shaft {
+  transform: scale(1.28);
+}
+.group:hover .popout-return-arrow .pra-head {
+  transform: translate(-2.8px, -2.8px);
 }
