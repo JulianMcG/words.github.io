@@ -7,6 +7,7 @@ import {
   Pin, Folder, GripVertical, Smile, Moon, Printer, AlignLeft, List, WifiOff, Check,
 } from 'lucide-react';
 import GradualBlur from './components/GradualBlur';
+import WordsWordmark from './WordsWordmark';
 
 /* ─── Tokens ─── */
 const EASE = [0.22, 1, 0.36, 1];
@@ -128,13 +129,7 @@ const StickyHeader = ({ navigate, scrolled, pinnedLeft }) => (
           transition: 'left 0.5s cubic-bezier(0.22,1,0.36,1), transform 0.5s cubic-bezier(0.22,1,0.36,1)',
         }}
       >
-        <span className="w-[22px] h-[22px] flex items-center justify-center shrink-0">
-          <img src="/logolight.png" alt="Words" className="w-full h-full object-contain dark:hidden" />
-          <img src="/logodark.png" alt="Words" className="w-full h-full object-contain hidden dark:block" />
-        </span>
-        <span className="leading-none" style={{ fontFamily: SERIF, fontWeight: 300, fontSize: '26px', letterSpacing: '-0.055em', transform: 'translateY(1px)' }}>
-          Words
-        </span>
+        <WordsWordmark className="h-[26px] w-auto shrink-0 text-[var(--landing-ink)]" />
       </button>
 
       <div className="ml-auto">

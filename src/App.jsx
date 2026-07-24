@@ -66,7 +66,7 @@ import {
 } from "lucide-react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, writeBatch } from "./firebase";
-import { motion, AnimatePresence, MotionConfig, useMotionValue, useMotionTemplate, useTransform, useSpring, useAnimationControls, animate as animateMV, LayoutGroup } from "framer-motion";
+import { motion, AnimatePresence, MotionConfig, useMotionValue, useMotionTemplate, useTransform, useSpring, animate as animateMV, LayoutGroup } from "framer-motion";
 import GradualBlur from "./components/GradualBlur";
 import { Sparkles } from "lucide-react";
 import BuddyIcon from "./components/BuddyIcon";
@@ -79,6 +79,7 @@ import { exportToGoogleDocs } from "./utils/googleDocs";
 import FolderIconPicker from "./components/FolderIconPicker";
 import { FolderIcon, ICON_COMPONENTS, FOLDER_ICONS } from "./utils/folderIcons";
 import SpotlightSearch from "./components/SpotlightSearch";
+import PrintExportModal, { TEXT_ZOOM, MARGINS, PRINT_PAPER, FONT_STACKS } from "./PrintExportModal";
 import TooltipLayer from "./components/TooltipLayer";
 import { getIconForFolderName } from "./utils/folderIconMap";
 import HeadingNavigator from "./components/HeadingNavigator";
@@ -657,14 +658,14 @@ const MembershipCard = ({ user }) => {
               <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-36">
                 <button
                   onClick={(e) => { e.stopPropagation(); copyCard(); }}
-                  className="w-full text-left px-2 py-1.5 rounded flex items-center gap-2 text-[12.5px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[12.5px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                 >
                   {copied ? <Check size={13} className="text-green-500" /> : <Copy size={13} className="text-[var(--color-text-muted)]" />}
                   {copied ? "Copied" : "Copy image"}
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); saveCard(); }}
-                  className="w-full text-left px-2 py-1.5 rounded flex items-center gap-2 text-[12.5px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[12.5px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                 >
                   <Download size={13} className="text-[var(--color-text-muted)]" />
                   Save image
@@ -1837,7 +1838,13 @@ export default function App() {
   // open — desktop behavior (pinned or peek-on-hover) is untouched.
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${NARROW_VIEWPORT_BREAKPOINT - 1}px)`);
-    const handleChange = (e) => setIsNarrowViewport(e.matches);
+    const handleChange = (e) => {
+      // window.print() re-evaluates media queries against the paper size, which
+      // reads as a "narrow viewport" and would auto-collapse the sidebar. Ignore
+      // any changes while the print pipeline is active.
+      if (document.body.classList.contains('printing')) return;
+      setIsNarrowViewport(e.matches);
+    };
     mq.addEventListener('change', handleChange);
     return () => mq.removeEventListener('change', handleChange);
   }, []);
@@ -1870,6 +1877,23 @@ export default function App() {
   const [shareDocMenuOpen, setShareDocMenuOpen] = useState(false);
   const [gdocsLoading, setGdocsLoading] = useState(false);
   const [styleMenuOpen, setStyleMenuOpen] = useState(null); // null | { top: px offset of Style row in options menu }
+  // Print/Export modal — morphs out of its menu row (Spotlight-style).
+  // Holds a snapshot of the doc taken at open time so the preview is stable.
+  const [printModal, setPrintModal] = useState(null); // null | { mode:'print'|'export', title, bodyHTML, emoji, docFont, textAlign, lineSpacing }
+
+  // The Style pop-out opens after a brief hover; a click "pins" it so it
+  // survives mouse-out (click again to unpin).
+  const [stylePinned, setStylePinned] = useState(false);
+  const styleOpenTimer = useRef(null);
+  const styleCloseTimer = useRef(null);
+  // When the whole options menu closes, forget any Style hover/pin state so it
+  // doesn't auto-reopen next time the options menu is opened.
+  useEffect(() => {
+    if (!shareMenuOpen) {
+      setStyleMenuOpen(null); setStylePinned(false);
+      clearTimeout(styleOpenTimer.current); clearTimeout(styleCloseTimer.current);
+    }
+  }, [shareMenuOpen]);
   // The style pop-out lives inside the options menu — never outlive it
   useEffect(() => {
     if (!shareMenuOpen) setStyleMenuOpen(null);
@@ -2075,9 +2099,6 @@ export default function App() {
   const [isGrabbing, setIsGrabbing] = useState(false);
   const [deleteGhost, setDeleteGhost] = useState(null);
   const [cloudIconPhase, setCloudIconPhase] = useState('idle'); // 'idle' | 'trash'
-  // Drives the "…" options icon: a one-shot left-to-right dot ripple fired on
-  // press, so it always plays through regardless of how briefly it's held.
-  const optionsDotsControls = useAnimationControls();
   const cloudButtonRef = useRef(null);
   const trashIconRef = useRef(null);
   const lastDeleteAnimationTs = useRef(0);
@@ -5127,6 +5148,134 @@ export default function App() {
     setContextMenu(null);
   };
 
+  // Print / Save-as-PDF. Rather than print the live app DOM (nested scroll
+  // containers, transforms, sidebar chrome — which never paginated cleanly and
+  // got nuked by a blanket `* { color:black }`), we render a clean, print-only
+  // copy of just this document — emoji, title, and the editor's own HTML — into
+  // #print-root, styled entirely by the @media print rules in index.css.
+  // Hand-paginates the doc into paper-sized .print-sheet blocks — the same
+  // measure-and-slice math as the modal preview, so what you saw is what
+  // prints. @page margins are zeroed (killing the browser's own header/footer
+  // margin text); each sheet carries its padding and a words.do footer.
+  const printDocument = (settings = {}) => {
+    const {
+      showTitle = true, showEmoji = true,
+      textSize = 'md', margins = 'normal', paper = 'letter',
+    } = settings;
+    const docData = docsRef.current.find((d) => d.id === activeDocId) || activeDoc;
+    if (!docData) return;
+
+    document.getElementById('print-root')?.remove();
+    document.getElementById('print-page-style')?.remove();
+
+    const P = PRINT_PAPER[paper] || PRINT_PAPER.letter;
+    const M = MARGINS[margins] ?? MARGINS.normal;
+    const windowH = P.h - 2 * M;
+    const footerBottom = Math.max(10, Math.round((M - 12) / 2));
+
+    const titleText = (titleRef.current?.textContent ?? docData.title ?? '').trim() || 'Untitled';
+    const bodyHTML = editorRef.current?.innerHTML ?? docData.content ?? '';
+
+    // The document flow — one element, cloned into each sheet's window.
+    const flow = document.createElement('div');
+    flow.style.zoom = TEXT_ZOOM[textSize] ?? 1;
+    flow.style.fontFamily = FONT_STACKS[docData.docFont] || FONT_STACKS.sans;
+    flow.style.textAlign = docData.textAlign || 'left';
+    if (showTitle) {
+      const head = document.createElement('div');
+      head.className = 'print-head';
+      if (showEmoji && docData.emoji) {
+        const em = document.createElement('div');
+        em.className = 'print-emoji';
+        em.textContent = docData.emoji;
+        head.appendChild(em);
+      }
+      const h1 = document.createElement('h1');
+      h1.className = 'print-title';
+      h1.textContent = titleText;
+      head.appendChild(h1);
+      flow.appendChild(head);
+    }
+    const body = document.createElement('div');
+    // Reuse .editor-content so the same heading/list/quote styling applies.
+    body.className = 'editor-content print-body';
+    body.innerHTML = bodyHTML;
+    // Drop editor-only affordances that shouldn't appear on paper.
+    body.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
+    body.querySelectorAll('.buddy-caret, .caret-buddy-hotspot, [data-slash-placeholder]').forEach((el) => el.remove());
+    flow.appendChild(body);
+
+    const root = document.createElement('div');
+    root.id = 'print-root';
+    root.setAttribute('data-print-font', docData.docFont || 'sans');
+
+    // Measurement pass: render the flow offscreen at content width. The print
+    // content styles live outside @media print, so metrics here match paper.
+    root.style.cssText = 'display:block; position:absolute; left:-100000px; top:0; visibility:hidden;';
+    const measurer = document.createElement('div');
+    measurer.style.width = `${P.w - 2 * M}px`;
+    measurer.appendChild(flow);
+    root.appendChild(measurer);
+    document.body.appendChild(root);
+    const pageCount = Math.max(1, Math.ceil(measurer.scrollHeight / windowH));
+
+    // Slice into sheets — window + offset clone, plus the footer.
+    root.innerHTML = '';
+    for (let i = 0; i < pageCount; i++) {
+      const sheet = document.createElement('div');
+      sheet.className = 'print-sheet';
+      sheet.style.cssText = `width:${P.w}px; height:${P.h}px; padding:${M}px;`;
+      const win = document.createElement('div');
+      win.style.cssText = `height:${windowH}px; overflow:hidden;`;
+      const offset = document.createElement('div');
+      offset.style.transform = `translateY(-${i * windowH}px)`;
+      offset.appendChild(flow.cloneNode(true));
+      win.appendChild(offset);
+      sheet.appendChild(win);
+      const footer = document.createElement('div');
+      footer.className = 'print-footer';
+      footer.style.bottom = `${footerBottom}px`;
+      footer.innerHTML = `<span>words<span class="pf-do">.do</span></span><span class="pf-num" style="right:${M}px">${i + 1}</span>`;
+      sheet.appendChild(footer);
+      root.appendChild(sheet);
+    }
+    root.style.cssText = ''; // back to display:none on screen; print media reveals it
+
+    // Paper size with zero margin — the browser's date/URL header-footer text
+    // lives in the margin band, so this removes it entirely.
+    const pageStyle = document.createElement('style');
+    pageStyle.id = 'print-page-style';
+    pageStyle.textContent = `@page { size: ${paper === 'a4' ? 'A4' : 'letter'}; margin: 0; }`;
+    document.head.appendChild(pageStyle);
+
+    const cleanup = () => {
+      document.body.classList.remove('printing');
+      document.getElementById('print-root')?.remove();
+      document.getElementById('print-page-style')?.remove();
+      window.removeEventListener('afterprint', cleanup);
+      setPrintModal(null);
+    };
+    window.addEventListener('afterprint', cleanup);
+    document.body.classList.add('printing');
+    // Give layout a beat to settle (images/fonts) before the print dialog.
+    setTimeout(() => window.print(), 80);
+  };
+
+  // Snapshot the active doc and open the Print/Export modal.
+  const openPrintModal = (mode) => {
+    const d = docsRef.current.find((x) => x.id === activeDocId) || activeDoc;
+    if (!d) return;
+    setPrintModal({
+      mode,
+      title: (titleRef.current?.textContent ?? d.title ?? '').trim(),
+      bodyHTML: editorRef.current?.innerHTML ?? d.content ?? '',
+      emoji: d.emoji || null,
+      docFont: d.docFont || 'sans',
+      textAlign: d.textAlign || 'left',
+      lineSpacing: d.lineSpacing || '1.5',
+    });
+  };
+
   const handlePasscodeSubmit = (code) => {
     const pin = code || passcodeInput;
     if (pin.length !== 4 || !/^\d{4}$/.test(pin)) return;
@@ -6980,7 +7129,7 @@ export default function App() {
             )}
           </div>
           <div
-            className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+            className={`absolute right-1 top-1/2 -translate-y-1/2 flex items-center transition-opacity z-10 ${contextMenu?.docId === doc.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
             onMouseEnter={() => {
               clearTimeout(hoverTimeoutRef.current);
               setPreviewHoverDocId(null);
@@ -7003,7 +7152,7 @@ export default function App() {
                   handleContextMenu(e, doc.id);
                 }
               }}
-              className={`words-context-menu p-1 rounded transition-colors ${isAltHeld ? 'text-red-500 hover:text-red-600' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
+              className={`words-context-menu p-1 rounded transition-colors hover:bg-[var(--color-bg-active)] ${isAltHeld ? 'text-red-500 hover:text-red-600' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}`}
               title={isAltHeld ? "Delete" : "More options"}
             >
               {isAltHeld ? <Trash2 size={14} /> : <MoreHorizontal size={14} />}
@@ -7021,6 +7170,12 @@ export default function App() {
       style={{ height: 'calc(100vh / var(--a11y-zoom, 1))' }}
     >
       <TooltipLayer />
+      {/* Print / Export modal — morphs from its options-menu row */}
+      <PrintExportModal
+        open={printModal}
+        onClose={() => setPrintModal(null)}
+        onPrint={(settings) => printDocument(settings)}
+      />
       {/* Spotlight Search */}
       <SpotlightSearch
         isOpen={isSearching}
@@ -7573,49 +7728,43 @@ export default function App() {
           {/* Options (…) button */}
           <div className="relative">
             <motion.button
-              onPointerDown={() => optionsDotsControls.start('pulse')}
               onClick={() => { setShareMenuOpen(!shareMenuOpen); setShareDocMenuOpen(false); }}
               className={`words-context-menu p-1.5 rounded-md transition-colors ${shareMenuOpen ? 'bg-[var(--color-bg-hover-strong)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover-strong)] hover:text-[var(--color-text-primary)]'}`}
               title="Options"
+              initial="rest"
+              animate="rest"
+              whileTap="tap"
             >
-              {/* Custom three-dot glyph. On press each dot shrinks then bounces
-                  back to full size, one after another left to right — a one-shot
-                  ripple driven by controls so it never depends on hold length. */}
-              <motion.svg
-                width="20" height="20" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-                style={{ display: 'block' }}
-                initial="idle"
-                animate={optionsDotsControls}
-                variants={{ idle: {}, pulse: { transition: { staggerChildren: 0.08 } } }}
+              <motion.span
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                variants={{ rest: { scale: 1 }, tap: { scale: 0.9 } }}
+                transition={ICON_TAP_SPRING}
               >
-                {[5, 12, 19].map((cx) => (
-                  <motion.circle
-                    key={cx} cx={cx} cy="12" r="1"
-                    style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
-                    variants={{
-                      idle: { scale: 1 },
-                      pulse: {
-                        scale: [1, 0.7, 1.12, 1],
-                        transition: { duration: 0.5, ease: 'easeInOut', times: [0, 0.35, 0.7, 1] },
-                      },
-                    }}
-                  />
-                ))}
-              </motion.svg>
+                <MoreHorizontal size={20} />
+              </motion.span>
             </motion.button>
-          <AnimatePresence>
+          <AnimatePresence custom={!!printModal}>
           {shareMenuOpen && (
             <motion.div
               key="options-menu"
               className="words-context-menu absolute right-0 top-full mt-2 z-[40]"
-              initial={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' }}
-              animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' }}
+              custom={!!printModal}
+              variants={{
+                hidden: { opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' },
+                show: { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' },
+                // When a row is morphing into the Print/Export modal, drop the
+                // popover instantly so its exit doesn't fight the layoutId morph.
+                exit: (toModal) => toModal
+                  ? { opacity: 0, transition: { duration: 0.001 } }
+                  : { opacity: 0, scale: 0.95, y: -4, filter: 'blur(2px)' },
+              }}
+              initial="hidden"
+              animate="show"
+              exit="exit"
               transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
               style={{ transformOrigin: 'top right' }}
             >
-              <svg className="absolute -top-[9px] right-4 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10 Z" fill="var(--color-bg-primary)"/><path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
+              <svg className="absolute -top-[9px] right-1.5 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10 Z" fill="var(--color-bg-primary)"/><path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
               <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-56 overflow-hidden">
                 <div className="px-2 py-1.5">
                   <div className="flex items-center justify-between gap-1.5">
@@ -7644,44 +7793,64 @@ export default function App() {
                 </div>
                 <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
                 <button
-                  className={`w-full text-left px-2.5 py-1.5 rounded flex items-center justify-between text-[13px] text-[var(--color-text-primary)] transition-colors ${styleMenuOpen ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]'}`}
+                  className={`w-full text-left px-2 py-1 rounded flex items-center justify-between text-[13px] text-[var(--color-text-primary)] transition-colors ${styleMenuOpen ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]'}`}
+                  // A brief hover pops the Style panel out; a click pins it so it
+                  // stays when the pointer moves away (click again to unpin).
+                  // offsetParent is the positioned options-menu container, so
+                  // offsetTop anchors the pop-out to this row.
+                  onMouseEnter={(e) => {
+                    clearTimeout(styleCloseTimer.current);
+                    if (styleMenuOpen) return;
+                    const top = e.currentTarget.offsetTop;
+                    styleOpenTimer.current = setTimeout(() => setStyleMenuOpen({ top }), 260);
+                  }}
+                  onMouseLeave={() => {
+                    clearTimeout(styleOpenTimer.current);
+                    if (stylePinned) return;
+                    styleCloseTimer.current = setTimeout(() => setStyleMenuOpen(null), 120);
+                  }}
                   onClick={(e) => {
-                    // offsetParent is the positioned options-menu container, so
-                    // offsetTop anchors the pop-out to this row
-                    setStyleMenuOpen(styleMenuOpen ? null : { top: e.currentTarget.offsetTop });
+                    clearTimeout(styleOpenTimer.current);
+                    clearTimeout(styleCloseTimer.current);
+                    setStylePinned((p) => !p);
+                    setStyleMenuOpen({ top: e.currentTarget.offsetTop });
                   }}
                 >
                   <div className="flex items-center gap-2.5">
                     <Paintbrush size={14} /> Style
                   </div>
-                  <ChevronDown size={14} className={`transition-transform duration-200 text-[var(--color-text-muted)] ${styleMenuOpen ? 'rotate-90' : ''}`} />
+                  <ChevronRight size={14} className="text-[var(--color-text-muted)]" />
                 </button>
                 <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
                 <button
-                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => { setShareMenuOpen(false); setHistoryPanelOpen(true); }}
                 >
                   <Clock size={14} /> Edit history
                 </button>
                 <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
                 <button
-                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                   onClick={() => { setShareMenuOpen(false); handleShareDoc(activeDocId); }}
                 >
                   <Link size={14} /> Share a copy
                 </button>
-                <button
-                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                  onClick={() => { setShareMenuOpen(false); setTimeout(() => window.print(), 100); }}
+                {/* Export / Print — these rows morph into the Print/Export modal
+                    (shared layoutIds, Spotlight-style). */}
+                <motion.button
+                  layoutId="exportx-shell"
+                  className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => openPrintModal('export')}
                 >
-                  <File size={14} /> Export as PDF
-                </button>
-                <button
-                  className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                  onClick={() => { setShareMenuOpen(false); setTimeout(() => window.print(), 100); }}
+                  <Download size={14} /> Export
+                </motion.button>
+                <motion.button
+                  layoutId="printx-shell"
+                  className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  onClick={() => openPrintModal('print')}
                 >
                   <Printer size={14} /> Print
-                </button>
+                </motion.button>
               </div>
 
               {/* Style pop-out — sibling of the panel so its squircle clip can't cut it off.
@@ -7692,10 +7861,9 @@ export default function App() {
                     key="style-popout"
                     className="absolute z-[50]"
                     style={{ top: styleMenuOpen.top, right: 'calc(100% + 10px)', transformOrigin: 'right top' }}
-                    initial={{ opacity: 0, scale: 0.95, x: 4, filter: 'blur(2px)' }}
-                    animate={{ opacity: 1, scale: 1, x: 0, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, scale: 0.95, x: 4, filter: 'blur(2px)' }}
-                    transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, x: { type: 'spring', stiffness: 400, damping: 32 } }}
+                    initial={false}
+                    onMouseEnter={() => { clearTimeout(styleCloseTimer.current); clearTimeout(styleOpenTimer.current); }}
+                    onMouseLeave={() => { if (!stylePinned) styleCloseTimer.current = setTimeout(() => setStyleMenuOpen(null), 120); }}
                   >
                     <svg className="absolute pointer-events-none z-10" style={{ top: '5px', right: '-9px' }} width="10" height="20" viewBox="0 0 10 20" fill="none">
                       <path d="M0,0 C0,4 10,7 10,10 C10,13 0,16 0,20 Z" fill="var(--color-bg-primary)" />
@@ -8157,7 +8325,7 @@ export default function App() {
                       >
                         {/* Icon — click to change (emoji / icon picker) */}
                         <button
-                          className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded hover:bg-[var(--color-bg-hover-strong)] transition-colors"
+                          className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded hover:bg-[var(--color-bg-active)] transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (deskIconPicker) { setDeskIconPicker(null); return; }
@@ -8208,7 +8376,7 @@ export default function App() {
                             setDeskMenuOpen(false);
                             setDeskColorPicker({ x: Math.max(8, Math.min(rect.left - 100, window.innerWidth - 248)), y: rect.bottom + 10, anchor });
                           }}
-                          className="flex-shrink-0 p-0.5 rounded opacity-0 group-hover/desk:opacity-100 transition-opacity text-[var(--color-text-muted)] hover:opacity-100 hover:text-[var(--color-text-primary)]"
+                          className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded opacity-0 group-hover/desk:opacity-100 transition-all text-[var(--color-text-muted)] hover:opacity-100 hover:bg-[var(--color-bg-active)] hover:text-[var(--color-text-primary)]"
                           title="Desk color"
                         >
                           <Paintbrush size={13} />
@@ -8223,7 +8391,7 @@ export default function App() {
                             setDeskColorPicker(null);
                             setDeskMenuOpen({ x: Math.min(rect.left - 4, window.innerWidth - 190), y: rect.bottom + 10, anchor });
                           }}
-                          className="flex-shrink-0 p-0.5 -mr-1 rounded opacity-0 group-hover/desk:opacity-100 transition-opacity text-[var(--color-text-muted)] hover:opacity-100 hover:text-[var(--color-text-primary)]"
+                          className="w-5 h-5 flex-shrink-0 flex items-center justify-center -mr-1 rounded opacity-0 group-hover/desk:opacity-100 transition-all text-[var(--color-text-muted)] hover:opacity-100 hover:bg-[var(--color-bg-active)] hover:text-[var(--color-text-primary)]"
                           title="Desk menu"
                         >
                           <MoreHorizontal size={13} />
@@ -8632,15 +8800,15 @@ export default function App() {
                   transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
                   style={{ transformOrigin: 'bottom right' }}
                 >
-                  <svg className="absolute -bottom-[9px] right-2 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0 Z" fill="var(--color-bg-primary)"/><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
+                  <svg className="absolute -bottom-[9px] right-1 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0 Z" fill="var(--color-bg-primary)"/><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
                   <button
-                    className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                    className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                     onClick={(e) => { e.stopPropagation(); setPlusMenuOpen(false); createNewDoc(e); }}
                   >
                     <File size={14} /> New Page
                   </button>
                   <button
-                    className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                    className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                     onClick={(e) => { e.stopPropagation(); setPlusMenuOpen(false); createGroup(); }}
                   >
                     <Folder size={14} /> New Folder
@@ -8649,7 +8817,7 @@ export default function App() {
                     <>
                       <div className="mx-2 my-1 h-px bg-[var(--color-border-primary)]/50" />
                       <button
-                        className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                         onClick={(e) => { e.stopPropagation(); createDesk(); }}
                       >
                         <LampDesk size={14} /> New Desk
@@ -8735,7 +8903,7 @@ export default function App() {
                 transition={{ opacity: { duration: 0.2, ease: 'easeOut' }, filter: { duration: 0.25, ease: 'easeOut' }, scale: { type: 'spring', stiffness: 400, damping: 32 }, y: { type: 'spring', stiffness: 400, damping: 32 } }}
                 style={{ transformOrigin: 'bottom left' }}
               >
-              <svg className="absolute -bottom-[9px] left-4 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0 Z" fill="var(--color-bg-primary)"/><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
+              <svg className="absolute -bottom-[9px] left-1 z-10 pointer-events-none" width="20" height="10" viewBox="0 0 20 10" fill="none"><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0 Z" fill="var(--color-bg-primary)"/><path d="M0,0 C4,0 7,10 10,10 C13,10 16,0 20,0" fill="none" stroke="var(--color-border-primary)" strokeWidth="1"/></svg>
               <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl z-[60] w-[248px] p-2">
 
                 <MembershipCard user={user} />
@@ -9671,20 +9839,20 @@ export default function App() {
           onContextMenu={(e) => e.preventDefault()}
         >
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={(e) => { e.stopPropagation(); createNewDoc(e); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); }}
           >
             <File size={14} /> New Page
           </button>
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={(e) => { e.stopPropagation(); createGroup(); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); }}
           >
             <Folder size={14} /> New Folder
           </button>
           {user && (
             <button
-              className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+              className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
               onClick={(e) => { e.stopPropagation(); createDesk(); setSidebarContextMenu({ isOpen: false, x: 0, y: 0 }); }}
             >
               <LampDesk size={14} /> New Desk
@@ -9717,7 +9885,7 @@ export default function App() {
             <path d="M0,10 C4,10 7,0 10,0 C13,0 16,10 20,10" fill="none" stroke="var(--color-border-primary)" strokeWidth="1" />
           </svg>
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={() => {
               setDeskMenuOpen(false);
               setEditingDeskId(activeDesk.id);
@@ -9726,7 +9894,7 @@ export default function App() {
             <Pencil size={14} /> Rename
           </button>
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={() => openDeskIconPicker()}
           >
             <Smile size={14} /> Change Icon
@@ -10069,7 +10237,7 @@ export default function App() {
                 return (
                   <button
                     key={cmd.id}
-                    className={`w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] transition-colors ${isActive ? "bg-[var(--color-bg-hover)]" : "hover:bg-[var(--color-bg-hover)]"}`}
+                    className={`w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] transition-colors ${isActive ? "bg-[var(--color-bg-hover)]" : "hover:bg-[var(--color-bg-hover)]"}`}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => executeCommand(cmd)}
                     onMouseEnter={() => setSlashState((prev) => ({ ...prev, activeIndex: index }))}
@@ -10109,7 +10277,7 @@ export default function App() {
           </svg>
           <div className="bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] rounded-lg shadow-xl py-1 px-1 w-44">
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={(e) => {
               e.stopPropagation();
               setEditingDocId(contextMenu.docId);
@@ -10120,38 +10288,38 @@ export default function App() {
             <Pencil size={14} /> Rename
           </button>
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={(e) => { e.stopPropagation(); openDocInPopout(contextMenu.docId); setContextMenu(null); }}
           >
             <SquareArrowOutUpRight size={14} /> Pop out
           </button>
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={(e) => { e.stopPropagation(); setActiveDocId(contextMenu.docId); setIsEmojiPickerOpen(true); setContextMenu(null); }}
           >
             <Smile size={14} className="flex-shrink-0" /> Change icon
           </button>
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={(e) => { togglePinDoc(e, contextMenu.docId); setContextMenu(null); }}
           >
             {docs.find(d => d.id === contextMenu.docId)?.isPinned ? <><PinOff size={14} /> Unpin</> : <><Pin size={14} /> Pin</>}
           </button>
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={() => toggleLockDoc(contextMenu.docId)}
           >
             {docs.find(d => d.id === contextMenu.docId)?.isLocked ? <><Unlock size={14} /> Unlock</> : <><Lock size={14} /> Lock</>}
           </button>
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={() => handleDuplicateDoc(contextMenu.docId)}
           >
             <Copy size={14} /> Duplicate
           </button>
           <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
           <button
-            className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+            className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick={(e) => { triggerDeleteAnimation(e, contextMenu.docId); setContextMenu(null); }}
           >
             <Trash2 size={14} /> Delete
@@ -10183,7 +10351,7 @@ export default function App() {
               onClick={(e) => e.stopPropagation()}
             >
               <button
-                className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                 onClick={(e) => {
                   e.stopPropagation();
                   const panelW = 272, panelH = 400;
@@ -10199,14 +10367,14 @@ export default function App() {
                 <Paintbrush size={14} /> Customize
               </button>
               <button
-                className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                 onClick={(e) => { e.stopPropagation(); setEditingGroupId(menuGroup.id); setGroupMenuOpen(null); }}
               >
                 <Pencil size={14} /> Rename
               </button>
               <div className="h-px bg-[var(--color-border-primary)] my-1.5 mx-1" />
               <button
-                className="w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2.5 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
+                className="w-full text-left px-2 py-1 rounded flex items-center gap-2 text-[13px] text-red-500 hover:bg-[var(--color-bg-hover)] transition-colors"
                 onClick={(e) => { e.stopPropagation(); setGroupMenuOpen(null); deleteGroup(e, menuGroup.id); }}
               >
                 <FolderMinus size={14} /> Ungroup

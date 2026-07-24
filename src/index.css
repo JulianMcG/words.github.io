@@ -6,6 +6,7 @@
   --color-bg-tertiary: #f9fafb;
   --color-bg-hover: #f1f1ef;
   --color-bg-hover-strong: #ebebea;
+  --color-bg-active: #dcdcd8;
   --color-text-primary: #37352f;
   --color-text-muted: #73726e;
   --color-text-faint: #9a9a97;
@@ -28,6 +29,7 @@
     --color-bg-tertiary: #2a2a2a;
     --color-bg-hover: #2e2e2e;
     --color-bg-hover-strong: #383838;
+    --color-bg-active: #474747;
     --color-text-primary: #ffffff;
     --color-text-muted: #a3a3a3;
     --color-text-faint: #5e5e5e;
@@ -330,7 +332,7 @@ body {
 /* Force dark/light theme overrides */
 html[data-theme="dark"] {
   --color-bg-primary: #191919; --color-bg-secondary: #202020; --color-bg-tertiary: #2a2a2a;
-  --color-bg-hover: #2e2e2e; --color-bg-hover-strong: #383838;
+  --color-bg-hover: #2e2e2e; --color-bg-hover-strong: #383838; --color-bg-active: #474747;
   --color-text-primary: #ffffff; --color-text-muted: #a3a3a3; --color-text-faint: #5e5e5e;
   --color-icon-muted: #5e5e5e; --color-border-primary: #3d3a35; --color-border-hover: #504d47;
   --color-highlight: #716215; --color-shadow-primary: rgba(0,0,0,0.4);
@@ -465,65 +467,76 @@ html[data-reduce-motion="true"] *::after {
   transition-duration: 0.01ms !important;
 }
 
+/* ── Print pipeline (built in App.jsx → printDocument) ─────────────────────────
+   #print-root holds hand-paginated .print-sheet blocks sized to the exact paper.
+   Content styles live OUTSIDE @media print so the on-screen measurement pass
+   sees identical metrics (px values mirror the modal preview 1:1); the print
+   block below only swaps the app out and zeroes @page so the browser's own
+   margin header/footer text never renders. */
+#print-root { display: none; }
+
+/* Ink-on-paper colors regardless of the app's current theme. Meaningful
+   fills (highlights, code, table shading) survive via exact color-adjust. */
+#print-root {
+  --color-text-primary: #1a1a1a;
+  --color-text-muted: #555555;
+  --color-text-faint: #888888;
+  --color-icon-muted: #888888;
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f4f4f2;
+  --color-bg-tertiary: #f4f4f2;
+  --color-bg-hover: #f0f0ee;
+  --color-bg-hover-strong: #ebebe9;
+  --color-border-primary: #dcdcdc;
+  --color-border-hover: #cccccc;
+  --color-highlight: #fdf1a6;
+  color: #1a1a1a;
+  background: #ffffff;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+#print-root, #print-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+#print-root[data-print-font="sans"] { font-family: var(--font-sans); }
+#print-root[data-print-font="serif"] { font-family: 'Lora', Georgia, serif; }
+#print-root[data-print-font="mono"] { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+
+/* One physical page. Inline styles carry the size/padding for the chosen
+   paper/margins; overflow-hidden windows inside carry the flow offset. */
+.print-sheet {
+  position: relative;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: #ffffff;
+  break-after: page;
+  page-break-after: always;
+}
+.print-sheet:last-child { break-after: auto; page-break-after: auto; }
+
+.print-head { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+.print-emoji { font-size: 34px; line-height: 1; }
+.print-title { margin: 0; font-size: 31px; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; }
+.print-body { padding-bottom: 0 !important; min-height: 0 !important; }
+.print-body::after { content: none !important; }
+.print-body > :first-child { margin-top: 0 !important; }
+#print-root img { max-width: 100% !important; height: auto !important; }
+#print-root a { color: #1a1a1a; text-decoration: underline; }
+
+/* Our own margin text: centered "words.do" (.do at half strength) plus the
+   page number at the right margin — Inter, always. */
+.print-footer { position: absolute; left: 0; right: 0; text-align: center; font-family: 'Inter', sans-serif; font-size: 11.3px; color: #1a1a1a; line-height: 1; }
+.print-footer .pf-do { opacity: 0.5; }
+.print-footer .pf-num { position: absolute; bottom: 0; }
+
 @media print {
-  @page {
-    margin: 0;
-  }
+  /* Zero page margins: the browser's date/title/URL header-footer text lives
+     in the margin band, so this removes it. Sheets carry their own padding. */
+  @page { margin: 0; }
 
-  body {
-    background-color: white !important;
-    color: black !important;
-    padding-top: 2cm !important;
-    padding-bottom: 2cm !important;
-    padding-left: 2cm !important;
-    padding-right: 2cm !important;
-  }
-
-  /* Hide the sidebar and overlays completely */
-  [data-sidebar],
-  .hamburger-container,
-  .share-container,
-  .z-30,
-  .z-40,
-  .z-50 {
-    display: none !important;
-  }
-
-  /* The main content area should take full width */
-  .flex-1 {
-    overflow: visible !important;
-    display: block !important;
-    height: auto !important;
-    min-height: 0 !important;
-  }
-
-  .editor-content,
-  [data-slate-editor] {
-    min-height: 0 !important;
-    overflow: visible !important;
-  }
-
-  #main,
-  .App,
-  html,
-  body,
-  #root,
-  .h-screen,
-  .h-full,
-  .min-h-screen {
-    overflow: visible !important;
-    display: block !important;
-    height: auto !important;
-    min-height: 0 !important;
-    margin-left: 0 !important;
-  }
-
-  * {
-    color: black !important;
-    background: white !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
+  /* Swap the whole live app out for the clean print copy. */
+  html, body { height: auto !important; overflow: visible !important; background: #fff !important; margin: 0 !important; padding: 0 !important; }
+  body.printing > #root { display: none !important; }
+  body.printing #print-root { display: block !important; }
 }
 
 /* Link Previews */
