@@ -80,6 +80,7 @@ import FolderIconPicker from "./components/FolderIconPicker";
 import { FolderIcon, ICON_COMPONENTS, FOLDER_ICONS } from "./utils/folderIcons";
 import SpotlightSearch from "./components/SpotlightSearch";
 import PrintExportModal, { TEXT_ZOOM, MARGINS, PRINT_PAPER, FONT_STACKS } from "./PrintExportModal";
+import WordsMark from "./WordsMark";
 import TooltipLayer from "./components/TooltipLayer";
 import { getIconForFolderName } from "./utils/folderIconMap";
 import HeadingNavigator from "./components/HeadingNavigator";
@@ -8081,8 +8082,8 @@ export default function App() {
           <div className="h-14 px-5 flex items-center justify-between group text-[var(--color-text-primary)]">
             <div className="flex items-center select-none">
               <div className="w-5 h-5 flex items-center justify-center shrink-0">
-                <img src="/logolight.png" alt="Words Logo" className="w-full h-full object-contain dark:hidden" />
-                <img src="/logodark.png" alt="Words Logo" className="w-full h-full object-contain hidden dark:block" />
+                {/* Inherits text-primary from the header: #37352F light / #fff dark */}
+                <WordsMark className="w-full h-full" />
               </div>
             </div>
             <div className="flex items-center gap-2">
